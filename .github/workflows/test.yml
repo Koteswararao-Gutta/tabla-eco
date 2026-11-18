@@ -16,6 +16,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm ci --prefix functions && npm test --prefix functions
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --trace retain-on-failure
       - if: failure()

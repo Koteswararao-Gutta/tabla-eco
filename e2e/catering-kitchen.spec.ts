@@ -170,3 +170,27 @@ test('kitchen shows a 1-hour heads-up with a Got it button', async ({ page }) =>
   await banner.getByRole('button', { name: 'Got it' }).click();
   await expect(banner).toHaveCount(0);
 });
+
+test('scan paper order fills the new order form for checking, then saves', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  // The preview store answers with a fixed sample instead of calling the AI.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await sheet.getByLabel('Scan paper order').setInputFiles({ name: 'order.png', mimeType: 'image/png', buffer: png });
+  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await expect(sheet.getByLabel('Time')).toHaveValue('18:30');
+  await expect(sheet.getByLabel('Order items (one per line)')).toHaveValue('Veg biryani, 2 large trays\nGulab jamun, 50');
+  await expect(sheet.getByText('Please check this')).toHaveCount(1); // the phone number
+  await shot(manager, 'manager-scan-filled');
+  await sheet.getByLabel('Phone').fill('555 404 1213');
+  await expect(sheet.getByText('Please check this')).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(sheet).toHaveCount(0);
+  const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Meera Iyer')!;
+  expect(saved).toMatchObject({ phone: '555 404 1213', people: 40, notes: 'Less spicy', status: 'open' });
+  await context.close();
+});

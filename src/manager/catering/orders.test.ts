@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CateringOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, fromInputs, groupByDay, groupOpen, history, isSoon, orderFields, validate } from './orders';
+import type { CateringOrder, ScannedOrder } from '@shared/data';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupOpen, history, isSoon, orderFields, validate } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -101,5 +101,30 @@ describe('form', () => {
   it('round-trips an order through the form', () => {
     const o = order(at(19, 12, 0), { type: 'delivery', address: 'X', people: 25, notes: 'N' });
     expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N' });
+  });
+});
+
+describe('formFromScan', () => {
+  const scan: ScannedOrder = {
+    isOrder: true, customerName: ' Meera Iyer ', phone: '555 404 1212', date: '2026-11-19', time: '18:30', type: 'delivery',
+    address: '12 Palm St', people: 'about 40', items: ['Veg biryani, 2 trays', ' ', 'Naan, 30'], notes: '', unsure: ['phone', 'bogus'],
+  };
+  const base = emptyForm(new Date(2026, 10, 18, 10).getTime());
+
+  it('fills every field it can and keeps the AI flags', () => {
+    const { form, unsure } = formFromScan(scan, base);
+    expect(form).toMatchObject({ customerName: 'Meera Iyer', date: '2026-11-19', time: '18:30', type: 'delivery', address: '12 Palm St', people: '40', items: 'Veg biryani, 2 trays\nNaan, 30', notes: '' });
+    expect(unsure).toEqual(['phone']);
+    expect(validate(form)).toEqual({});
+  });
+
+  it('keeps the form values and asks to check when something is missing or malformed', () => {
+    const { form, unsure } = formFromScan({ ...scan, date: '19/11', time: '6pm', type: 'unknown', address: '', people: '0', items: [] }, base);
+    expect(form.date).toBe(base.date);
+    expect(form.time).toBe('');
+    expect(form.type).toBe('pickup');
+    expect(form.people).toBe('');
+    expect(form.items).toBe('');
+    expect(unsure).toEqual(['phone', 'date', 'type']);
   });
 });

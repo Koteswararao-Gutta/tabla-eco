@@ -5,7 +5,7 @@
 //  - FirebaseStore (firebase.ts): the same calls, shared across real devices.
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
-import type { CollectionName, Collections, Picture } from './types';
+import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 export type Unsubscribe = () => void;
 export type WithId<T> = T & { id: string };
@@ -40,6 +40,11 @@ export interface DataStore {
    *  FirebaseStore must cache picture bytes in IndexedDB too. Cached; safe to call often. */
   pictureUrl(id: string): Promise<string | null>;
   deletePicture(id: string): Promise<void>;
+
+  /** Reads a photo of a paper catering order with AI (server side) and returns the form's fields.
+   *  Saves nothing. Throws with a plain message when it can't (offline, unreadable, server down).
+   *  LocalStore returns a fixed sample so previews and tests work without the server. */
+  readOrderPhoto(photo: Blob): Promise<ScannedOrder>;
 }
 
 /** Removes undefined top-level values (Firestore rejects them). */
