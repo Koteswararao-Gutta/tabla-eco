@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { FirebaseStore } from './firebase';
+import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
@@ -7,8 +9,10 @@ export * from './types';
 export type { DataStore, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 
-/** The app-wide data store. Stage 1 runs on LocalStore; Firebase replaces it later behind the same interface. */
-export const store: DataStore = new LocalStore();
+/** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
+ *  which keeps everything in one browser (tests and the offline Chrome preview). */
+export const store: DataStore =
+  import.meta.env.VITE_STORE === 'local' ? new LocalStore() : new FirebaseStore(firebaseConfig);
 
 /** Live collection. `null` until the first value arrives. */
 export function useCollection<C extends CollectionName>(col: C): WithId<Collections[C]>[] | null {
@@ -69,16 +73,17 @@ export function useNow(everyMs = 250): number {
   return now;
 }
 
-/** Screens call this so the manager can show a green (online) or grey (offline) dot. */
+/** Screens call this so the manager can show a green (online) or grey (offline) dot.
+ *  Every 2 minutes: 6 screens x 720 = ~4,300 writes a day, well inside Firestore's free 20,000. */
 export function useHeartbeat(screenId: ScreenId): void {
   useEffect(() => {
-    const beat = () => store.updateDoc('screens', screenId, { lastSeen: store.now() });
+    const beat = () => store.setDoc('heartbeats', screenId, { lastSeen: store.now() });
     beat();
-    const t = setInterval(beat, 30_000);
+    const t = setInterval(beat, 120_000);
     return () => clearInterval(t);
   }, [screenId]);
 }
 
-/** A screen counts as online if it reported in the last 75 seconds. */
+/** A screen counts as online if it reported in the last 5 minutes. */
 export const isOnline = (lastSeen: number | undefined, now: number): boolean =>
-  !!lastSeen && now - lastSeen < 75_000;
+  !!lastSeen && now - lastSeen < 300_000;

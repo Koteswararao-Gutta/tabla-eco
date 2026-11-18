@@ -7,9 +7,9 @@ import { screenName } from './logic';
 
 /** Page frame for one screen: back link, title, online badge. */
 export function ScreenPage({ id, sub, children }: { id: ScreenId; sub?: string; children: ReactNode }) {
-  const screens = useCollection('screens');
+  const beats = useCollection('heartbeats');
   const now = useNow(5000);
-  const online = isOnline(screens?.find((x) => x.id === id)?.lastSeen, now);
+  const online = isOnline(beats?.find((x) => x.id === id)?.lastSeen, now);
   return (
     <main className="t-page sc-page">
       <Link className="sc-back" to="/manager/screens">‹ Screens</Link>

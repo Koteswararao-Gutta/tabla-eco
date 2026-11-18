@@ -74,7 +74,7 @@ test('no playlist: catering clip loops with title and restaurant name', async ({
   await expect(tv.getByTestId('clip-brand')).toHaveText('Tabla');
   await expect(tv.getByTestId('clip-picture')).toHaveCount(1); // seeded catering picture
   // the TV reports in for the manager's online dot
-  const lastSeen = await tv.evaluate(() => JSON.parse(localStorage.getItem('tabla:screens') || '{}').tv5?.lastSeen);
+  const lastSeen = await tv.evaluate(() => JSON.parse(localStorage.getItem('tabla:heartbeats') || '{}').tv5?.lastSeen);
   expect(lastSeen).toBeGreaterThan(0);
 });
 
