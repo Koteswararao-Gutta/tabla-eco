@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afterClip, clipDue, DEFAULT_MUSIC, nextPlayable, onVideoEnded, planFrom, screenMode, stalled, startIndex } from './schedule';
+import { afterClip, clipDue, clipEachMs, DEFAULT_MUSIC, nextPlayable, onVideoEnded, planFrom, screenMode, stalled, startIndex } from './schedule';
 
 describe('stalled', () => {
   it('is stalled after 20 s without playing', () => {
@@ -89,5 +89,14 @@ describe('screenMode', () => {
     expect(screenMode({ ...ok, online: false, inClip: true })).toEqual({ mode: 'fallback', reason: 'offline' });
     expect(screenMode({ ...ok, apiFailed: true })).toEqual({ mode: 'fallback', reason: 'apiFailed' });
     expect(screenMode({ ...ok, allFailed: true })).toEqual({ mode: 'fallback', reason: 'allFailed' });
+  });
+});
+
+describe('clipEachMs', () => {
+  it('shares the clip length between pictures, never under 2.5 s each', () => {
+    expect(clipEachMs(0, 8000)).toBe(8000);
+    expect(clipEachMs(1, 8000)).toBe(8000);
+    expect(clipEachMs(2, 8000)).toBe(4000);
+    expect(clipEachMs(10, 8000)).toBe(2500);
   });
 });

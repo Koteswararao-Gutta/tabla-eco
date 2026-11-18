@@ -63,7 +63,6 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
   const [started, setStarted] = useState(false);
   const [clip, setClip] = useState<ClipState | null>(null);
   const [needSound, setNeedSound] = useState(false);
-  const [loopKey, setLoopKey] = useState(0);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YtPlayer | null>(null);
@@ -263,13 +262,10 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
     return () => clearInterval(t);
   }, [mode]);
 
-  // Fallback / connecting: replay the clip again and again.
-  const looping = mode === 'fallback' || mode === 'connecting';
-  useEffect(() => {
-    if (!looping) return;
-    const t = setInterval(() => setLoopKey((k) => k + 1), plan.clipMs);
-    return () => clearInterval(t);
-  }, [looping, plan.clipMs]);
+  // Fallback / connecting: the clip stays up and keeps cycling its pictures. It is one mounted
+  // element for as long as it shows (also from connecting into fallback, or a break into either),
+  // so it never fades out and in again.
+  const showClip = mode === 'clip' || mode === 'fallback' || mode === 'connecting';
 
   // Muted fallback: one click or key press turns the sound on.
   useEffect(() => {
@@ -296,8 +292,7 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
       <div className="tm-root" data-testid="tv-music" data-mode={mode} data-reason={reason ?? ''} data-sound={needSound ? 'muted' : 'on'}>
         <div ref={hostRef} className={'tm-player' + (mode === 'video' ? ' on' : '')} data-testid="player" />
         <div className="tm-cover" />
-        {mode === 'clip' && clip && <Clip key={'clip' + clip.key} plan={plan} brand={brand} />}
-        {looping && <Clip key={'loop' + loopKey} plan={plan} brand={brand} />}
+        {showClip && <Clip plan={plan} brand={brand} />}
         {needSound && mode !== 'fallback' && (
           <div className="tm-sound" data-testid="sound-note">
             Click or press OK for sound
