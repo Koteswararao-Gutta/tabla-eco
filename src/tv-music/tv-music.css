@@ -1,0 +1,93 @@
+/* TV 5: YouTube player layer + catering clip. Colours: theme.css tokens, plus the .t-screen black/white (inherited). */
+
+.tm-root { position: absolute; inset: 0; background: inherit; color: inherit; cursor: none; }
+
+/* YouTube layer. The cover above it keeps clicks, hover controls and the cursor away from the iframe. */
+.tm-player { position: absolute; inset: 0; visibility: hidden; }
+.tm-player.on { visibility: visible; }
+.tm-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.tm-cover { position: absolute; inset: 0; z-index: 2; cursor: none; }
+
+/* clip */
+.tm-clip {
+  position: absolute; inset: 0; z-index: 3; overflow: hidden; cursor: none;
+  background-color: inherit;
+  background-image: radial-gradient(120% 90% at 70% 30%, color-mix(in srgb, var(--accent) 45%, transparent) 0%, transparent 70%);
+  font-family: var(--font); color: inherit;
+  animation: tm-in 600ms ease-out both;
+}
+.tm-pics { position: absolute; inset: 0; }
+.tm-pic {
+  position: absolute; inset: 0; background: center / cover no-repeat;
+  opacity: 0; transform-origin: 40% 45%;
+  animation-name: tm-pan; animation-timing-function: linear; animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+.tm-pic.alt { animation-name: tm-pan-alt; transform-origin: 60% 55%; }
+/* the last picture stays up until the clip ends instead of fading to black */
+.tm-pic:last-child { animation-name: tm-pan-last; }
+.tm-pic.alt:last-child { animation-name: tm-pan-alt-last; }
+
+.tm-shade {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to top, color-mix(in srgb, var(--ink) 96%, transparent) 0%, color-mix(in srgb, var(--ink) 58%, transparent) 34%, transparent 62%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 45%, transparent) 0%, transparent 18%);
+}
+
+.tm-brand {
+  position: absolute; top: 4.2vh; right: 4.2vw; display: flex; align-items: center; gap: 0.7vw;
+  font-size: 1.5vw; font-weight: 650; letter-spacing: 0.04em; color: inherit; opacity: 0.92;
+  animation: tm-rise 900ms 200ms ease-out both;
+}
+.tm-brand i { width: 0.75vw; height: 0.75vw; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0.3vw color-mix(in srgb, var(--accent) 35%, transparent); }
+
+.tm-text { position: absolute; left: 4.2vw; right: 4.2vw; bottom: 8vh; }
+.tm-text h1 {
+  margin: 0; font-size: 5.2vw; line-height: 1.05; font-weight: 700; letter-spacing: -0.02em;
+  animation: tm-rise 1100ms 500ms ease-out both;
+}
+.tm-text h1::after {
+  content: ''; display: block; width: 6vw; height: 0.45vh; min-height: 3px; margin-top: 2.4vh; border-radius: 99px; background: var(--accent);
+  transform-origin: left; animation: tm-grow 900ms 1100ms ease-out both;
+}
+.tm-text p {
+  margin: 2.4vh 0 0; max-width: 62vw; font-size: 2vw; line-height: 1.3; color: var(--accent-soft); opacity: 0.95;
+  animation: tm-rise 1100ms 1200ms ease-out both;
+}
+
+/* small, unobtrusive sound hint */
+.tm-sound {
+  position: absolute; z-index: 4; right: 2vw; bottom: 2.4vh; padding: 0.6vh 1.1vw; border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 60%, transparent); color: inherit; font: 600 0.95vw/1.4 var(--font); opacity: 0.8; pointer-events: none;
+}
+
+@keyframes tm-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tm-rise { from { opacity: 0; transform: translateY(2.5vh); } to { opacity: 1; transform: none; } }
+@keyframes tm-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes tm-pan {
+  0% { opacity: 0; transform: scale(1.04) translate(0, 0); }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.16) translate(-2%, -1.5%); }
+}
+@keyframes tm-pan-alt {
+  0% { opacity: 0; transform: scale(1.16) translate(-2%, 1%); }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.04) translate(1.5%, 0); }
+}
+@keyframes tm-pan-last {
+  0% { opacity: 0; transform: scale(1.04) translate(0, 0); }
+  10% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1.16) translate(-2%, -1.5%); }
+}
+@keyframes tm-pan-alt-last {
+  0% { opacity: 0; transform: scale(1.16) translate(-2%, 1%); }
+  10% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1.04) translate(1.5%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-pic { animation-name: tm-in !important; }
+}

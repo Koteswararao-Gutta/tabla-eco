@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LocalStore } from './local';
 import type { DataStore, WithId } from './store';
-import type { CollectionName, Collections, ScreenId } from './types';
+import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
 
 export * from './types';
 export type { DataStore, WithId, Unsubscribe } from './store';
@@ -22,6 +22,27 @@ export function useDoc<C extends CollectionName>(col: C, id: string): WithId<Col
   const [doc, setDoc] = useState<WithId<Collections[C]> | null | undefined>(undefined);
   useEffect(() => store.watchDoc(col, id, setDoc), [col, id]);
   return doc;
+}
+
+/** Live single document by id: music, settings, staffConfig, loop. `undefined` while loading, `null` if missing. */
+export function useSingleton<K extends SingletonId>(id: K): Singletons[K] | null | undefined {
+  return useDoc('singletons', id) as Singletons[K] | null | undefined;
+}
+
+/** Replace a single document. */
+export function saveSingleton<K extends SingletonId>(id: K, value: Singletons[K]): Promise<void> {
+  return store.setDoc('singletons', id, value);
+}
+
+/** Merge fields into a single document. */
+export function updateSingleton<K extends SingletonId>(id: K, patch: Partial<Singletons[K]>): Promise<void> {
+  return store.updateDoc('singletons', id, patch as Partial<Collections['singletons']>);
+}
+
+/** Call after any change to the front menu loop so every TV shows the change at once,
+ *  starting from `firstSlotId` (e.g. the slot that just got a new picture). */
+export function restartLoop(firstSlotId?: string | null): Promise<void> {
+  return saveSingleton('loop', { anchor: store.now(), firstSlotId: firstSlotId ?? null });
 }
 
 /** URL for a stored picture, or null while loading / if missing. */

@@ -5,8 +5,12 @@ test('every link opens and sample data is seeded', async ({ context }) => {
   const home = await openScreen(context, '/');
   await expect(home.getByRole('heading', { name: 'Tabla' })).toBeVisible();
   for (const p of ['/tv/1', '/tv/2', '/tv/3', '/tv/4', '/tv/5', '/kitchen', '/manager/screens', '/manager/catering', '/manager/staff']) {
+    const errors: string[] = [];
+    context.once('page', (pg) => pg.on('pageerror', (e) => errors.push(e.message)));
     const page = await openScreen(context, p);
-    await expect(page.locator('#root')).not.toBeEmpty();
+    // Menu TVs show only a picture (no text), so check that something rendered rather than for text.
+    await expect(page.locator('#root > *').first()).toBeAttached();
+    expect(errors, p).toEqual([]);
     await page.close();
   }
   expect((await readCollection(home, 'screens')).length).toBe(6);

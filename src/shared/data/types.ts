@@ -90,14 +90,33 @@ export interface AppSettings {
 export type StaffConfig = Record<string, unknown>;
 export type StaffWeek = Record<string, unknown>;
 
+/** Where the shared menu loop is counted from. The manager resets it when the loop changes,
+ * so the change shows at once instead of mid-picture. */
+export interface LoopAnchor {
+  /** Shared-clock time the loop (re)started. */
+  anchor: number;
+  /** The slot that plays first from the anchor (e.g. a picture just added). Optional. */
+  firstSlotId?: string | null;
+}
+
+/** Single documents, by id. Use useSingleton / saveSingleton from @shared/data. */
+export interface Singletons {
+  music: MusicSettings;
+  settings: AppSettings;
+  staffConfig: StaffConfig;
+  loop: LoopAnchor;
+  seeded: { at: number };
+}
+export type SingletonId = keyof Singletons;
+
 /** Every collection the app stores, with its document type. */
 export interface Collections {
   screens: Screen;
   slots: Slot;
   pictures: Picture;
   orders: CateringOrder;
-  /** Single documents live in "singletons": ids "music", "settings", "staffConfig". */
-  singletons: MusicSettings | AppSettings | StaffConfig;
+  /** Single documents: use useSingleton / saveSingleton rather than this collection directly. */
+  singletons: Singletons[SingletonId];
   staffWeeks: StaffWeek;
 }
 export type CollectionName = keyof Collections;

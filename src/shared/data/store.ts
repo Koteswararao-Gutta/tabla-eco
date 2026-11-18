@@ -13,7 +13,9 @@ export type WithId<T> = T & { id: string };
 export interface DataStore {
   readonly mode: 'local' | 'firebase';
 
-  /** Current time in ms, corrected to the shared clock (server time). Use this, never Date.now(), for anything synced. */
+  /** Current time in ms, corrected to the shared clock (server time). Use this, never Date.now(), for anything synced.
+   *  LocalStore: Date.now(). FirebaseStore must measure its offset from server time at start
+   *  (write a server timestamp and read it back, or the HTTP Date header) and refresh it hourly. */
   now(): number;
 
   /** Live view of one document. Calls back immediately with the current value (or null), then on every change. */
@@ -24,7 +26,9 @@ export interface DataStore {
 
   getDoc<C extends CollectionName>(col: C, id: string): Promise<WithId<Collections[C]> | null>;
   setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void>;
-  /** Shallow merge of top-level fields. */
+  /** Shallow merge of top-level fields, creating the document if it is missing
+   *  (FirebaseStore implements this as setDoc(..., { merge: true })).
+   *  Never pass undefined values: to clear a field, set it to null. Stores strip undefined. */
   updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void>;
   deleteDoc(col: CollectionName, id: string): Promise<void>;
   /** Creates a document with a new id and returns the id. */
@@ -32,9 +36,15 @@ export interface DataStore {
 
   /** Stores a picture (resized to fit 1920x1080 for menu use) and returns its record. */
   uploadPicture(file: Blob, name: string): Promise<WithId<Picture>>;
-  /** A URL an <img> can show. Cached; safe to call often. */
+  /** A URL an <img> can show, served from a local cache (a blob: URL) so it keeps working offline.
+   *  FirebaseStore must cache picture bytes in IndexedDB too. Cached; safe to call often. */
   pictureUrl(id: string): Promise<string | null>;
   deletePicture(id: string): Promise<void>;
+}
+
+/** Removes undefined top-level values (Firestore rejects them). */
+export function clean<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
 export const newId = (): string =>
