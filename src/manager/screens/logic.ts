@@ -32,6 +32,22 @@ export function withoutPicture<T extends Slot>(slot: T, tv: ScreenId): T | null 
   return Object.values(pictures).some(Boolean) ? { ...slot, pictures } : null;
 }
 
+/** Is this picture still shown anywhere: in any slot, or in the TV 5 catering clip? */
+export function pictureInUse(id: string, slots: readonly Pick<Slot, 'pictures'>[], clipPictures: readonly string[] = []): boolean {
+  return clipPictures.includes(id) || slots.some((s) => Object.values(s.pictures).includes(id));
+}
+
+/** Plain warnings for a picture that will not look right on a 16:9 TV. Empty when it is fine. */
+export function pictureWarnings(width: number, height: number): string[] {
+  if (!(width > 0 && height > 0)) return [];
+  const out: string[] = [];
+  const aspect = width / height;
+  if (aspect < 1.2) out.push('This picture is tall, so the TV will show black bars at the sides.');
+  else if (aspect > 2.4) out.push('This picture is very wide, so the TV will show black bars above and below.');
+  if (width < 960) out.push('This picture is small and may look blurry on the TV.');
+  return out;
+}
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

@@ -8,7 +8,7 @@ import { newId, restartLoop, store, useCollection, useNow, type Screen, type Scr
 import { PARTNER, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
 import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlot, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
-import { FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
+import { deletePictureIfUnused, FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
 
 type S = WithId<Slot>;
 type Kind = NonNullable<Slot['kind']>;
@@ -17,6 +17,7 @@ const SIDE_LINE: Partial<Record<ScreenId, string>> = {
   tv1: 'Left side. Pictures play top to bottom, then start again.',
   tv2: 'Right side. Pictures play top to bottom, then start again.',
 };
+const PLAY_LINE = 'Pictures play top to bottom, then start again.';
 
 export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const screens = useCollection('screens');
@@ -29,7 +30,8 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const mirrorSrc = MIRROR_SOURCE[tv];
   const source = screen?.mirrorOf ?? null;
   const mirroring = !!(mirrorSrc && source);
-  const sub = SIDE_LINE[tv] ?? (mirroring ? undefined : 'Pictures play top to bottom, then start again.');
+  // The same line whether mirroring is on or off, so the switch never moves under the finger.
+  const sub = SIDE_LINE[tv] ?? PLAY_LINE;
   return (
     <ScreenPage id={tv} sub={sub}>
       {mirrorSrc && (
@@ -42,9 +44,9 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
       )}
       {mirroring && source ? (
         <>
-          <p className="sc-note" data-testid="mirror-note">
-            {screenName(tv)} shows the same pictures as {screenName(source)}. To change them, open{' '}
-            <Link to={'/manager/screens/' + source}>{screenName(source)}</Link> or turn off mirroring.
+          <p className="sc-note sc-mirror-note" data-testid="mirror-note">
+            To change these pictures, open
+            <Link className="sc-link" to={'/manager/screens/' + source}>{screenName(source)} ›</Link>
           </p>
           <PictureList tv={source} slots={slots} screens={screens} now={now} readOnly />
         </>
@@ -96,11 +98,11 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           const shared = !own && !!shown;
           const ended = slot.endsAt != null && slot.endsAt <= now;
           const kind = slot.kind ?? 'menu';
-          const inner = (
+          const inner = <StoredPicture id={shown} alt={`Picture ${i + 1}`} />;
+          const badges = (
             <>
-              <StoredPicture id={shown} alt={`Picture ${i + 1}`} />
-              {kind !== 'menu' && <span className="t-badge accent sc-kind">{kind === 'special' ? 'Special' : 'Catering'}</span>}
-              {shared && partner && <span className="t-badge sc-shared">Shared with {screenName(partner)}</span>}
+              {kind !== 'menu' && <span className="t-badge accent">{kind === 'special' ? 'Special' : 'Catering'}</span>}
+              {shared && partner && <span className="t-badge">Shared with {screenName(partner)}</span>}
             </>
           );
           return (
@@ -121,13 +123,16 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
                   {inner}
                 </button>
               )}
-              {readOnly ? (
-                <p className="sc-meta">{slotLine(slot, now)}</p>
-              ) : (
-                <button className="sc-meta" data-testid="slot-line" onClick={() => setOpen({ kind: 'timing', slotId: slot.id })}>
-                  {slotLine(slot, now)} <span aria-hidden>›</span>
-                </button>
-              )}
+              <div className="sc-under">
+                {badges}
+                {readOnly ? (
+                  <p className="sc-meta">{slotLine(slot, now)}</p>
+                ) : (
+                  <button className="sc-meta" data-testid="slot-line" onClick={() => setOpen({ kind: 'timing', slotId: slot.id })}>
+                    {slotLine(slot, now)} <span aria-hidden>›</span>
+                  </button>
+                )}
+              </div>
               {!readOnly && (
                 <div className="sc-insert">
                   <button className="t-plus" aria-label={`Add a picture after picture ${i + 1}`} onClick={() => setOpen({ kind: 'add', after: i })}>
@@ -140,13 +145,14 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
         })}
       </ol>
       {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={open.after} onClose={close} />}
-      {open?.kind === 'fill' && openSlot && <FillSheet tv={tv} slot={openSlot} replace={open.replace} onClose={close} />}
+      {open?.kind === 'fill' && openSlot && <FillSheet tv={tv} sorted={sorted} slot={openSlot} replace={open.replace} onClose={close} />}
       {open?.kind === 'timing' && openSlot && <TimingSheet slot={openSlot} onClose={close} />}
       {open?.kind === 'options' && openSlot && (
         <OptionsSheet
           tv={tv}
           sorted={sorted}
           slot={openSlot}
+          screens={screens}
           onClose={close}
           onReplace={() => setOpen({ kind: 'fill', slotId: openSlot.id, replace: true })}
         />
@@ -190,6 +196,33 @@ function addHint(tv: ScreenId, kind: Kind): string {
     : `It shows right away, then in this spot in the loop. ${other} shows it too until you add a picture for ${other}.`;
 }
 
+/** Seconds and "Change with", each on its own full row (the same in every sheet). */
+function TimingFields({ seconds, setSeconds, transition, setTransition, invalid, testId }: { seconds: string; setSeconds: (v: string) => void; transition: Transition; setTransition: (t: Transition) => void; invalid: boolean; testId?: string }) {
+  return (
+    <>
+      <Field label="Seconds on screen">
+        <input className="t-input sc-seconds" inputMode="numeric" value={seconds} onChange={(e) => setSeconds(e.target.value)} aria-invalid={invalid} data-testid={testId} />
+      </Field>
+      <div className="t-field" role="group" aria-label="Change with">
+        <span>Change with</span>
+        <Segmented label="Change with" value={transition} options={TRANSITIONS} onChange={setTransition} />
+      </div>
+    </>
+  );
+}
+
+/** Primary action full-width, ghost Cancel below: how every sheet here ends. */
+function SheetEnd({ label, onSave, onCancel, disabled, cancel = 'Cancel', primary = 'primary' }: { label: string; onSave: () => void; onCancel: () => void; disabled?: boolean; cancel?: string; primary?: string }) {
+  return (
+    <div className="sc-end">
+      <button className={'t-btn block ' + primary} onClick={onSave} disabled={disabled}>{label}</button>
+      <button className="t-btn block ghost" onClick={onCancel}>{cancel}</button>
+    </div>
+  );
+}
+
+const SECONDS_ERROR = 'Seconds must be a whole number from 1 to 3600.';
+
 function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; after: number; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<Kind>('menu');
@@ -201,7 +234,7 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
 
   const save = () => {
     if (!file) return setError('Choose a picture first.');
-    if (secs == null) return setError('Seconds must be a whole number from 1 to 3600.');
+    if (secs == null) return setError(SECONDS_ERROR);
     const endsAt = kind !== 'menu' && ends ? fromLocalInput(ends) : null;
     run(async () => {
       const pic = await store.uploadPicture(file, file.name);
@@ -216,42 +249,36 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
     <Sheet open title={`Add a picture to ${screenName(tv)}`} onClose={onClose}>
       {file && <FilePreview file={file} />}
       <PictureInput label={file ? 'Choose a different picture' : 'Choose a picture'} className={'t-btn block' + (file ? '' : ' accent')} onFile={setFile} testId="add-file" />
-      <Field label="Type">
+      <div className="t-field" role="group" aria-label="Type">
+        <span>Type</span>
         <Segmented label="Type" value={kind} options={KINDS} onChange={setKind} />
-      </Field>
-      <div className="t-grid2">
-        <Field label="Seconds on screen">
-          <input className="t-input" inputMode="numeric" value={seconds} onChange={(e) => setSeconds(e.target.value)} aria-invalid={secs == null} />
-        </Field>
-        <Field label="Change with">
-          <Segmented label="Change with" value={transition} options={TRANSITIONS} onChange={setTransition} />
-        </Field>
       </div>
+      <TimingFields seconds={seconds} setSeconds={setSeconds} transition={transition} setTransition={setTransition} invalid={secs == null} />
       {kind !== 'menu' && (
         <Field label="Stop showing after (optional)">
-          <input className="t-input" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} />
+          <input className="t-input sc-when" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} />
         </Field>
       )}
       <p className="sc-hint" data-testid="add-hint">{addHint(tv, kind)}</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
-      <div className="sc-actions">
-        <button className="t-btn" onClick={onClose}>Cancel</button>
-        <button className="t-btn primary" onClick={save} disabled={busy || !file}>{busy ? 'Saving…' : 'Add picture'}</button>
-      </div>
+      <SheetEnd label={busy ? 'Saving…' : 'Add picture'} onSave={save} onCancel={onClose} disabled={busy || !file} />
     </Sheet>
   );
 }
 
-function FillSheet({ tv, slot, replace, onClose }: { tv: ScreenId; slot: S; replace: boolean; onClose: () => void }) {
+function FillSheet({ tv, sorted, slot, replace, onClose }: { tv: ScreenId; sorted: S[]; slot: S; replace: boolean; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const { busy, error, run } = useSaver();
   const save = () =>
     file &&
     run(async () => {
+      const old = slot.pictures[tv];
       const pic = await store.uploadPicture(file, file.name);
-      await store.setDoc('slots', slot.id, { ...slot, pictures: { ...slot.pictures, [tv]: pic.id } });
+      const next = { ...slot, pictures: { ...slot.pictures, [tv]: pic.id } };
+      await store.setDoc('slots', slot.id, next);
       await restartLoop(slot.id);
       onClose();
+      await deletePictureIfUnused(old, sorted.map((s) => (s.id === slot.id ? next : s)));
     }, 'That file could not be saved as a picture. Try another one.');
   return (
     <Sheet open title={replace ? 'Replace picture' : `Add a picture for ${screenName(tv)}`} onClose={onClose}>
@@ -259,13 +286,12 @@ function FillSheet({ tv, slot, replace, onClose }: { tv: ScreenId; slot: S; repl
       <PictureInput label={file ? 'Choose a different picture' : 'Choose a picture'} className={'t-btn block' + (file ? '' : ' accent')} onFile={setFile} testId="fill-file" />
       <p className="sc-hint">Keeps this spot's seconds and transition ({slotLine(slot, store.now())}).</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
-      <div className="sc-actions">
-        <button className="t-btn" onClick={onClose}>Cancel</button>
-        <button className="t-btn primary" onClick={save} disabled={busy || !file}>{busy ? 'Saving…' : 'Save'}</button>
-      </div>
+      <SheetEnd label={busy ? 'Saving…' : 'Save'} onSave={save} onCancel={onClose} disabled={busy || !file} />
     </Sheet>
   );
 }
+
+const ALL_TVS_NOTE = 'Seconds and change are shared by all front TVs (TV 1 to TV 4) for this spot, because they change pictures together.';
 
 function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   const [seconds, setSeconds] = useState(String(slot.seconds));
@@ -273,7 +299,7 @@ function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   const { busy, error, setError, run } = useSaver();
   const secs = parseSeconds(seconds);
   const save = () => {
-    if (secs == null) return setError('Seconds must be a whole number from 1 to 3600.');
+    if (secs == null) return setError(SECONDS_ERROR);
     run(async () => {
       await store.updateDoc('slots', slot.id, { seconds: secs, transition });
       await restartLoop(slot.id);
@@ -282,42 +308,46 @@ function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   };
   return (
     <Sheet open title="Time on screen" onClose={onClose}>
-      <p className="sc-note">This applies to all front TVs (TV 1 to TV 4) for this spot, because they change pictures together.</p>
-      <Field label="Seconds on screen">
-        <input className="t-input" inputMode="numeric" value={seconds} onChange={(e) => setSeconds(e.target.value)} aria-invalid={secs == null} data-testid="timing-seconds" />
-      </Field>
-      <Field label="Change with">
-        <Segmented label="Change with" value={transition} options={TRANSITIONS} onChange={setTransition} />
-      </Field>
+      <TimingFields seconds={seconds} setSeconds={setSeconds} transition={transition} setTransition={setTransition} invalid={secs == null} testId="timing-seconds" />
+      <p className="sc-hint">{ALL_TVS_NOTE}</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
-      <div className="sc-actions">
-        <button className="t-btn" onClick={onClose}>Cancel</button>
-        <button className="t-btn primary" onClick={save} disabled={busy}>Save</button>
-      </div>
+      <SheetEnd label={busy ? 'Saving…' : 'Save'} onSave={save} onCancel={onClose} disabled={busy} />
     </Sheet>
   );
 }
 
-function OptionsSheet({ tv, sorted, slot, onClose, onReplace }: { tv: ScreenId; sorted: S[]; slot: S; onClose: () => void; onReplace: () => void }) {
+function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: ScreenId; sorted: S[]; slot: S; screens: Screen[]; onClose: () => void; onReplace: () => void }) {
   const [confirm, setConfirm] = useState(false);
+  const [seconds, setSeconds] = useState(String(slot.seconds));
+  const [transition, setTransition] = useState<Transition>(slot.transition ?? 'fade');
   const [ends, setEnds] = useState(slot.endsAt != null ? toLocalInput(slot.endsAt) : '');
-  const { busy, error, run } = useSaver();
+  const { busy, error, setError, run } = useSaver();
   const index = sorted.findIndex((s) => s.id === slot.id);
-  const own = !!slot.pictures[tv];
+  const own = slot.pictures[tv];
   const name = screenName(tv);
   const partner = PARTNER[tv];
+  const kind = slot.kind ?? 'menu';
+  // Menu pictures never end (the Add sheet doesn't offer it); an old end date can still be cleared.
+  const showEnds = kind !== 'menu' || slot.endsAt != null;
+
+  const secs = parseSeconds(seconds);
+  const endsMs = ends ? fromLocalInput(ends) : null;
+  const dirty = seconds.trim() !== String(slot.seconds) || transition !== (slot.transition ?? 'fade') || (endsMs ?? null) !== (slot.endsAt ?? null);
 
   const move = (dir: -1 | 1) =>
     run(async () => {
       for (const s of moveSlot(sorted, index, dir)) await store.updateDoc('slots', s.id, { order: s.order });
       await restartLoop(slot.id);
     });
-  const saveEnds = (value: number | null) =>
+  const save = () => {
+    if (secs == null) return setError(SECONDS_ERROR);
+    if (ends && endsMs == null) return setError('That end date is not a valid date.');
     run(async () => {
-      await store.updateDoc('slots', slot.id, { endsAt: value });
+      await store.updateDoc('slots', slot.id, { seconds: secs, transition, endsAt: endsMs });
       await restartLoop(slot.id);
-      if (value == null) setEnds('');
+      onClose();
     });
+  };
   const remove = () =>
     run(async () => {
       const next = withoutPicture(slot, tv);
@@ -325,6 +355,8 @@ function OptionsSheet({ tv, sorted, slot, onClose, onReplace }: { tv: ScreenId; 
       else await store.deleteDoc('slots', slot.id);
       await restartLoop(null);
       onClose();
+      const after = sorted.flatMap((s) => (s.id !== slot.id ? [s] : next ? [next] : []));
+      await deletePictureIfUnused(own, after);
     });
 
   if (confirm) {
@@ -335,36 +367,46 @@ function OptionsSheet({ tv, sorted, slot, onClose, onReplace }: { tv: ScreenId; 
           {lastOne ? 'No other TV uses this spot, so it leaves the loop.' : `${partner ? screenName(partner) : 'The other TV'} keeps its picture in this spot.`}
         </p>
         {error && <p className="sc-error" role="alert">{error}</p>}
-        <div className="sc-actions">
-          <button className="t-btn" onClick={() => setConfirm(false)}>Keep it</button>
-          <button className="t-btn danger" onClick={remove} disabled={busy}>Remove</button>
-        </div>
+        <SheetEnd label={busy ? 'Removing…' : 'Remove picture'} primary="sc-danger-solid" onSave={remove} onCancel={() => setConfirm(false)} cancel="Keep it" disabled={busy} />
       </Sheet>
     );
   }
 
-  const endsMs = ends ? fromLocalInput(ends) : null;
+  const shown = pictureFor(slot, tv, screens);
   return (
     <Sheet open title={`Picture ${index + 1} of ${sorted.length}`} onClose={onClose}>
+      <div className="sc-pic sc-pic-static" data-testid="options-preview">
+        <StoredPicture id={shown} alt={`Picture ${index + 1}`} />
+      </div>
       <div className="sc-menu">
         <button className="t-btn block" onClick={onReplace}>{own ? 'Replace picture' : `Use a different picture on ${name}`}</button>
         <div className="t-grid2">
           <button className="t-btn" onClick={() => move(-1)} disabled={busy || index <= 0}>Move up</button>
           <button className="t-btn" onClick={() => move(1)} disabled={busy || index >= sorted.length - 1}>Move down</button>
         </div>
+        {own && (
+          <button className="t-btn block danger" onClick={() => setConfirm(true)}>Remove from {name}</button>
+        )}
       </div>
-      <Field label="Stop showing after (optional)">
-        <input className="t-input" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} data-testid="ends-input" />
-      </Field>
-      <div className="t-grid2">
-        <button className="t-btn" onClick={() => saveEnds(endsMs)} disabled={busy || endsMs == null || endsMs === slot.endsAt}>Save end date</button>
-        <button className="t-btn" onClick={() => saveEnds(null)} disabled={busy || slot.endsAt == null}>No end date</button>
-      </div>
-      {error && <p className="sc-error" role="alert">{error}</p>}
-      {own && (
-        <button className="t-btn block danger" onClick={() => setConfirm(true)}>Remove from {name}</button>
+      <hr className="sc-rule" />
+      <TimingFields seconds={seconds} setSeconds={setSeconds} transition={transition} setTransition={setTransition} invalid={secs == null} testId="options-seconds" />
+      {showEnds && (
+        <>
+          <Field label="Stop showing after (optional)">
+            <input className="t-input sc-when" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} data-testid="ends-input" />
+          </Field>
+          {ends && (
+            <button className="t-btn ghost sc-clear" onClick={() => setEnds('')}>Clear end date</button>
+          )}
+        </>
       )}
-      <button className="t-btn block ghost" onClick={onClose}>Done</button>
+      <p className="sc-hint">{ALL_TVS_NOTE}</p>
+      {error && <p className="sc-error" role="alert">{error}</p>}
+      {dirty ? (
+        <SheetEnd label={busy ? 'Saving…' : 'Save changes'} onSave={save} onCancel={onClose} disabled={busy} />
+      ) : (
+        <button className="t-btn block" onClick={onClose}>Done</button>
+      )}
     </Sheet>
   );
 }

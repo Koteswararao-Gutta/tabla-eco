@@ -1,9 +1,9 @@
 // Small pieces shared by the Screens tab pages.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { isOnline, useCollection, useNow, usePictureUrl, type ScreenId } from '@shared/data';
+import { isOnline, store, useCollection, useNow, usePictureUrl, type MusicSettings, type ScreenId, type Slot } from '@shared/data';
 import { PageHeader } from '@shared/ui';
-import { screenName } from './logic';
+import { pictureInUse, pictureWarnings, screenName } from './logic';
 
 /** Page frame for one screen: back link, title, online badge. */
 export function ScreenPage({ id, sub, children }: { id: ScreenId; sub?: string; children: ReactNode }) {
@@ -29,15 +29,22 @@ export function StoredPicture({ id, alt }: { id: string | null | undefined; alt:
   return url ? <img src={url} alt={alt} draggable={false} /> : <span className="sc-pic-wait" aria-label={alt} />;
 }
 
-/** A button that opens the phone's camera / photo picker. */
+/** A button that opens the phone's camera / photo picker. A real button (Tab, Enter and Space
+ *  work) that clicks a visually hidden file input. */
 export function PictureInput({ label, onFile, className = 't-btn block', testId, disabled }: { label: ReactNode; onFile: (f: File) => void; className?: string; testId?: string; disabled?: boolean }) {
+  const input = useRef<HTMLInputElement>(null);
   return (
-    <label className={className + (disabled ? ' sc-disabled' : '')}>
-      {label}
+    <>
+      <button type="button" className={className} disabled={disabled} onClick={() => input.current?.click()}>
+        {label}
+      </button>
       <input
+        ref={input}
+        className="sc-file"
         type="file"
         accept="image/*"
-        hidden
+        tabIndex={-1}
+        aria-hidden
         disabled={disabled}
         data-testid={testId}
         onChange={(e) => {
@@ -46,19 +53,43 @@ export function PictureInput({ label, onFile, className = 't-btn block', testId,
           if (f) onFile(f);
         }}
       />
-    </label>
+    </>
   );
 }
 
-/** Preview of a picked file before it is saved. */
+/** Preview of a picked file before it is saved, framed like the TV shows it (whole, on black),
+ *  with a plain warning when the picture is tall, very wide or small. */
 export function FilePreview({ file }: { file: File }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   useEffect(() => {
     const u = URL.createObjectURL(file);
     setUrl(u);
+    setWarnings([]);
     return () => URL.revokeObjectURL(u);
   }, [file]);
-  return <div className="sc-pic sc-pic-static">{url && <img src={url} alt="Chosen picture" />}</div>;
+  return (
+    <>
+      <div className="sc-pic sc-pic-static">
+        {url && <img src={url} alt="Chosen picture" onLoad={(e) => setWarnings(pictureWarnings(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))} />}
+      </div>
+      {warnings.map((w) => (
+        <p key={w} className="sc-warn" data-testid="picture-warning">{w}</p>
+      ))}
+    </>
+  );
+}
+
+/** After a picture leaves a slot or the TV 5 clip: delete it from storage if nothing else shows it.
+ *  `slots` is the slot list as it is after the change. Never throws (the change itself already saved). */
+export async function deletePictureIfUnused(id: string | null | undefined, slots: readonly Pick<Slot, 'pictures'>[], clipPictures?: readonly string[]): Promise<void> {
+  if (!id) return;
+  try {
+    const clip = clipPictures ?? ((await store.getDoc('singletons', 'music')) as Partial<MusicSettings> | null)?.clipPictures ?? [];
+    if (!pictureInUse(id, slots, Array.isArray(clip) ? clip : [])) await store.deletePicture(id);
+  } catch {
+    /* leaving an unused picture behind is harmless */
+  }
 }
 
 /** On/off switch with a label, full-width row. */
