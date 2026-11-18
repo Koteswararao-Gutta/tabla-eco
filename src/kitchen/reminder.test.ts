@@ -1,26 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import type { CateringOrder, WithId } from '@shared/data';
-import { ackKey, dueReminders, ringAt } from './reminder';
+import type { CateringOrder } from '@shared/data';
+import { ackPatch, dueReminders, ringAt, type KitchenOrder } from './reminder';
 
 const H = 3_600_000;
-const order = (id: string, dueAt: number, status: CateringOrder['status'] = 'open') =>
-  ({ id, dueAt, status, customerName: id, phone: '', type: 'pickup', items: '', createdAt: 0, updatedAt: 0 }) as WithId<CateringOrder>;
+const MIN = 60_000;
+const order = (id: string, dueAt: number, status: CateringOrder['status'] = 'open', kitchenAckFor?: number) =>
+  ({ id, dueAt, status, customerName: id, phone: '', type: 'pickup', items: '', createdAt: 0, updatedAt: 0, kitchenAckFor }) as KitchenOrder;
 
 describe('dueReminders', () => {
   const now = 100 * H;
   it('reminds open orders due within the hour, soonest first', () => {
-    const list = [order('later', now + 2 * H), order('b', now + 50 * 60_000), order('a', now + 10 * 60_000)];
-    expect(dueReminders(list, now, new Set()).map((o) => o.id)).toEqual(['a', 'b']);
+    const list = [order('later', now + 2 * H), order('b', now + 50 * MIN), order('a', now + 10 * MIN)];
+    expect(dueReminders(list, now).map((o) => o.id)).toEqual(['a', 'b']);
   });
   it('skips completed and acknowledged orders', () => {
     const done = order('done', now + 1000, 'completed');
-    const seen = order('seen', now + 1000);
-    expect(dueReminders([done, seen], now, new Set([ackKey(seen)]))).toEqual([]);
+    const seen = order('seen', now + 1000, 'open', now + 1000);
+    expect(dueReminders([done, seen], now)).toEqual([]);
+  });
+  it('the acknowledgement is stored as the due time it was for', () => {
+    expect(ackPatch(order('x', now + 1000))).toEqual({ kitchenAckFor: now + 1000 });
   });
   it('reminds again when the order time changes', () => {
-    const o = order('x', now + 1000);
-    const moved = { ...o, dueAt: now + 2000 };
-    expect(dueReminders([moved], now, new Set([ackKey(o)]))).toHaveLength(1);
+    const moved = order('x', now + 2000, 'open', now + 1000); // acked for the old time
+    expect(dueReminders([moved], now)).toHaveLength(1);
+  });
+  it('keeps a late order for an hour, then leaves it to its card', () => {
+    expect(dueReminders([order('late', now - 59 * MIN)], now)).toHaveLength(1);
+    expect(dueReminders([order('old', now - 61 * MIN)], now)).toEqual([]);
+    expect(dueReminders([order('days', now - 72 * H)], now)).toEqual([]);
   });
 });
 
@@ -49,7 +57,12 @@ describe('ringAt: only while the kitchen is staffed', () => {
   });
   it('dueReminders holds the 5:30 order during the break, then shows it at 5:00', () => {
     const o = order('x', at(18, 17, 30));
-    expect(dueReminders([o], at(18, 16, 30), new Set(), staff)).toEqual([]);
-    expect(dueReminders([o], at(18, 17), new Set(), staff)).toEqual([o]);
+    expect(dueReminders([o], at(18, 16, 30), staff)).toEqual([]);
+    expect(dueReminders([o], at(18, 17), staff)).toEqual([o]);
+  });
+  it('a 4:00 order rung before the break stays until an hour after it is due', () => {
+    const o = order('x', at(18, 16));
+    expect(dueReminders([o], at(18, 13, 45), staff)).toEqual([o]);
+    expect(dueReminders([o], at(18, 17, 1), staff)).toEqual([]);
   });
 });

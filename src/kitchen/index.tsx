@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScreenSurface } from '@shared/ui';
 import { store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, groupByDay, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
 import { PIN_LENGTH, expectedPin, press } from './pin';
-import { ackKey, chime, dueReminders } from './reminder';
+import { ackKey, ackPatch, chime, dueReminders } from './reminder';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -68,7 +68,7 @@ function PinScreen({ onUnlock }: { onUnlock: () => void }) {
         {keys.map((k) => (
           <button
             key={k}
-            className={'k-key' + (k.length > 1 ? ' k-key-fn' : '')}
+            className={'k-key' + (k.length > 1 ? ' k-key-fn' : '') + (k === 'back' ? ' k-key-back' : '')}
             onClick={() => key(k)}
             disabled={pin === undefined}
             aria-label={k === 'back' ? 'Delete last digit' : k === 'clear' ? 'Clear' : k}
@@ -103,6 +103,12 @@ function Board() {
   const now = useNow(15_000);
   const online = useOnline();
   const [showAll, setShowAll] = useState(false);
+  const board = useRef<HTMLDivElement>(null);
+  // Each view opens at its top, not at the other view's scroll position.
+  useEffect(() => {
+    const root = board.current?.closest('.k-root');
+    if (root) root.scrollTop = 0;
+  }, [showAll]);
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -129,11 +135,10 @@ function Board() {
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
-  // 1-hour heads-up: a banner per order, with a chime when a new one appears.
-  const [acked, setAcked] = useState<Set<string>>(() => new Set());
+  // 1-hour heads-up: a banner per order, with a chime when a new one appears. Only on the open orders view.
   // Rings only while the kitchen is staffed (staff schedule hours). Waits for those hours to load.
   const staff = useSingleton('staffConfig');
-  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, acked, staff);
+  const reminders = staff === undefined || showAll ? [] : dueReminders(orders ?? [], now, staff);
   const remindIds = reminders.map(ackKey).join(',');
   const chimed = useRef(new Set<string>());
   useEffect(() => {
@@ -142,15 +147,20 @@ function Board() {
     if (fresh.length) chime();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remindIds]);
-  const ack = (o: Order) => setAcked((s) => new Set(s).add(ackKey(o)));
+  // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet.
+  const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
 
   return (
-    <div className="k-board">
+    <div className="k-board" ref={board}>
       <header className="k-bar">
         <div className="k-bar-title">
           <h1>{showAll ? 'All orders' : 'Open orders'}</h1>
           {!showAll && orders && <span className="k-count">{open.length}</span>}
-          {!online && <span className="t-badge bad k-offline">Offline</span>}
+          {!online && (
+            <span className="t-badge bad k-offline" role="status">
+              Offline: showing the last saved orders
+            </span>
+          )}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
         {showAll ? (
@@ -167,10 +177,12 @@ function Board() {
         <div className="k-remind" role="alert" data-testid="kitchen-reminder">
           {reminders.map((o) => (
             <div key={o.id} className="k-remind-row">
-              <span>
+              <span className="k-remind-text">
                 <b>{o.customerName}</b> {o.type === 'delivery' ? 'delivery' : 'pickup'} at {timeLabel(o.dueAt)}, {countdown(o.dueAt, now).text}
               </span>
-              <button className="t-btn" onClick={() => ack(o)}>Got it</button>
+              <button className="t-btn k-remind-btn" onClick={() => ack(o)}>
+                Got it
+              </button>
             </div>
           ))}
         </div>
@@ -194,7 +206,7 @@ function Board() {
 
       {undo && (
         <div className="k-undo" role="status">
-          <span>
+          <span className="k-undo-text">
             Marked completed: <b>{undo.name}</b>
           </span>
           <button className="t-btn accent" onClick={undoComplete}>
@@ -248,7 +260,7 @@ function AllOrders({ orders, now, onReopen }: { orders: Order[]; now: number; on
   if (orders.length === 0) return <div className="t-empty k-empty">No orders yet.</div>;
   return (
     <div className="k-all">
-      {groupByDay(orders, now).map((g) => (
+      {groupByDayUpcomingFirst(orders, now).map((g) => (
         <section key={g.label} className="k-day-group" aria-label={g.label}>
           <h2>{g.label}</h2>
           <div className="k-rows">
@@ -256,29 +268,29 @@ function AllOrders({ orders, now, onReopen }: { orders: Order[]; now: number; on
               <div key={o.id} className={'k-row' + (o.status === 'completed' ? ' done' : '')} data-testid="kitchen-row">
                 <span className="k-row-time">{timeLabel(o.dueAt)}</span>
                 <span className="k-row-main">
-                  <span className="k-row-name">
-                    {o.customerName} <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+                  <span className="k-row-head">
+                    <span className="k-row-name">{o.customerName}</span>
+                    <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
                   </span>
                   <span className="k-row-items">
                     {o.people ? `${o.people} people · ` : ''}
                     {itemLines(o.items).join(' · ')}
                   </span>
                 </span>
-                {o.status === 'completed' ? (
-                  <>
-                    <span className="k-row-status good">
-                      ✓ Completed{o.completedAt ? ` ${timeLabel(o.completedAt)}` : ''}
-                    </span>
-                    <button className="t-btn k-row-btn" onClick={() => onReopen(o)}>
-                      Reopen
-                    </button>
-                  </>
-                ) : (
-                  <>
+                <span className="k-row-side">
+                  {o.status === 'completed' ? (
+                    <>
+                      <span className="k-row-status good">
+                        ✓ Completed{o.completedAt ? ` ${timeLabel(o.completedAt)}` : ''}
+                      </span>
+                      <button className="t-btn k-row-btn" onClick={() => onReopen(o)}>
+                        Reopen
+                      </button>
+                    </>
+                  ) : (
                     <span className="k-row-status">Open</span>
-                    <span />
-                  </>
-                )}
+                  )}
+                </span>
               </div>
             ))}
           </div>

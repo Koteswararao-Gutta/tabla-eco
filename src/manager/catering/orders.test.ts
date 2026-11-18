@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupOpen, history, isSoon, orderFields, validate } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, orderFields, validate } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -54,6 +54,12 @@ describe('grouping', () => {
     const g = groupByDay(all, NOW);
     expect(g.map((x) => x.label)).toEqual(['Sun, Nov 22', 'Tomorrow', 'Today', 'Yesterday', 'Mon, Nov 16']);
     expect(g[2].orders).toEqual([a, b]);
+  });
+  it('for the kitchen: today and the days ahead first, then past days, each day by time', () => {
+    const g = groupByDayUpcomingFirst(all, NOW);
+    expect(g.map((x) => x.label)).toEqual(['Today', 'Tomorrow', 'Sun, Nov 22', 'Yesterday', 'Mon, Nov 16']);
+    expect(g[0].orders).toEqual([b, a]);
+    expect(groupByDayUpcomingFirst([], NOW)).toEqual([]);
   });
   it('labels days', () => {
     expect(dayLabel(at(18, 23, 59), NOW)).toBe('Today');

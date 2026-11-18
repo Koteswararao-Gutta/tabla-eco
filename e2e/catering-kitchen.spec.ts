@@ -41,6 +41,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet.getByText("Please enter the customer's name.")).toBeVisible();
   await expect(sheet.getByText('Please add at least one item.')).toBeVisible();
+  await expect(sheet.getByLabel('Customer name')).toBeFocused(); // the first field to fix
   await shot(manager, 'manager-new-order-errors');
   const tomorrow = await manager.evaluate(() => {
     const d = new Date();
@@ -57,6 +58,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await sheet.getByLabel('Notes (optional)').fill('Set up by 1 PM');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet.getByText('Please enter the delivery address.')).toBeVisible();
+  await expect(sheet.getByLabel('Delivery address')).toBeFocused();
   await shot(manager, 'manager-new-order-form');
   await sheet.getByLabel('Delivery address').fill('48 Lake View Rd, Hall B');
   await sheet.getByRole('button', { name: 'Save order' }).click();
@@ -86,6 +88,10 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
 
   // Show all orders: ticked as completed, and it can be reopened.
   await kitchen.getByRole('button', { name: 'Show all orders' }).click();
+  // Upcoming days first: Today, then Tomorrow, then past days.
+  const days = await kitchen.locator('.k-day-group h2').allTextContents();
+  expect(days.slice(0, 2)).toEqual(['Today', 'Tomorrow']);
+  expect(days.indexOf('Yesterday')).toBeGreaterThan(1);
   const row = kitchen.getByTestId('kitchen-row').filter({ hasText: 'Anika Wedding' });
   await expect(row).toContainText('✓ Completed');
   await expect(kitchen.getByTestId('kitchen-row').filter({ hasText: 'Rahul Verma' })).toContainText('✓ Completed');
@@ -101,8 +107,21 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(edit.getByLabel('Delivery address')).toHaveValue('48 Lake View Rd, Hall B');
   await edit.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
+  // Quick feedback with Undo.
+  const toast = manager.getByRole('status').filter({ hasText: 'Marked completed: Anika Wedding' });
+  await expect(toast).toBeVisible();
+  await shot(manager, 'manager-marked-completed');
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await expect(card).toBeVisible();
+  await manager.getByRole('button', { name: /Anika Wedding/ }).click();
+  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Mark completed' }).click();
+  await expect(card).toHaveCount(0);
   await manager.getByRole('button', { name: /History/ }).click();
   await manager.getByRole('region', { name: 'History' }).getByRole('button', { name: /Anika Wedding/ }).click();
+  // Delete, then "Keep it" goes back to the order.
+  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
+  await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Keep it' }).click();
+  await expect(manager.getByRole('dialog', { name: 'Edit order' }).getByLabel('Customer name')).toHaveValue('Anika Wedding');
   await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
   await expect(manager.getByText('Anika Wedding')).toHaveCount(0);
@@ -151,15 +170,18 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
   await context.close();
 });
 
-test('kitchen shows a 1-hour heads-up with a Got it button', async ({ page }) => {
-  await page.goto('/#/kitchen');
+test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late orders drop off', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
-  // An order due in 30 minutes, written straight into the local store (test-only).
+  // An order due in 30 minutes and one 3 hours late, written straight into the local store (test-only).
   await page.evaluate(() => {
     const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
-    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed'; // only our order is open
+    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed'; // only our orders are open
     const now = Date.now();
-    t.soon = { id: 'soon', customerName: 'Anita Rao', phone: '555', dueAt: now + 30 * 60_000, type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    const base = { phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    t.soon = { ...base, id: 'soon', customerName: 'Anita Rao', dueAt: now + 30 * 60_000 };
+    t.old = { ...base, id: 'old', customerName: 'Old Late Order', dueAt: now - 3 * 3_600_000 };
     localStorage.setItem('tabla:orders', JSON.stringify(t));
   });
   await page.reload();
@@ -167,8 +189,62 @@ test('kitchen shows a 1-hour heads-up with a Got it button', async ({ page }) =>
   const banner = page.getByTestId('kitchen-reminder');
   await expect(banner).toContainText('Anita Rao pickup at');
   await expect(banner).toContainText('in 30 min');
-  await banner.getByRole('button', { name: 'Got it' }).click();
+  await expect(banner).not.toContainText('Old Late Order'); // its card already says it is late
+  await expect(page.getByRole('article', { name: 'Order for Old Late Order' })).toContainText('late');
+  const gotIt = banner.getByRole('button', { name: 'Got it' });
+  await expect(gotIt).toHaveCSS('color', 'rgb(31, 30, 28)'); // readable: dark text on the white pill
+  expect((await gotIt.boundingBox())!.height).toBeGreaterThanOrEqual(56);
+  await shot(page, 'kitchen-reminder');
+
+  // Not shown on the all orders view.
+  await page.getByRole('button', { name: 'Show all orders' }).click();
   await expect(banner).toHaveCount(0);
+  await page.getByRole('button', { name: '← Back to open orders' }).click();
+
+  await gotIt.click();
+  await expect(banner).toHaveCount(0);
+  // Saved on the order: still gone after a reload (and on any other kitchen tablet).
+  await page.reload();
+  await typePin(page, '1234');
+  await expect(page.getByRole('article', { name: 'Order for Anita Rao' })).toBeVisible();
+  await expect(banner).toHaveCount(0);
+
+  // The manager moves the order 10 minutes later: the reminder comes back.
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    t.soon.dueAt += 10 * 60_000;
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await typePin(page, '1234');
+  await expect(banner).toContainText('Anita Rao');
+  await context.close();
+});
+
+test('kitchen: long names wrap, portrait all-orders rows fit, offline is clear', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 800, height: 1280 } });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    const now = Date.now();
+    t.long = { id: 'long', customerName: 'Supercalifragilisticexpialidocious_Corporate_Holdings_LLC_Event', phone: '555', dueAt: now + 40 * 60_000, type: 'delivery', address: '1 Long Rd', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await typePin(page, '1234');
+  await expect(page.getByRole('article', { name: /Order for Supercali/ })).toBeVisible();
+  const fits = () => page.evaluate(() => [...document.querySelectorAll('.k-root *')].every((el) => el.getBoundingClientRect().right <= window.innerWidth + 1));
+  expect(await fits()).toBe(true);
+  await shot(page, 'kitchen-portrait');
+  await page.getByRole('button', { name: 'Show all orders' }).click();
+  await expect(page.getByTestId('kitchen-row').first()).toBeVisible();
+  expect(await page.evaluate(() => (document.querySelector('.k-root') as HTMLElement).scrollTop)).toBe(0);
+  expect(await fits()).toBe(true);
+  await shot(page, 'kitchen-portrait-all');
+  await context.setOffline(true);
+  await expect(page.getByText('Offline: showing the last saved orders')).toBeVisible();
+  await context.close();
 });
 
 test('scan paper order fills the new order form for checking, then saves', async ({ browser }) => {
@@ -178,6 +254,9 @@ test('scan paper order fills the new order form for checking, then saves', async
   await manager.getByRole('button', { name: '+ New order' }).click();
   const sheet = manager.getByRole('dialog', { name: 'New order' });
   // The preview store answers with a fixed sample instead of calling the AI.
+  // The scan button is reachable by keyboard.
+  await sheet.getByLabel('Scan paper order').focus();
+  await expect(sheet.getByLabel('Scan paper order')).toBeFocused();
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await sheet.getByLabel('Scan paper order').setInputFiles({ name: 'order.png', mimeType: 'image/png', buffer: png });
   await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
@@ -199,9 +278,26 @@ test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   const card = manager.getByTestId('alerts');
-  await expect(card).toContainText('Get a phone alert 1 hour before each catering order');
+  await expect(card).toContainText('Get a phone alert 1 hour before each order.');
   await shot(manager, 'manager-alerts-off');
   await card.getByRole('button', { name: 'Turn on alerts' }).click();
   await expect(card).toContainText('This phone gets an alert 1 hour before each order.');
+  await context.close();
+});
+
+test('catering list fits a phone with a long no-space customer name', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
+  await manager.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    const now = Date.now();
+    t.long = { id: 'long', customerName: 'Supercalifragilisticexpialidocious_Corporate_Holdings_LLC_Event', phone: '555 123 4567', dueAt: now + 3 * 3_600_000, type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await manager.reload();
+  await expect(manager.getByText(/Supercali/)).toBeVisible();
+  expect(await manager.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await shot(manager, 'manager-long-name');
   await context.close();
 });

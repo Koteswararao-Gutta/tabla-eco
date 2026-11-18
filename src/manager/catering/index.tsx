@@ -1,5 +1,5 @@
 // Manager > Catering: open orders by day, history, and a form sheet to add or edit an order.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type WithId } from '@shared/data';
 import {
@@ -9,6 +9,12 @@ import {
 import './catering.css';
 
 type Order = WithId<CateringOrder>;
+const UNDO_MS = 6000;
+
+const setOrderStatus = (id: string, status: CateringOrder['status']) => {
+  const now = store.now();
+  return store.updateDoc('orders', id, { status, completedAt: status === 'completed' ? now : null, updatedAt: now });
+};
 
 export default function Catering() {
   const orders = useCollection('orders');
@@ -16,6 +22,26 @@ export default function Catering() {
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  // "Marked completed" toast with Undo, for a few seconds.
+  const [done, setDone] = useState<{ id: string; name: string } | null>(null);
+  const doneTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(doneTimer.current), []);
+  const markedCompleted = (o: Order) => {
+    clearTimeout(doneTimer.current);
+    setDone({ id: o.id, name: o.customerName });
+    doneTimer.current = setTimeout(() => setDone(null), UNDO_MS);
+  };
+  const undoCompleted = async () => {
+    const id = done?.id;
+    clearTimeout(doneTimer.current);
+    setDone(null);
+    if (id && orders?.some((o) => o.id === id)) await setOrderStatus(id, 'open');
+  };
+  // Delete -> "Keep it" goes back to the order.
+  const keepIt = () => {
+    if (deleting) setEditing(deleting.id);
+    setDeleting(null);
+  };
 
   const groups = orders ? groupOpen(orders, now) : null;
   const past = orders ? history(orders) : [];
@@ -41,21 +67,24 @@ export default function Catering() {
 
       {!groups ? null : (
         <div className="t-stack">
-          {openCount === 0 && <div className="t-empty">No open orders. Tap “+ New order” to add one.</div>}
+          {openCount === 0 && (
+            <div className="t-empty c-empty">
+              No open orders.
+              <br />
+              Tap “+ New order” to add one.
+            </div>
+          )}
           <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} showDate onOpen={openOrder} late />
           <Group title="Today" orders={groups.today} now={now} onOpen={openOrder} />
           <Group title="Tomorrow" orders={groups.tomorrow} now={now} onOpen={openOrder} />
           <Group title="Later" orders={groups.later} now={now} showDate onOpen={openOrder} />
 
-          <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
-            {showHistory ? 'Hide history' : `History (${past.length})`}
-          </button>
-          {showHistory &&
-            (past.length === 0 ? (
-              <div className="t-empty">No completed orders yet.</div>
-            ) : (
-              <Group title="History" orders={past} now={now} showDate onOpen={openOrder} />
-            ))}
+          {past.length > 0 && (
+            <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
+              {showHistory ? 'Hide history' : `History (${past.length})`}
+            </button>
+          )}
+          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} showDate onOpen={openOrder} />}
         </div>
       )}
 
@@ -64,6 +93,7 @@ export default function Catering() {
           key={editing!}
           order={editOrder}
           onClose={() => setEditing(null)}
+          onCompleted={markedCompleted}
           onDelete={(o) => {
             setEditing(null);
             setDeleting(o);
@@ -71,7 +101,7 @@ export default function Catering() {
         />
       )}
 
-      <Sheet open={!!deleting} title="Delete this order?" onClose={() => setDeleting(null)}>
+      <Sheet open={!!deleting} title="Delete this order?" onClose={keepIt}>
         {deleting && (
           <>
             <p className="c-confirm">
@@ -86,12 +116,23 @@ export default function Catering() {
             >
               Delete order
             </button>
-            <button className="t-btn block ghost" onClick={() => setDeleting(null)}>
+            <button className="t-btn block ghost" onClick={keepIt}>
               Keep it
             </button>
           </>
         )}
       </Sheet>
+
+      {done && (
+        <div className="c-toast" role="status">
+          <span className="c-toast-text">
+            Marked completed: <b>{done.name}</b>
+          </span>
+          <button className="t-btn accent" onClick={undoCompleted}>
+            Undo
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -114,7 +155,7 @@ function AlertsCard() {
     <div className="c-alerts" data-testid="alerts">
       {state === 'off' && (
         <>
-          <p>Get a phone alert 1 hour before each catering order, even when the app is closed.</p>
+          <p>Get a phone alert 1 hour before each order.</p>
           <button
             className="t-btn primary"
             disabled={busy}
@@ -172,7 +213,18 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose: () => void; onDelete: (o: Order) => void }) {
+function OrderSheet(props: { order: Order | null; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void }) {
+  const { order, onClose, onCompleted, onDelete } = props;
+  const form = useRef<HTMLFormElement>(null);
+  const [attempt, setAttempt] = useState(0); // bumps on a save with errors
+  // After a save with errors, bring the first marked field into view and put the cursor in it.
+  useEffect(() => {
+    if (!attempt) return;
+    const first = form.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    if (!first) return;
+    first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    first.focus({ preventScroll: true });
+  }, [attempt]);
   const [f, setF] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now())));
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
@@ -207,7 +259,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
     const e = validate(f);
     setTried(true);
     setErrors(e);
-    if (Object.keys(e).length) return;
+    if (Object.keys(e).length) return setAttempt((n) => n + 1);
     setBusy(true);
     const now = store.now();
     const fields = orderFields(f);
@@ -224,8 +276,8 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
 
   const setStatus = async (status: CateringOrder['status']) => {
     if (!order) return;
-    const now = store.now();
-    await store.updateDoc('orders', order.id, { status, completedAt: status === 'completed' ? now : null, updatedAt: now });
+    await setOrderStatus(order.id, status);
+    if (status === 'completed') onCompleted(order);
     onClose();
   };
 
@@ -240,6 +292,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
   return (
     <Sheet open title={order ? 'Edit order' : 'New order'} onClose={onClose}>
       <form
+        ref={form}
         className="t-stack c-form"
         noValidate
         onSubmit={(e) => {
@@ -253,7 +306,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
               <input
                 type="file"
                 accept="image/*"
-                hidden
+                className="c-file"
                 disabled={scan.state === 'reading'}
                 aria-label="Scan paper order"
                 onChange={(e) => {
@@ -317,7 +370,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
           {err('people')}
         </Field>
         <Field label="Order items (one per line)">
-          <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'Chicken biryani, 2 large trays\nGarlic naan, 30'} />
+          <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'e.g. Chicken biryani, 2 large trays'} />
           {err('items')}
         </Field>
         <Field label="Notes (optional)">
