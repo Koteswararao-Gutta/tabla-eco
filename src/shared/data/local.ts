@@ -5,7 +5,7 @@
 
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 const PREFIX = 'tabla:';
 type Table = Record<string, unknown>;
@@ -159,6 +159,15 @@ export class LocalStore implements DataStore {
     if (url) URL.revokeObjectURL(url);
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
+  }
+
+  /** No server here: alerts are only pretended, so the screens can be tried. */
+  private alerts: AlertState = 'off';
+  async alertState(): Promise<AlertState> {
+    return this.alerts;
+  }
+  async turnOnAlerts(): Promise<AlertState> {
+    return (this.alerts = 'on');
   }
 
   /** No server here: a fixed sample order for tomorrow, so the scan flow can be tried and tested. */

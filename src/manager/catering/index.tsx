@@ -1,7 +1,7 @@
 // Manager > Catering: open orders by day, history, and a form sheet to add or edit an order.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
-import { store, useCollection, useNow, type CateringOrder, type WithId } from '@shared/data';
+import { store, useCollection, useNow, type AlertState, type CateringOrder, type WithId } from '@shared/data';
 import {
   dayLabel, emptyForm, formFromOrder, formFromScan, groupOpen, history, itemLines, orderFields, timeLabel, validate,
   type FormErrors, type OrderForm,
@@ -36,6 +36,8 @@ export default function Catering() {
           </button>
         }
       />
+
+      <AlertsCard />
 
       {!groups ? null : (
         <div className="t-stack">
@@ -91,6 +93,46 @@ export default function Catering() {
         )}
       </Sheet>
     </main>
+  );
+}
+
+/** Offers the 1-hour phone alerts on this device, or says why it can't. */
+function AlertsCard() {
+  const [state, setState] = useState<AlertState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    store.alertState().then((s) => live && setState(s), () => live && setState('unsupported'));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!state || state === 'unsupported') return null;
+  if (state === 'on') return <p className="c-alerts-on" data-testid="alerts">✓ This phone gets an alert 1 hour before each order.</p>;
+  return (
+    <div className="c-alerts" data-testid="alerts">
+      {state === 'off' && (
+        <>
+          <p>Get a phone alert 1 hour before each catering order, even when the app is closed.</p>
+          <button
+            className="t-btn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setState(await store.turnOnAlerts().catch((): AlertState => 'off'));
+              setBusy(false);
+            }}
+          >
+            Turn on alerts
+          </button>
+        </>
+      )}
+      {state === 'needs-home-screen' && (
+        <p>To get alerts on iPhone, first add this app to your Home Screen: tap Share, then “Add to Home Screen”. Then open it from there.</p>
+      )}
+      {state === 'blocked' && <p>Alerts are blocked on this phone. To turn them on, allow notifications for this app in the phone’s settings.</p>}
+    </div>
   );
 }
 

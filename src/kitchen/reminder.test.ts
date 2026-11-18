@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, WithId } from '@shared/data';
-import { ackKey, dueReminders } from './reminder';
+import { ackKey, dueReminders, ringAt } from './reminder';
 
 const H = 3_600_000;
 const order = (id: string, dueAt: number, status: CateringOrder['status'] = 'open') =>
@@ -21,5 +21,35 @@ describe('dueReminders', () => {
     const o = order('x', now + 1000);
     const moved = { ...o, dueAt: now + 2000 };
     expect(dueReminders([moved], now, new Set([ackKey(o)]))).toHaveLength(1);
+  });
+});
+
+describe('ringAt: only while the kitchen is staffed', () => {
+  // Weekdays: prep from 10:00, open 11:00 to 21:00, break 14:00 to 17:00. Sunday closed on a special date.
+  const wd = { open: 660, close: 1260, brk: [840, 1020] };
+  const staff = { settings: { prepStart: 600, days: [wd, wd, wd, wd, wd, wd, wd] }, special: { '2026-11-22': { closed: true } } };
+  const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Wed Nov 18 2026 is d=18
+
+  it('rings 1 hour before when people are there', () => {
+    expect(ringAt(at(18, 13), staff)).toBe(at(18, 12));
+    expect(ringAt(at(18, 19), staff)).toBe(at(18, 18));
+  });
+  it('during the break, waits until people are back', () => {
+    expect(ringAt(at(18, 17, 30), staff)).toBe(at(18, 17)); // 5:30 order: rings at 5:00, not 4:30
+  });
+  it('if people are back only after it is due, rings just before the break', () => {
+    expect(ringAt(at(18, 16), staff)).toBe(at(18, 13, 45)); // 4:00 order, during the break
+  });
+  it('early morning orders ring when prep starts', () => {
+    expect(ringAt(at(18, 10, 30), staff)).toBe(at(18, 10));
+  });
+  it('without staff hours, rings exactly 1 hour before', () => {
+    expect(ringAt(at(18, 17, 30))).toBe(at(18, 16, 30));
+    expect(ringAt(at(18, 17, 30), { nothing: true })).toBe(at(18, 16, 30));
+  });
+  it('dueReminders holds the 5:30 order during the break, then shows it at 5:00', () => {
+    const o = order('x', at(18, 17, 30));
+    expect(dueReminders([o], at(18, 16, 30), new Set(), staff)).toEqual([]);
+    expect(dueReminders([o], at(18, 17), new Set(), staff)).toEqual([o]);
   });
 });
