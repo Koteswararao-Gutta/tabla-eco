@@ -36,12 +36,15 @@ const SCREENS: Screen[] = [
 ];
 
 export async function seedIfEmpty(): Promise<void> {
-  if (await store.getDoc('singletons', 'settings')) return;
+  // The marker is written first, so a seed that fails partway never runs twice and duplicates data.
+  if (await store.getDoc('singletons', 'seeded')) return;
+  await store.setDoc('singletons', 'seeded', { at: store.now() });
   await seed();
 }
 
 export async function resetDemoData(): Promise<void> {
   for (const k of Object.keys(localStorage)) if (k.startsWith('tabla:')) localStorage.removeItem(k);
+  await store.setDoc('singletons', 'seeded', { at: store.now() });
   await seed();
 }
 
@@ -63,6 +66,7 @@ async function seed(): Promise<void> {
     { id: 'slot-catering', order: 4, seconds: 8, transition: 'fade', kind: 'catering', pictures: { tv1: cat } },
   ];
   for (const s of slots) await store.setDoc('slots', s.id, s);
+  await store.setDoc('singletons', 'loop', { anchor: 0, firstSlotId: null });
 
   const music: MusicSettings = {
     playlist: '', shuffle: true, clipMode: 'afterEachSong', everySeconds: 60, clipSeconds: 8,

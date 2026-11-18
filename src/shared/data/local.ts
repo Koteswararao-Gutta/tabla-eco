@@ -4,7 +4,7 @@
 // /kitchen and /manager open side by side in Chrome behave like the real devices.
 
 import type { DataStore, Unsubscribe, WithId } from './store';
-import { newId } from './store';
+import { clean, newId } from './store';
 import type { CollectionName, Collections, Picture } from './types';
 
 const PREFIX = 'tabla:';
@@ -88,13 +88,13 @@ export class LocalStore implements DataStore {
 
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     const t = this.read(col);
-    t[id] = { ...(data as object), id };
+    t[id] = { ...clean(data as object), id };
     this.write(col, t);
   }
 
   async updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void> {
     const t = this.read(col);
-    t[id] = { ...((t[id] as object) || {}), ...(patch as object), id };
+    t[id] = { ...((t[id] as object) || {}), ...clean(patch as object), id };
     this.write(col, t);
   }
 
@@ -107,7 +107,7 @@ export class LocalStore implements DataStore {
   async addDoc<C extends CollectionName>(col: C, data: Omit<Collections[C], 'id'>): Promise<string> {
     const id = newId();
     const t = this.read(col);
-    t[id] = { ...(data as object), id };
+    t[id] = { ...clean(data as object), id };
     this.write(col, t);
     return id;
   }

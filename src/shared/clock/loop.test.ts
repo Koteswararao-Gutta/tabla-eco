@@ -34,6 +34,21 @@ describe('loopPosition', () => {
     expect(p.next.id).toBe('c');
   });
 
+  it('restarts from the anchor, beginning with the chosen slot', () => {
+    const anchor = 1_763_490_000_000;
+    const loop = { anchor, firstSlotId: 'c' };
+    expect(loopPosition(slots, anchor, loop)!.slot.id).toBe('c');
+    expect(loopPosition(slots, anchor + 14_999, loop)!.slot.id).toBe('c');
+    expect(loopPosition(slots, anchor + 15_000, loop)!.slot.id).toBe('a');
+    expect(loopPosition(slots, anchor + 25_000, loop)!.slot.id).toBe('b');
+    expect(loopPosition(slots, anchor + 30_000, loop)!.slot.id).toBe('c');
+  });
+
+  it('ignores a first slot that is no longer playing', () => {
+    const anchor = 5_000_000;
+    expect(loopPosition(slots, anchor, { anchor, firstSlotId: 'gone' })!.slot.id).toBe('a');
+  });
+
   it('returns null when nothing can play', () => {
     expect(loopPosition([], 1000)).toBeNull();
     expect(loopPosition([slot('x', 1, 0)], 1000)).toBeNull();
@@ -63,11 +78,16 @@ describe('pictureFor', () => {
     expect(pictureFor(slot('a', 1, 10, { pictures: { tv1: 'L', tv2: 'R' } }), 'tv3', screens)).toBe('L');
   });
 
-  it('falls back to the partner picture, so one special fills a pair', () => {
-    expect(pictureFor(slot('s', 1, 10, { pictures: { tv1: 'SPECIAL' } }), 'tv2', screens)).toBe('SPECIAL');
+  it('falls back to the partner picture for specials, so one special fills a pair', () => {
+    expect(pictureFor(slot('s', 1, 10, { kind: 'special', pictures: { tv1: 'SPECIAL' } }), 'tv2', screens)).toBe('SPECIAL');
+  });
+
+  it('never borrows the partner picture in menu slots', () => {
+    expect(pictureFor(slot('m', 1, 10, { kind: 'menu', pictures: { tv1: 'L' } }), 'tv2', screens)).toBeNull();
+    expect(pictureFor(slot('m', 1, 10, { pictures: { tv1: 'L' } }), 'tv2', screens)).toBeNull();
   });
 
   it('returns null when the pair has nothing', () => {
-    expect(pictureFor(slot('s', 1, 10, { pictures: { tv1: 'X' } }), 'tv4', screens)).toBeNull();
+    expect(pictureFor(slot('s', 1, 10, { kind: 'special', pictures: { tv1: 'X' } }), 'tv4', screens)).toBeNull();
   });
 });

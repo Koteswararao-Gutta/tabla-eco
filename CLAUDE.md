@@ -22,7 +22,10 @@ Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**
 
 - **Data only through `@shared/data`** (`store`, `useCollection`, `useDoc`, `usePictureUrl`, `useNow`, `useHeartbeat`). Never touch localStorage, IndexedDB or a backend directly. Stage 1 runs on `LocalStore` (one browser; windows sync via the storage event); Firebase replaces it later behind the same `DataStore` interface, so screens must not depend on local-only behaviour.
 - **Time:** use `store.now()` / `useNow()` for anything synced, never `Date.now()`.
-- **Menu loop sync:** use `loopPosition` and `pictureFor` from `@shared/clock/loop`. Seconds and transition live on the `Slot`, shared by all menu TVs.
+- **Menu loop sync:** use `loopPosition(slots, now, loop)` and `pictureFor` from `@shared/clock/loop`, with `loop = useSingleton('loop')`. Seconds and transition live on the `Slot`, shared by all menu TVs. After any change to slots, the manager calls `restartLoop(slotId)` so every TV shows the change at once.
+- **Picture fallback:** in a `special` or `catering` slot, a TV with no picture shows its partner's (one picture fills the pair). In a `menu` slot it never borrows; a menu picture added to TV 1 stays on TV 1.
+- **Single documents** (music, settings, staffConfig, loop): `useSingleton`, `saveSingleton`, `updateSingleton`. Never pass `undefined` field values; use `null` to clear.
+- **Pictures:** `pictureUrl` already serves from a local cache that works offline. Don't build another cache; the menu TV preloads the `next` slot's picture.
 - **Look:** use `@shared/ui` components and `.t-*` classes / CSS variables from `theme.css`. Area-specific CSS goes in a `.css` file inside your folder, using the variables. No new colours, no UI libraries.
 - **Screens must survive:** reloads, the internet dropping, missing pictures, empty data. TVs never show a browser error or a blank white page.
 - **Keep it simple.** No features beyond the plan. Big touch targets (48 px+). Plain words in the UI.
@@ -37,6 +40,8 @@ npm run typecheck
 npm test             # unit tests (vitest)
 npm run e2e          # Chrome tests (Playwright). In the cloud container: PW_CHROMIUM=/opt/pw-browsers/chromium npm run e2e
 ```
+
+Parallel agents each use their own test port: `PW_PORT=4181` agent 1, `4182` agent 2, `4183` agent 3, `4184` agent 4, `4185` agent 5, `4190` integration.
 
 Sample data seeds on first load (PIN 1234). Reset by clearing site data, or `resetDemoData()` from `@shared/seed/seed`.
 
