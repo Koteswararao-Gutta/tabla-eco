@@ -95,6 +95,11 @@ export interface ScannedOrder {
   unsure: string[];
 }
 
+/** Phone alerts on this device (1-hour catering reminders):
+ *  on, off (can be turned on), blocked (the person said no; only phone settings can undo it),
+ *  needs-home-screen (iPhone: only works from the Home Screen app), unsupported (this browser can't). */
+export type AlertState = 'on' | 'off' | 'blocked' | 'needs-home-screen' | 'unsupported';
+
 export interface AppSettings {
   kitchenPin: string; // 4 digits
   restaurantName: string;

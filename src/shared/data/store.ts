@@ -5,7 +5,7 @@
 //  - FirebaseStore (firebase.ts): the same calls, shared across real devices.
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
-import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 export type Unsubscribe = () => void;
 export type WithId<T> = T & { id: string };
@@ -45,6 +45,11 @@ export interface DataStore {
    *  Saves nothing. Throws with a plain message when it can't (offline, unreadable, server down).
    *  LocalStore returns a fixed sample so previews and tests work without the server. */
   readOrderPhoto(photo: Blob): Promise<ScannedOrder>;
+
+  /** Whether this device gets the 1-hour catering alerts. When on, also refreshes the device's alert address. */
+  alertState(): Promise<AlertState>;
+  /** Asks the person for permission (must be called from a tap) and registers this device for alerts. */
+  turnOnAlerts(): Promise<AlertState>;
 }
 
 /** Removes undefined top-level values (Firestore rejects them). */

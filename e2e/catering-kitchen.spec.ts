@@ -194,3 +194,14 @@ test('scan paper order fills the new order form for checking, then saves', async
   expect(saved).toMatchObject({ phone: '555 404 1213', people: 40, notes: 'Less spicy', status: 'open' });
   await context.close();
 });
+
+test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  const card = manager.getByTestId('alerts');
+  await expect(card).toContainText('Get a phone alert 1 hour before each catering order');
+  await shot(manager, 'manager-alerts-off');
+  await card.getByRole('button', { name: 'Turn on alerts' }).click();
+  await expect(card).toContainText('This phone gets an alert 1 hour before each order.');
+  await context.close();
+});

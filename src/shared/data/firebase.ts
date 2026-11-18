@@ -27,7 +27,8 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
+import { vapidKey } from './firebaseConfig';
+import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
@@ -190,6 +191,34 @@ export class FirebaseStore implements DataStore {
     await this.deleteDoc('pictures', id);
   }
 
+  // ---------- phone alerts ----------
+  async alertState(): Promise<AlertState> {
+    if (!vapidKey) return 'unsupported';
+    if (!pushSupported()) return isIphoneBrowser() ? 'needs-home-screen' : 'unsupported';
+    if (Notification.permission === 'denied') return 'blocked';
+    if (Notification.permission !== 'granted' || !flag()) return 'off';
+    this.registerPush().catch((e) => console.warn('alerts refresh', e)); // the address can change; keep it current
+    return 'on';
+  }
+
+  async turnOnAlerts(): Promise<AlertState> {
+    if (!vapidKey || !pushSupported()) return this.alertState();
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return permission === 'denied' ? 'blocked' : 'off';
+    await this.registerPush();
+    flag(true);
+    return 'on';
+  }
+
+  private async registerPush(): Promise<void> {
+    const { getMessaging, getToken, isSupported } = await import('firebase/messaging');
+    if (!(await isSupported())) throw new Error('Push is not supported here');
+    const reg = await navigator.serviceWorker.register('./alerts-sw.js');
+    const token = await getToken(getMessaging(this.app), { vapidKey, serviceWorkerRegistration: reg });
+    await this.ready;
+    await fsSet(doc(this.db, 'pushTokens', deviceId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
+  }
+
   // ---------- reading paper orders ----------
   async readOrderPhoto(photo: Blob): Promise<ScannedOrder> {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please try again when online.');
@@ -215,6 +244,26 @@ export class FirebaseStore implements DataStore {
       console.warn('readOrder', e);
       throw new Error("Couldn't read the photo right now. Please try again, or type the order in.");
     }
+  }
+}
+
+/** Phone alerts: the browser's push address for this device, saved in `pushTokens/<device id>`.
+ *  The server sends the 1-hour catering reminders to every saved address. */
+function pushSupported(): boolean {
+  return typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+}
+function isIphoneBrowser(): boolean {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const homeScreen = (navigator as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
+  return ios && !homeScreen;
+}
+const ALERTS_FLAG = 'tabla-alerts';
+function flag(on?: boolean): boolean {
+  try {
+    if (on !== undefined) localStorage.setItem(ALERTS_FLAG, on ? '1' : '0');
+    return localStorage.getItem(ALERTS_FLAG) === '1';
+  } catch {
+    return false;
   }
 }
 
