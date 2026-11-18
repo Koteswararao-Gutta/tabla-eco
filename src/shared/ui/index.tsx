@@ -1,5 +1,5 @@
 // Shared building blocks. Screens compose these; they don't restyle them.
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import './theme.css';
 
@@ -18,7 +18,12 @@ export function PageHeader({ title, sub, action }: { title: string; sub?: string
 export function Tile(props: { name: string; sub?: string; online?: boolean; selected?: boolean; onClick?: () => void; testId?: string }) {
   return (
     <button className="t-tile" aria-pressed={!!props.selected} onClick={props.onClick} data-testid={props.testId}>
-      {props.online !== undefined && <i className={'t-dot' + (props.online ? ' on' : '')} aria-label={props.online ? 'online' : 'offline'} />}
+      {props.online !== undefined && (
+        <span className={'t-status' + (props.online ? ' on' : '')}>
+          <i className="t-dot" aria-hidden="true" />
+          {props.online ? 'Online' : 'Offline'}
+        </span>
+      )}
       <span className="t-tile-name">{props.name}</span>
       {props.sub && <span className="t-tile-sub">{props.sub}</span>}
     </button>
@@ -46,6 +51,8 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
   );
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap, Escape,
  *  or (phones) dragging it down from the handle or from the top of its content. */
 export function Sheet({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
@@ -55,7 +62,28 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
 
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
+    const el = sheet.current;
+    // Move focus into the sheet, keep Tab inside it, and give focus back to the opener on close.
+    const opener = document.activeElement as HTMLElement | null;
+    const focusables = () =>
+      el ? Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((f) => f.offsetParent !== null || f === document.activeElement) : [];
+    // The sheet itself takes focus (not its first field), so phones don't pop up the keyboard.
+    if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return close.current();
+      if (e.key !== 'Tab' || !el) return;
+      const list = focusables();
+      if (!list.length) return e.preventDefault(), el.focus();
+      const first = list[0], last = list[list.length - 1];
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || at === el || !el.contains(at))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !el.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener('keydown', k);
     // Keep the page behind still while the sheet is open.
     const html = document.documentElement;
@@ -64,6 +92,7 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
     return () => {
       window.removeEventListener('keydown', k);
       html.style.overflow = before;
+      if (opener && opener.isConnected && opener !== document.body) opener.focus({ preventScroll: true });
     };
   }, [open]);
 
@@ -125,9 +154,11 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
   if (!open) return null;
   return (
     <div className="t-sheet-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="t-sheet-grab" aria-hidden="true" />
-        <h2>{title}</h2>
+      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
+        <div className="t-sheet-head">
+          <div className="t-sheet-grab" aria-hidden="true" />
+          <h2>{title}</h2>
+        </div>
         {children}
       </div>
     </div>
@@ -175,6 +206,34 @@ export function Idle({ line, small }: { line: string; small?: string }) {
     <div className="t-idle">
       <span>{line}</span>
       {small && <small>{small}</small>}
+    </div>
+  );
+}
+
+/** True while the browser has no internet connection. */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const on = () => setOnline(true), off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+  return online;
+}
+
+/** A calm notice shown while the device is offline. Changes still save and sync when it is back. */
+export function OfflineBanner() {
+  if (useOnline()) return null;
+  return (
+    <div className="t-offline" role="status">
+      <p>
+        <i className="t-dot" aria-hidden="true" />
+        Offline. Changes will be saved when the internet is back.
+      </p>
     </div>
   );
 }

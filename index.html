@@ -13,6 +13,20 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Tabla" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- TVs: paint black from the very first frame (no white flash on load or reload). -->
+    <style>html.t-dark, html.t-dark body { background: #000; }</style>
+    <script>
+      (function () {
+        var meta = document.querySelector('meta[name="theme-color"]');
+        function apply() {
+          var tv = location.hash.indexOf('#/tv') === 0;
+          document.documentElement.classList.toggle('t-dark', tv);
+          if (meta) meta.setAttribute('content', tv ? '#000000' : '#ffffff');
+        }
+        apply();
+        window.addEventListener('hashchange', apply);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

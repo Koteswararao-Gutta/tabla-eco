@@ -10,3 +10,11 @@ seedIfEmpty().finally(() => {
     </StrictMode>,
   );
 });
+
+// Offline start-up: the service worker keeps a copy of the app so a reload without internet still opens it.
+// Production builds only (the dev server changes files constantly). Same file as the push reminders use.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./alerts-sw.js').catch(() => {});
+  });
+}
