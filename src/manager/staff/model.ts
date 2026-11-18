@@ -94,6 +94,24 @@ export function defaults(): PlannerDB {
   return { config: { people, settings: { prepStart: 600, secondAt: 645, minStaff: 2, days }, special: {} }, weeks: { [SEED_WEEK]: w } };
 }
 
+/* ---------- stored form ---------- */
+// The stored week writes each shift as {s, e, pos?} instead of [s, e, pos]: the shared store
+// (Firestore later) can't hold an array directly inside an array. normalizeDB reads both forms.
+export interface StoredShift { s: number; e: number; pos?: Pos }
+export interface StoredWeek { locked: boolean; shifts: Record<string, StoredShift[]>[] }
+export function encodeWeek(w: Week): StoredWeek {
+  return {
+    locked: !!w.locked,
+    shifts: w.shifts.map((day) => {
+      const out: Record<string, StoredShift[]> = {};
+      Object.entries(day).forEach(([pid, l]) => {
+        out[pid] = l.map(([s, e, pos]) => (pos ? { s, e, pos } : { s, e }));
+      });
+      return out;
+    }),
+  };
+}
+
 /* ---------- data checks ---------- */
 // Cleans up data from storage, another window or a paste. Returns null if it isn't planner data at all.
 // The input is untrusted, so it is read as `any` here and every field is checked before use.
@@ -150,6 +168,7 @@ export function normalizeDB(input: unknown): PlannerDB | null {
         Object.entries(day).forEach(([pid, l]) => {
           if (!ids.has(pid) || !Array.isArray(l)) return;
           const clean: Shift[] = (l as Loose[])
+            .map((x) => (x && typeof x === 'object' && !Array.isArray(x) ? [x.s, x.e, x.pos] : x))
             .filter((x) => Array.isArray(x) && num(x[0]) && num(x[1]) && x[1] > x[0])
             .map((x): Shift => (x[2] === 'prep' || x[2] === 'runner' ? [x[0], x[1], x[2]] : [x[0], x[1]]))
             .sort((a, b) => a[0] - b[0])

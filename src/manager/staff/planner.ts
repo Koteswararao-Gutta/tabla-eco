@@ -30,6 +30,8 @@ interface Gap { s: number; e: number; n: number; c: number }
 
 // Per-session view preferences (zoom, tip dismissed). Kept in memory: screens don't use browser storage directly.
 const prefs: Record<string, string> = {};
+// Unsaved Settings changes are kept here when the tab is left (e.g. switching to Screens), and come back on return.
+let keptSettings: Settings | null = null;
 
 const SHELL = `<div class="wrap">
   <div class="top">
@@ -1614,6 +1616,11 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }
 
   /* ---------- start ---------- */
+  if (keptSettings) {
+    draft = keptSettings;
+    keptSettings = null;
+    view = 'settings';
+  }
   const unConfig = io.watchConfig((c) => {
     rawConfig = c;
     onData();
@@ -1624,6 +1631,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   });
 
   return () => {
+    keptSettings = settingsDirty() ? draft : null;
     disposed = true;
     unConfig();
     unWeeks();

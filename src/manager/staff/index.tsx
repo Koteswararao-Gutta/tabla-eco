@@ -1,10 +1,12 @@
 // Manager > Staff: the Shift planner (port of reference/shift-planner.html).
 // The planner renders into the div below; its data goes through @shared/data:
-// config -> singleton 'staffConfig', each week -> collection 'staffWeeks' (doc id = Monday, YYYY-MM-DD).
+// config -> singleton 'staffConfig', each week -> collection 'staffWeeks' (doc id = Monday, YYYY-MM-DD),
+// with each shift stored as {s, e, pos?} (no arrays directly inside arrays; see encodeWeek).
 import { useEffect, useRef } from 'react';
 import { saveSingleton, store } from '@shared/data';
 import type { StaffConfig, StaffWeek } from '@shared/data';
 import { mountPlanner, type PlannerIO } from './planner';
+import { encodeWeek } from './model';
 import './staff.css';
 
 const io: PlannerIO = {
@@ -17,7 +19,7 @@ const io: PlannerIO = {
       cb(weeks);
     }),
   saveConfig: (config) => saveSingleton('staffConfig', config as unknown as StaffConfig),
-  saveWeek: (id, week) => (week ? store.setDoc('staffWeeks', id, week as unknown as StaffWeek) : store.deleteDoc('staffWeeks', id)),
+  saveWeek: (id, week) => (week ? store.setDoc('staffWeeks', id, encodeWeek(week) as unknown as StaffWeek) : store.deleteDoc('staffWeeks', id)),
 };
 
 export default function Staff() {
