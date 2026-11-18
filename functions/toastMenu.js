@@ -139,6 +139,17 @@ export async function readWithChrome(url = TOAST_PAGE) {
   }
 }
 
+/** Rejects with `message` if `promise` takes longer than `ms`. */
+export function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** Tries each way in turn. Returns { menu, source } or throws with every way's reason. */
 export async function readToastMenu(ways) {
   const reasons = [];
