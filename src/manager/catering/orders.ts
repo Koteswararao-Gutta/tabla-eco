@@ -58,6 +58,20 @@ export function groupByDay<T extends Order>(orders: T[], now: number): { label: 
   return groups.map(({ label, orders }) => ({ label, orders }));
 }
 
+/** For the kitchen: today and the days ahead first (soonest day first), then past days (most recent
+ *  first). Inside each day, orders by time, earliest first. */
+export function groupByDayUpcomingFirst<T extends Order>(orders: T[], now: number): { label: string; orders: T[] }[] {
+  const today = dayStart(now);
+  const days = new Map<number, T[]>();
+  for (const o of [...orders].sort(byDueAsc)) {
+    const day = dayStart(o.dueAt);
+    days.set(day, [...(days.get(day) ?? []), o]);
+  }
+  const keys = [...days.keys()];
+  const order = [...keys.filter((d) => d >= today).sort((a, b) => a - b), ...keys.filter((d) => d < today).sort((a, b) => b - a)];
+  return order.map((d) => ({ label: dayLabel(d, now), orders: days.get(d)! }));
+}
+
 /** "Today", "Tomorrow", "Yesterday" or "Fri, Nov 20". */
 export function dayLabel(ms: number, now: number): string {
   const diff = Math.round((dayStart(ms) - dayStart(now)) / (24 * 60 * MIN));
