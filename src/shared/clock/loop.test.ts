@@ -1,0 +1,73 @@
+import { describe, expect, it } from 'vitest';
+import type { Screen, Slot } from '../data/types';
+import { activeSlots, loopPosition, pictureFor } from './loop';
+
+const slot = (id: string, order: number, seconds: number, extra: Partial<Slot> = {}): Slot => ({
+  id, order, seconds, transition: 'fade', pictures: {}, ...extra,
+});
+
+describe('loopPosition', () => {
+  const slots = [slot('b', 2, 5), slot('a', 1, 10), slot('c', 3, 15)];
+
+  it('plays slots in order and wraps around', () => {
+    const cycle = 30_000;
+    const base = cycle * 1000; // a time that is an exact cycle start
+    expect(loopPosition(slots, base)!.slot.id).toBe('a');
+    expect(loopPosition(slots, base + 9_999)!.slot.id).toBe('a');
+    expect(loopPosition(slots, base + 10_000)!.slot.id).toBe('b');
+    expect(loopPosition(slots, base + 15_000)!.slot.id).toBe('c');
+    expect(loopPosition(slots, base + 29_999)!.slot.id).toBe('c');
+    expect(loopPosition(slots, base + 30_000)!.slot.id).toBe('a');
+  });
+
+  it('gives every device the same answer for the same time, whatever order slots arrive in', () => {
+    const t = 1_763_490_000_123;
+    const reversed = [...slots].reverse();
+    expect(loopPosition(slots, t)).toEqual(loopPosition(reversed, t));
+  });
+
+  it('reports exact start and end times of the current slot', () => {
+    const base = 30_000 * 500;
+    const p = loopPosition(slots, base + 12_000)!;
+    expect(p.startedAt).toBe(base + 10_000);
+    expect(p.endsAt).toBe(base + 15_000);
+    expect(p.next.id).toBe('c');
+  });
+
+  it('returns null when nothing can play', () => {
+    expect(loopPosition([], 1000)).toBeNull();
+    expect(loopPosition([slot('x', 1, 0)], 1000)).toBeNull();
+  });
+});
+
+describe('activeSlots', () => {
+  it('drops slots past their end time', () => {
+    const list = activeSlots([slot('a', 1, 10), slot('s', 2, 8, { endsAt: 5000 })], 6000);
+    expect(list.map((s) => s.id)).toEqual(['a']);
+  });
+});
+
+describe('pictureFor', () => {
+  const screens: Screen[] = [
+    { id: 'tv1', name: 'TV 1', kind: 'menu', side: 'left' },
+    { id: 'tv2', name: 'TV 2', kind: 'menu', side: 'right' },
+    { id: 'tv3', name: 'TV 3', kind: 'menu', side: 'left', mirrorOf: 'tv1' },
+    { id: 'tv4', name: 'TV 4', kind: 'menu', side: 'right', mirrorOf: null },
+  ];
+
+  it('uses the screen\'s own picture', () => {
+    expect(pictureFor(slot('a', 1, 10, { pictures: { tv1: 'L', tv2: 'R' } }), 'tv2', screens)).toBe('R');
+  });
+
+  it('follows mirroring', () => {
+    expect(pictureFor(slot('a', 1, 10, { pictures: { tv1: 'L', tv2: 'R' } }), 'tv3', screens)).toBe('L');
+  });
+
+  it('falls back to the partner picture, so one special fills a pair', () => {
+    expect(pictureFor(slot('s', 1, 10, { pictures: { tv1: 'SPECIAL' } }), 'tv2', screens)).toBe('SPECIAL');
+  });
+
+  it('returns null when the pair has nothing', () => {
+    expect(pictureFor(slot('s', 1, 10, { pictures: { tv1: 'X' } }), 'tv4', screens)).toBeNull();
+  });
+});
