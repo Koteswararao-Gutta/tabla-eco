@@ -150,3 +150,23 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
   await expect(kitchen.getByRole('article', { name: 'Order for Desert Tech office' })).toHaveCount(0);
   await context.close();
 });
+
+test('kitchen shows a 1-hour heads-up with a Got it button', async ({ page }) => {
+  await page.goto('/#/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  // An order due in 30 minutes, written straight into the local store (test-only).
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed'; // only our order is open
+    const now = Date.now();
+    t.soon = { id: 'soon', customerName: 'Anita Rao', phone: '555', dueAt: now + 30 * 60_000, type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await typePin(page, '1234');
+  const banner = page.getByTestId('kitchen-reminder');
+  await expect(banner).toContainText('Anita Rao pickup at');
+  await expect(banner).toContainText('in 30 min');
+  await banner.getByRole('button', { name: 'Got it' }).click();
+  await expect(banner).toHaveCount(0);
+});
