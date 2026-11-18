@@ -1,0 +1,62 @@
+/* Screens tab. Uses theme.css variables only. */
+
+.sc-tiles .t-tile { min-height: 96px; justify-content: flex-end; padding-right: 32px; }
+.sc-tiles .t-tile .t-tile-name { font-size: 1.1rem; }
+
+.sc-back { display: inline-flex; align-items: center; min-height: var(--tap); margin: -8px 0 0 -4px; padding: 0 4px; color: var(--muted); text-decoration: none; font-weight: 600; }
+.sc-h2 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.sc-note { margin: 0; color: var(--muted); font-size: 0.92rem; }
+.sc-note a { color: var(--accent); font-weight: 600; }
+.sc-hint { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.sc-error { margin: 0; color: var(--bad); font-size: 0.92rem; font-weight: 600; }
+.sc-ok { margin: 0; color: var(--good); font-size: 0.92rem; font-weight: 600; }
+.sc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sc-menu { display: flex; flex-direction: column; gap: 10px; }
+.sc-disabled { opacity: 0.5; pointer-events: none; }
+.sc-pin { font-size: 1.4rem; letter-spacing: 0.4em; max-width: 180px; }
+
+/* picture list */
+.sc-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; }
+.sc-item { display: flex; flex-direction: column; }
+.sc-item.sc-ended .sc-pic { opacity: 0.45; }
+.sc-pic { position: relative; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); overflow: hidden; cursor: pointer; color: var(--muted); font-weight: 600; }
+div.sc-pic { cursor: default; }
+.sc-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sc-pic-wait { position: absolute; inset: 0; background: var(--surface-2); }
+.sc-pic-empty { background: var(--surface); border: 1.5px dashed var(--line); }
+.sc-pic-static { cursor: default; }
+.sc-pic .sc-kind { position: absolute; top: 10px; left: 10px; }
+.sc-pic .sc-shared { position: absolute; bottom: 10px; left: 10px; background: var(--bg); color: var(--ink); box-shadow: var(--shadow); }
+.sc-meta { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 0 2px; border: 0; background: transparent; color: var(--muted); font-size: 0.9rem; cursor: pointer; }
+p.sc-meta { cursor: default; }
+.sc-insert { position: relative; display: flex; justify-content: center; padding: 0 0 12px; }
+.sc-insert::before { content: ''; position: absolute; left: 0; right: 0; top: 20px; border-top: 1px solid var(--line); }
+.sc-insert .t-plus { position: relative; width: 44px; height: 44px; }
+.sc-big-plus { width: 100%; margin-top: 16px; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 1.5px dashed var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font-weight: 600; cursor: pointer; }
+.sc-big-plus .t-plus, .sc-pic-empty .t-plus { width: 52px; height: 52px; font-size: 28px; }
+
+/* mirror switch */
+.sc-switch-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 12px 16px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); text-align: left; cursor: pointer; }
+.sc-switch-text { display: flex; flex-direction: column; }
+.sc-switch-text span { font-weight: 650; }
+.sc-switch-text small { color: var(--muted); font-size: 0.88rem; }
+.sc-switch { flex: none; position: relative; width: 52px; height: 32px; border-radius: 999px; background: var(--line); transition: background 0.15s; }
+.sc-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--bg); box-shadow: var(--shadow); transition: transform 0.15s; }
+.sc-switch-row[aria-checked='true'] .sc-switch { background: var(--accent); }
+.sc-switch-row[aria-checked='true'] .sc-switch::after { transform: translateX(20px); }
+
+/* clip pictures (TV 5) */
+.sc-clip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sc-clip { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius-sm); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+.sc-clip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sc-clip-x { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--bg); box-shadow: var(--shadow); font-size: 18px; line-height: 1; cursor: pointer; }
+.sc-clip-x::before { content: ''; position: absolute; inset: -8px; }
+.sc-clip-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1.5px dashed var(--line); background: var(--surface); color: var(--muted); font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.sc-clip-add .t-plus { width: 30px; height: 30px; font-size: 18px; }
+
+/* the sheet's segmented controls fill the row on phones */
+.sc-page .t-seg { display: flex; }
+.sc-page .t-seg button { flex: 1; padding: 8px 10px; }
+.sc-page a.t-btn { text-decoration: none; color: var(--ink); }
+.sc-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
+.sc-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
