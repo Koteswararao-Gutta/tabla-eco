@@ -2,7 +2,7 @@
 // Two implementations share this interface:
 //  - LocalStore (local.ts): everything in this browser. Separate Chrome windows/tabs on the
 //    same computer stay in sync, which is what Stage 1 previews use.
-//  - FirebaseStore (later): the same calls, shared across real devices.
+//  - FirebaseStore (firebase.ts): the same calls, shared across real devices.
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
 import type { CollectionName, Collections, Picture } from './types';

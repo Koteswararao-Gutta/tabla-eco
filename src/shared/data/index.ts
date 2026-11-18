@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { FirebaseStore } from './firebase';
+import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
@@ -7,8 +9,10 @@ export * from './types';
 export type { DataStore, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 
-/** The app-wide data store. Stage 1 runs on LocalStore; Firebase replaces it later behind the same interface. */
-export const store: DataStore = new LocalStore();
+/** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
+ *  which keeps everything in one browser (tests and the offline Chrome preview). */
+export const store: DataStore =
+  import.meta.env.VITE_STORE === 'local' ? new LocalStore() : new FirebaseStore(firebaseConfig);
 
 /** Live collection. `null` until the first value arrives. */
 export function useCollection<C extends CollectionName>(col: C): WithId<Collections[C]>[] | null {

@@ -12,5 +12,5 @@ export default defineConfig({
     // Set PW_CHROMIUM to use an already-installed Chromium instead of Playwright's download.
     launchOptions: process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {},
   },
-  webServer: { command: `npx vite build && npx vite preview --port ${port} --strictPort`, port, reuseExistingServer: false, timeout: 120_000 },
+  webServer: { command: `VITE_STORE=local npx vite build && npx vite preview --port ${port} --strictPort`, port, reuseExistingServer: false, timeout: 120_000 },
 });

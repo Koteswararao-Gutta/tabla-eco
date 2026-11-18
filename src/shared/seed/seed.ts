@@ -43,6 +43,7 @@ export async function seedIfEmpty(): Promise<void> {
 }
 
 export async function resetDemoData(): Promise<void> {
+  if (store.mode !== 'local') throw new Error('resetDemoData only works in the local preview');
   for (const k of Object.keys(localStorage)) if (k.startsWith('tabla:')) localStorage.removeItem(k);
   await store.setDoc('singletons', 'seeded', { at: store.now() });
   await seed();
