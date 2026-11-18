@@ -131,7 +131,9 @@ function Board() {
 
   // 1-hour heads-up: a banner per order, with a chime when a new one appears.
   const [acked, setAcked] = useState<Set<string>>(() => new Set());
-  const reminders = dueReminders(orders ?? [], now, acked);
+  // Rings only while the kitchen is staffed (staff schedule hours). Waits for those hours to load.
+  const staff = useSingleton('staffConfig');
+  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, acked, staff);
   const remindIds = reminders.map(ackKey).join(',');
   const chimed = useRef(new Set<string>());
   useEffect(() => {

@@ -16,6 +16,14 @@ service cloud.firestore {
     match /staffWeeks/{id}  { allow read: if signedIn(); allow write: if signedIn() && small(); }
     match /heartbeats/{id}  { allow read: if signedIn(); allow write: if signedIn() && small(); }
     match /clocks/{id}      { allow read: if signedIn(); allow write: if signedIn() && small(); }
+    // Phone alert addresses: devices can save their own, but nobody can read the list (only the server does).
+    match /pushTokens/{id} {
+      allow read: if false;
+      allow write: if signedIn()
+        && request.resource.data.keys().hasOnly(['token', 'device', 'updatedAt'])
+        && request.resource.data.token is string
+        && request.resource.data.token.size() <= 4096;
+    }
     match /singletons/{id} {
       allow read: if signedIn();
       allow write: if signedIn() && id in ['seeded', 'loop', 'music', 'settings', 'staffConfig'];

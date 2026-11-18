@@ -10,3 +10,7 @@ export const firebaseConfig: FirebaseOptions = {
   messagingSenderId: '521266629394',
   appId: '1:521266629394:web:87761a8a1b62f79cf5c1cb',
 };
+
+/** Public "Web Push certificate" key (Firebase console > Project settings > Cloud Messaging). Not a secret.
+ *  Empty means phone alerts are not set up yet, and the app doesn't offer them. */
+export const vapidKey = '';
