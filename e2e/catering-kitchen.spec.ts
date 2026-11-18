@@ -121,3 +121,32 @@ test('kitchen PIN stays in memory only: a reload locks it again', async ({ brows
   await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
   await context.close();
 });
+
+test('saving an edit never undoes a completion made in the kitchen meanwhile', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  const kitchen = await openScreen(context, '/kitchen');
+  await kitchen.setViewportSize({ width: 1280, height: 800 });
+  await typePin(kitchen, '1234');
+
+  // Manager opens the edit sheet...
+  await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
+
+  // ...the kitchen completes the order while it is open...
+  await kitchen.getByRole('article', { name: 'Order for Desert Tech office' }).getByRole('button', { name: 'Mark completed' }).click();
+  await expect(edit.getByRole('button', { name: 'Reopen' })).toBeVisible(); // the sheet shows the live status
+
+  // ...and saving the edit keeps it completed.
+  await edit.getByLabel('Notes (optional)').fill('Call when outside, gate code 42');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+  const o = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.customerName === 'Desert Tech office')!;
+  expect(o.status).toBe('completed');
+  expect(o.completedAt).toEqual(expect.any(Number));
+  expect(o.notes).toBe('Call when outside, gate code 42');
+  await expect(kitchen.getByRole('article', { name: 'Order for Desert Tech office' })).toHaveCount(0);
+  await context.close();
+});

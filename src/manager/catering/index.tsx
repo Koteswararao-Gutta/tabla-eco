@@ -13,12 +13,17 @@ type Order = WithId<CateringOrder>;
 export default function Catering() {
   const orders = useCollection('orders');
   const now = useNow(30_000);
-  const [editing, setEditing] = useState<Order | 'new' | null>(null);
+  const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
   const groups = orders ? groupOpen(orders, now) : null;
   const past = orders ? history(orders) : [];
+  // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
+  // completing it) shows in the sheet at once. If it is deleted elsewhere, the sheet closes.
+  const editOrder = editing && editing !== 'new' ? orders?.find((o) => o.id === editing) ?? null : null;
+  const sheetOpen = editing === 'new' || !!editOrder;
+  const openOrder = (o: Order) => setEditing(o.id);
   const openCount = groups ? groups.overdue.length + groups.today.length + groups.tomorrow.length + groups.later.length : 0;
 
   return (
@@ -35,10 +40,10 @@ export default function Catering() {
       {!groups ? null : (
         <div className="t-stack">
           {openCount === 0 && <div className="t-empty">No open orders. Tap “+ New order” to add one.</div>}
-          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} showDate onOpen={setEditing} late />
-          <Group title="Today" orders={groups.today} now={now} onOpen={setEditing} />
-          <Group title="Tomorrow" orders={groups.tomorrow} now={now} onOpen={setEditing} />
-          <Group title="Later" orders={groups.later} now={now} showDate onOpen={setEditing} />
+          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} showDate onOpen={openOrder} late />
+          <Group title="Today" orders={groups.today} now={now} onOpen={openOrder} />
+          <Group title="Tomorrow" orders={groups.tomorrow} now={now} onOpen={openOrder} />
+          <Group title="Later" orders={groups.later} now={now} showDate onOpen={openOrder} />
 
           <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
             {showHistory ? 'Hide history' : `History (${past.length})`}
@@ -47,15 +52,15 @@ export default function Catering() {
             (past.length === 0 ? (
               <div className="t-empty">No completed orders yet.</div>
             ) : (
-              <Group title="History" orders={past} now={now} showDate onOpen={setEditing} />
+              <Group title="History" orders={past} now={now} showDate onOpen={openOrder} />
             ))}
         </div>
       )}
 
-      {editing && (
+      {sheetOpen && (
         <OrderSheet
-          key={editing === 'new' ? 'new' : editing.id}
-          order={editing === 'new' ? null : editing}
+          key={editing!}
+          order={editOrder}
           onClose={() => setEditing(null)}
           onDelete={(o) => {
             setEditing(null);
@@ -146,10 +151,9 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
     const now = store.now();
     const fields = orderFields(f);
     if (order) {
-      // Full replace, so a field that was cleared (e.g. address after switching to pickup) really goes away.
-      const next: Omit<CateringOrder, 'id'> = { ...fields, status: order.status, createdAt: order.createdAt, updatedAt: now };
-      if (order.status === 'completed') next.completedAt = order.completedAt ?? null;
-      await store.setDoc('orders', order.id, next as CateringOrder);
+      // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
+      // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
+      await store.updateDoc('orders', order.id, { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: now });
     } else {
       await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
     }
