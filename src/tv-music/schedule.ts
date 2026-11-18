@@ -51,6 +51,15 @@ export function planFrom(m: Partial<MusicSettings> | null | undefined): MusicPla
   };
 }
 
+/** Shortest time one clip picture stays up, so each cross-fade (about 1 s) can finish. */
+export const CLIP_PICTURE_MIN_MS = 2500;
+
+/** How long each of `count` clip pictures stays up: the clip length shared out, never too short. */
+export function clipEachMs(count: number, clipMs: number): number {
+  if (count <= 1) return clipMs;
+  return Math.max(CLIP_PICTURE_MIN_MS, Math.round(clipMs / count));
+}
+
 /** A video just ended: show the clip first, or let the playlist go on. */
 export function onVideoEnded(plan: Pick<MusicPlan, 'clipMode'>): 'clip' | 'continue' {
   return plan.clipMode === 'afterEachSong' ? 'clip' : 'continue';

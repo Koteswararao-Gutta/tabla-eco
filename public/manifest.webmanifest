@@ -1,7 +1,7 @@
 {
   "name": "Tabla",
   "short_name": "Tabla",
-  "start_url": "./#/manager/screens",
+  "start_url": "./#/manager",
   "scope": "./",
   "display": "standalone",
   "background_color": "#ffffff",

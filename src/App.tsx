@@ -1,5 +1,5 @@
 // Routes. Owned by the foundation. Each area's screen lives in its own folder.
-import { HashRouter, Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { PageHeader } from '@shared/ui';
 import type { ScreenId } from '@shared/data';
 import MenuTv from './tv-menu';
@@ -33,7 +33,6 @@ function Home() {
             {label}
           </a>
         ))}
-        <Link className="t-btn ghost" to="/manager">Open the manager app here</Link>
       </div>
     </main>
   );
@@ -41,7 +40,7 @@ function Home() {
 
 export function App() {
   return (
-    <HashRouter>
+    <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/tv/:n" element={<TvRoute />} />

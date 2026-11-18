@@ -29,7 +29,7 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   const page = await openScreen(context, '/manager/staff');
   const errors = watchErrors(page);
   const planner = page.getByTestId('staff-planner');
-  await expect(planner.getByRole('heading', { name: 'Shift planner' })).toBeVisible();
+  await expect(planner.getByRole('heading', { level: 1, name: 'Staff', exact: true })).toBeVisible();
   await expect(page.locator('#savepill')).toHaveText('Saved ✓');
 
   // Seeded from the planner's defaults.
@@ -48,10 +48,10 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   // A second window on the Staff page, then add a person in the first: it shows up live.
   const page2 = await openScreen(context, '/manager/staff');
   const errors2 = watchErrors(page2);
-  await page2.locator('.views [data-v="staff"]').click();
+  await page2.locator('.views [data-v="people"]').click();
   await expect(page2.locator('input[data-id]')).toHaveCount(7);
 
-  await page.locator('.views [data-v="staff"]').click();
+  await page.locator('.views [data-v="people"]').click();
   await page.getByLabel("New person's name").fill('Meena');
   await page.getByRole('button', { name: 'Add person' }).click();
   await expect(page.locator('input[data-id]')).toHaveCount(8);
@@ -82,26 +82,91 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   // Settings page.
   await page.locator('.views [data-v="settings"]').click();
   await expect(page.getByRole('heading', { name: 'Opening hours' })).toBeVisible();
+  // No save bar until something changes.
+  await expect(page.locator('#savebar')).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/staff-settings.png` });
   await page.locator('#minStaff').selectOption('3');
-  await aboveTabBar(page, '.savebar');
+  await expect(page.locator('#savebar')).toBeVisible();
+  await expect(page.locator('#savebar')).toContainText('Unsaved changes');
+  // The header pill never says "Saved" over unsaved settings.
+  await expect(page.locator('#savepill')).toHaveClass(/off/);
+  await aboveTabBar(page, '#savebar');
+  const sb = await page.locator('#savebar').boundingBox();
+  expect(sb!.height).toBeLessThan(90);
+  // Changing it back makes the bar go away again.
+  await page.locator('#minStaff').selectOption('2');
+  await expect(page.locator('#savebar')).toBeHidden();
+  await page.locator('#minStaff').selectOption('3');
   // Unsaved settings survive a trip to another manager tab.
   await page.getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByTestId('staff-planner')).toHaveCount(0);
   await page.getByRole('link', { name: 'Staff' }).click();
-  await expect(page.locator('.savebar.dirty')).toBeVisible();
+  await expect(page.locator('#savebar')).toBeVisible();
   await expect(page.locator('#minStaff')).toHaveValue('3');
-  await page.getByRole('button', { name: 'Save settings' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(async () => ((await staffConfig(page)) as unknown as { settings: { minStaff: number } }).settings.minStaff).toBe(3);
+  await expect(page.locator('#savebar')).toBeHidden();
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  await expect(page.locator('#savepill')).not.toHaveClass(/off/);
 
   // Switch to Screens and back: no errors, planner comes back.
   await page.getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByTestId('staff-planner')).toHaveCount(0);
   await page.getByRole('link', { name: 'Staff' }).click();
-  await expect(page.getByRole('heading', { name: 'Shift planner' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Staff', exact: true })).toBeVisible();
   await expect(page.locator('#savepill')).toHaveText('Saved ✓');
   await expect(page.locator('.wlabel')).toContainText('This week');
 
   expect(errors).toEqual([]);
   expect(errors2).toEqual([]);
+});
+
+test.describe('staff sheets on a touch phone', () => {
+  test.use({ hasTouch: true });
+
+  test('edit sheet: Escape and dragging the handle close it; remove asks with a red button and Keep', async ({ context }) => {
+    const page = await openScreen(context, '/manager/staff');
+    const errors = watchErrors(page);
+    await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+    for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+    await expect(page.locator('.wlabel')).toContainText('Sep 21 – 27');
+    const bar = page.locator('.bar').first();
+    const open = async () => {
+      await bar.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await bar.click();
+      await expect(page.locator('#edit')).toBeVisible();
+    };
+    // No cryptic "?" on shifts without a position.
+    expect(await page.locator('.bar span').allInnerTexts()).not.toContainEqual(expect.stringMatching(/^\?/));
+
+    await open();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#edit')).toBeHidden();
+
+    const cdp = await context.newCDPSession(page);
+    const drag = async (dy: number) => {
+      const g = (await page.locator('#editBox .t-sheet-grab').boundingBox())!;
+      const x = g.x + g.width / 2, y = g.y + g.height / 2;
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + (dy * i) / 8 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await open();
+    await drag(20); // a small pull springs back
+    await page.waitForTimeout(400);
+    await expect(page.locator('#edit')).toBeVisible();
+    await drag(400); // a long pull closes it
+    await expect(page.locator('#edit')).toBeHidden();
+
+    await open();
+    await page.getByRole('button', { name: 'Remove shift' }).click();
+    const ask = page.locator('#ask');
+    await expect(ask).toBeVisible();
+    await expect(ask.getByRole('heading', { name: 'Remove this shift?' })).toBeVisible();
+    await expect(ask.getByRole('button', { name: 'Remove shift' })).toHaveClass(/solid-danger/);
+    await ask.getByRole('button', { name: 'Keep' }).click();
+    await expect(ask).toBeHidden();
+    await expect(page.locator('#edit')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
 });

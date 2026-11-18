@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '@shared/data/types';
-import { formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, parseSeconds, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
+import { formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
 
 const s = (id: string, order: number, extra: Partial<Slot> = {}): Slot => ({ id, order, seconds: 10, transition: 'fade', pictures: { tv1: 'p' + id }, ...extra });
 
@@ -58,5 +58,26 @@ describe('words', () => {
     expect(tileLine({ id: 'tv3', mirrorOf: 'tv1' })).toBe('Mirrors TV 1');
     expect(tileLine({ id: 'tv4', mirrorOf: null })).toBe('Own pictures');
     expect(tileLine({ id: 'kitchen' })).toBe('Tablet');
+  });
+});
+
+describe('pictureInUse', () => {
+  const slots = [s('a', 1, { pictures: { tv1: 'x', tv2: 'y' } }), s('b', 2, { pictures: { tv1: 'z' } })];
+  it('finds pictures in slots and the TV 5 clip', () => {
+    expect(pictureInUse('y', slots)).toBe(true);
+    expect(pictureInUse('q', slots)).toBe(false);
+    expect(pictureInUse('q', slots, ['q'])).toBe(true);
+    expect(pictureInUse('z', [])).toBe(false);
+  });
+});
+
+describe('pictureWarnings', () => {
+  it('is quiet for a large 16:9 picture', () => expect(pictureWarnings(1920, 1080)).toEqual([]));
+  it('warns for tall, very wide and small pictures', () => {
+    expect(pictureWarnings(1080, 1920)[0]).toMatch(/tall/);
+    expect(pictureWarnings(3000, 1000)[0]).toMatch(/very wide/);
+    expect(pictureWarnings(800, 450)).toEqual(['This picture is small and may look blurry on the TV.']);
+    expect(pictureWarnings(600, 800)).toHaveLength(2);
+    expect(pictureWarnings(0, 0)).toEqual([]);
   });
 });

@@ -78,6 +78,21 @@ test('no playlist: catering clip loops with title and restaurant name', async ({
   expect(lastSeen).toBeGreaterThan(0);
 });
 
+test('clip loop never goes dark: the clip stays up and cross-fades its pictures', async ({ context }) => {
+  const admin = await setMusic(context, { playlist: '', clipSeconds: 5 });
+  const cat = await admin.evaluate(() => JSON.parse(localStorage.getItem('tabla:singletons') || '{}').music.clipPictures[0]);
+  await setMusic(context, { clipPictures: [cat, cat] }, admin); // two pictures → 2.5 s each
+  const tv = await openScreen(context, '/tv/5');
+  await expect(tv.getByTestId('clip-picture')).toHaveCount(2);
+  await tv.getByTestId('clip').evaluate((el) => el.setAttribute('data-mark', 'same'));
+  const onIndex = () => tv.getByTestId('clip-picture').evaluateAll((els) => els.findIndex((e) => e.classList.contains('on')));
+  expect(await onIndex()).toBe(0);
+  await expect.poll(onIndex, { timeout: 5000 }).toBe(1);
+  await tv.waitForTimeout(5500); // past a whole clip length (the old clip was remounted here)
+  await expect(tv.getByTestId('clip')).toHaveAttribute('data-mark', 'same');
+  await expect(tv.getByTestId('clip')).toHaveCount(1);
+});
+
 test('settings change shows live on the TV', async ({ context }) => {
   const admin = await setMusic(context, { playlist: '' });
   const tv = await openScreen(context, '/tv/5');

@@ -3,15 +3,21 @@ import type { CateringOrder, WithId } from '@shared/data';
 
 export const REMIND_MS = 60 * 60_000;
 
-/** Open orders whose heads-up time has come (see ringAt) and that this tablet hasn't acknowledged yet. */
-export function dueReminders(
-  orders: readonly WithId<CateringOrder>[],
-  now: number,
-  acked: ReadonlySet<string>,
-  staff?: unknown,
-): WithId<CateringOrder>[] {
+/** How long after its due time an order stays in the banner. Later than that, its card already shows it as late. */
+export const LATE_MS = 60 * 60_000;
+
+/** An order as the kitchen sees it: `kitchenAckFor` is the due time someone tapped "Got it" for.
+ *  Stored on the order, so it survives reloads and every kitchen tablet shares it. */
+export type KitchenOrder = WithId<CateringOrder> & { kitchenAckFor?: number | null };
+
+/** The store patch that acknowledges an order's heads-up. A new due time brings the reminder back. */
+export const ackPatch = (o: { dueAt: number }): Partial<KitchenOrder> => ({ kitchenAckFor: o.dueAt });
+
+/** Open orders whose heads-up time has come (see ringAt), not yet acknowledged for their current
+ *  due time, and at most an hour late. Soonest first. */
+export function dueReminders<T extends KitchenOrder>(orders: readonly T[], now: number, staff?: unknown): T[] {
   return orders
-    .filter((o) => o.status === 'open' && now >= ringAt(o.dueAt, staff) && !acked.has(o.id + ':' + o.dueAt))
+    .filter((o) => o.status === 'open' && now >= ringAt(o.dueAt, staff) && now <= o.dueAt + LATE_MS && o.kitchenAckFor !== o.dueAt)
     .sort((a, b) => a.dueAt - b.dueAt);
 }
 
@@ -69,7 +75,7 @@ export function ringAt(dueAt: number, staff?: unknown): number {
   return target;
 }
 
-/** Acknowledgement key: changing an order's time brings its reminder back. */
+/** One key per order and due time (so the chime rings again when the time changes). */
 export const ackKey = (o: { id: string; dueAt: number }) => o.id + ':' + o.dueAt;
 
 /** A short two-note chime, made in the browser (no sound file needed). */

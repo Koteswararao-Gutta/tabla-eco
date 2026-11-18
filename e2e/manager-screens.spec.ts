@@ -50,6 +50,8 @@ test('adding a picture creates a slot after that spot and restarts the loop on i
   await expect(page.getByTestId('add-hint')).toContainText('TV 2 shows the restaurant name in this spot');
   await page.getByTestId('add-file').setInputFiles({ name: 'dish.png', mimeType: 'image/png', buffer: PNG });
   await expect(sheet.locator('img')).toBeVisible();
+  // a 2x2 picture: tall-ish (square) and tiny, so both plain warnings show
+  await expect(sheet.getByTestId('picture-warning')).toHaveText([/black bars at the sides/, /small and may look blurry/]);
   await sheet.getByRole('button', { name: 'Special' }).click();
   await shot(page, 'add-sheet');
   await sheet.getByRole('button', { name: 'Add picture' }).click();
@@ -85,16 +87,71 @@ test('changing seconds and transition saves on the slot', async ({ context }) =>
 test('moving and removing pictures', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
   await page.getByRole('button', { name: 'Picture 2: options' }).click();
+  await expect(page.getByTestId('options-preview').locator('img')).toBeVisible();
   await page.getByRole('button', { name: 'Move up' }).click();
   await expect(page.getByTestId('slot').first()).toHaveAttribute('data-slot-id', 'slot-menu-2');
+  // a menu picture never offers an end date
+  await expect(page.getByTestId('ends-input')).toHaveCount(0);
   await page.getByRole('button', { name: 'Done' }).click();
+
+  const pictureIds = async () => (await readCollection<{ id: string }>(page, 'pictures')).map((p) => p.id);
+  const slotPicture = async (id: string) => (await readCollection<Slot>(page, 'slots')).find((s) => s.id === id)!.pictures.tv1;
+  const cateringPic = await slotPicture('slot-catering');
+  const specialPic = await slotPicture('slot-special');
 
   // The catering spot only has TV 1's picture: removing it removes the spot.
   await page.getByRole('button', { name: 'Picture 4: options' }).click();
   await page.getByRole('button', { name: 'Remove from TV 1' }).click();
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  const confirm = page.getByRole('dialog');
+  await expect(confirm.getByRole('heading')).toHaveText('Remove this picture from TV 1?');
+  await shot(page, 'remove-confirm');
+  await confirm.getByRole('button', { name: 'Remove picture' }).click();
   await expect(page.getByTestId('slot')).toHaveCount(3);
   expect((await readCollection<Slot>(page, 'slots')).map((s) => s.id).sort()).toEqual(['slot-menu-1', 'slot-menu-2', 'slot-special']);
+  // the TV 5 clip still uses that picture, so it is kept
+  expect(await pictureIds()).toContain(cateringPic);
+
+  // The special picture is used nowhere else: removing it deletes the stored picture too.
+  await page.getByRole('button', { name: 'Picture 3: options' }).click();
+  await page.getByRole('button', { name: 'Remove from TV 1' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove picture' }).click();
+  await expect(page.getByTestId('slot')).toHaveCount(2);
+  await expect.poll(pictureIds).not.toContain(specialPic);
+});
+
+test('picture options: preview, seconds, transition and end date in one place', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await page.getByRole('button', { name: 'Picture 3: options' }).click(); // the special
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByTestId('options-preview').locator('img')).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: 'Clear end date' })).toHaveCount(0);
+  await sheet.getByTestId('options-seconds').fill('12');
+  await sheet.getByRole('button', { name: 'Fade' }).click();
+  await sheet.getByTestId('ends-input').fill('2030-01-05T21:00');
+  await expect(sheet.getByRole('button', { name: 'Clear end date' })).toBeVisible();
+  // the date field stays inside the sheet on a narrow phone
+  const box = await sheet.getByTestId('ends-input').boundingBox();
+  const sheetBox = await sheet.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(sheetBox!.x + sheetBox!.width);
+  await shot(page, 'options-sheet');
+  await sheet.getByRole('button', { name: 'Save changes' }).click();
+  await expect(sheet).toBeHidden();
+  const s = (await readCollection<Slot & { endsAt: number | null }>(page, 'slots')).find((x) => x.id === 'slot-special')!;
+  expect([s.seconds, s.transition, s.endsAt]).toEqual([12, 'fade', new Date(2030, 0, 5, 21, 0).getTime()]);
+  expect((await singleton(page, 'loop')).firstSlotId).toBe('slot-special');
+});
+
+test('picture buttons work from the keyboard', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await page.getByRole('button', { name: 'Add a picture after picture 1' }).click();
+  const choose = page.getByRole('dialog').getByRole('button', { name: 'Choose a picture' });
+  await choose.focus();
+  await expect(choose).toBeFocused();
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('Enter');
+  await (await chooser).setFiles({ name: 'dish.png', mimeType: 'image/png', buffer: PNG });
+  await expect(page.getByRole('dialog').locator('img')).toBeVisible();
 });
 
 test('TV 3 mirroring can be turned off', async ({ context }) => {
@@ -103,8 +160,11 @@ test('TV 3 mirroring can be turned off', async ({ context }) => {
   await expect(sw).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByTestId('mirror-note')).toBeVisible();
   await expect(page.getByRole('button', { name: /Add a picture after/ })).toHaveCount(0);
+  await expect(page.getByTestId('mirror-note').getByRole('link', { name: /TV 1/ })).toHaveAttribute('href', '#/manager/screens/tv1');
+  const before = await sw.boundingBox();
   await sw.click();
   await expect(sw).toHaveAttribute('aria-checked', 'false');
+  expect((await sw.boundingBox())!.y).toBe(before!.y); // the switch never moves under the finger
   await expect(page.getByTestId('mirror-note')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Add a picture for TV 3' }).first()).toBeVisible();
   const tv3 = (await readCollection<{ id: string; mirrorOf: string | null }>(page, 'screens')).find((s) => s.id === 'tv3')!;
@@ -113,20 +173,30 @@ test('TV 3 mirroring can be turned off', async ({ context }) => {
   await expect(page.getByTestId('tile-tv3')).toContainText('Own pictures');
 });
 
-test('TV 5 music settings save', async ({ context }) => {
+test('TV 5 music settings save as you change them', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv5');
+  await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
   await page.getByLabel('YouTube playlist link').fill('https://www.youtube.com/playlist?list=PL123');
-  await page.getByRole('button', { name: 'Every N seconds' }).click();
-  await page.getByLabel('Every (seconds)').fill('90');
+  await page.getByRole('button', { name: 'On a timer' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+  await page.getByLabel('Show the clip every … seconds').fill('90');
   await expect(page.getByTestId('clip-picture')).toHaveCount(1);
   await page.getByTestId('clip-file').setInputFiles({ name: 'tray.png', mimeType: 'image/png', buffer: PNG });
   await expect(page.getByTestId('clip-picture')).toHaveCount(2);
   await page.getByRole('button', { name: 'Remove clip picture 1' }).click();
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible();
-  const m = await singleton(page, 'music');
-  expect([m.playlist, m.clipMode, m.everySeconds, m.clipPictures.length]).toEqual(['https://www.youtube.com/playlist?list=PL123', 'everySeconds', 90, 1]);
+  await expect(page.getByTestId('clip-picture')).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const m = await singleton(page, 'music');
+      return [m.playlist, m.clipMode, m.everySeconds, m.clipPictures.length];
+    })
+    .toEqual(['https://www.youtube.com/playlist?list=PL123', 'everySeconds', 90, 1]);
   await shot(page, 'tv5');
+
+  // Leaving right after typing still keeps the change.
+  await page.getByLabel('Title', { exact: true }).fill('Biryani trays for your party');
+  await page.getByRole('link', { name: '‹ Screens' }).click();
+  await expect.poll(async () => (await singleton(page, 'music')).clipTitle).toBe('Biryani trays for your party');
 });
 
 test('kitchen PIN must be 4 digits and saves', async ({ context }) => {
