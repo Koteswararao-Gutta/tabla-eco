@@ -228,21 +228,31 @@ export class FirebaseStore implements DataStore {
     } catch {
       throw new Error("That photo couldn't be opened. Please try another one.");
     }
+    return this.readOrder({ image: await toBase64(jpeg), mediaType: 'image/jpeg' }, 'photo');
+  }
+
+  async readOrderText(text: string): Promise<ScannedOrder> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please try again when online.');
+    if (text.trim().length < 5) throw new Error('Please paste the customer’s message first.');
+    if (text.length > 8000) throw new Error('That message is too long. Please paste only the order part.');
+    return this.readOrder({ text }, 'message');
+  }
+
+  private async readOrder(input: object, what: 'photo' | 'message'): Promise<ScannedOrder> {
     await this.ready;
     const d = new Date(this.now());
     const p = (n: number) => String(n).padStart(2, '0');
     const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
     try {
       const res = await call({
-        image: await toBase64(jpeg),
-        mediaType: 'image/jpeg',
+        ...input,
         today: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
         weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
       });
       return res.data;
     } catch (e) {
       console.warn('readOrder', e);
-      throw new Error("Couldn't read the photo right now. Please try again, or type the order in.");
+      throw new Error(`Couldn't read the ${what} right now. Please try again, or type the order in.`);
     }
   }
 }

@@ -274,6 +274,34 @@ test('scan paper order fills the new order form for checking, then saves', async
   await context.close();
 });
 
+test('paste a customer message fills the new order form, then saves', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await sheet.getByRole('button', { name: '📋 Paste message' }).click();
+  const box = sheet.getByLabel("Customer's message");
+  await expect(box).toBeFocused();
+  // Nothing pasted yet: a plain message, no AI call.
+  await sheet.getByRole('button', { name: 'Fill the form' }).click();
+  await expect(sheet.getByText('Please paste the customer’s message first.')).toBeVisible();
+  await shot(manager, 'manager-paste-open');
+  // The preview store answers with a fixed sample instead of calling the AI.
+  await box.fill('Hi! This is Meera, 555 404 1212. Need 2 trays veg biryani and 50 gulab jamun tomorrow 6:30pm pickup, 40 people, less spicy please');
+  await sheet.getByRole('button', { name: 'Fill the form' }).click();
+  await expect(sheet.getByText('Filled in from the message.')).toBeVisible();
+  await expect(box).toHaveCount(0);
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await expect(sheet.getByLabel('Order items (one per line)')).toHaveValue('Veg biryani, 2 large trays\nGulab jamun, 50');
+  await shot(manager, 'manager-paste-filled');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(sheet).toHaveCount(0);
+  const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Meera Iyer')!;
+  expect(saved).toMatchObject({ people: 40, notes: 'Less spicy', status: 'open' });
+  await context.close();
+});
+
 test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
