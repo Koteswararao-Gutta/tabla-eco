@@ -1,0 +1,25 @@
+/* Manager > Catering. Uses theme.css variables only. */
+.c-group-title { margin: 8px 0 8px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.c-group-title.late { color: var(--bad); }
+
+.c-card { width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-height: 84px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow); }
+.c-card:active { background: var(--surface); }
+.c-card.done { box-shadow: none; background: var(--surface); }
+.c-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.c-time { font-weight: 700; font-size: 1.05rem; }
+.c-date { color: var(--muted); font-weight: 600; }
+.c-name { font-size: 1.05rem; font-weight: 600; }
+.c-meta { color: var(--muted); font-size: 0.9rem; }
+
+.c-history-toggle { margin-top: 8px; color: var(--muted); }
+
+.c-form .t-seg { display: flex; }
+.c-form .t-seg button { flex: 1; min-height: 44px; }
+.c-people { max-width: 160px; }
+.c-notes.t-textarea { min-height: 72px; }
+.c-err { color: var(--bad); font-size: 0.88rem; font-weight: 500; }
+.c-err-summary { margin: 0; }
+.c-form .t-input[aria-invalid='true'], .c-form .t-textarea[aria-invalid='true'] { border-color: var(--bad); }
+
+.c-confirm { margin: 0; color: var(--muted); }
+.c-danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }

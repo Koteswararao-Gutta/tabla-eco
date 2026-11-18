@@ -1,0 +1,105 @@
+import { describe, expect, it } from 'vitest';
+import type { CateringOrder } from '@shared/data';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, fromInputs, groupByDay, groupOpen, history, isSoon, orderFields, validate } from './orders';
+
+const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
+const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
+
+let n = 0;
+const order = (dueAt: number, extra: Partial<CateringOrder> = {}): CateringOrder => ({
+  id: 'o' + ++n, customerName: 'A', phone: '555 123 4567', dueAt, type: 'pickup', items: 'Rice', status: 'open', createdAt: 0, updatedAt: 0, ...extra,
+});
+
+describe('countdown', () => {
+  it('counts down to a future order', () => {
+    expect(countdown(NOW + (2 * 60 + 15) * 60_000, NOW)).toEqual({ text: 'in 2 h 15 min', late: false });
+    expect(countdown(NOW + 45 * 60_000, NOW)).toEqual({ text: 'in 45 min', late: false });
+    expect(countdown(NOW + 3 * 3_600_000, NOW).text).toBe('in 3 h');
+  });
+  it('says late for overdue orders', () => {
+    expect(countdown(NOW - 45 * 60_000, NOW)).toEqual({ text: '45 min late', late: true });
+    expect(countdown(NOW - 3 * 86_400_000, NOW)).toEqual({ text: '3 days late', late: true });
+  });
+  it('says due now within a minute', () => {
+    expect(countdown(NOW + 20_000, NOW).text).toBe('due now');
+    expect(countdown(NOW - 20_000, NOW).late).toBe(false);
+  });
+  it('formats durations', () => {
+    expect(duration(30 * 3_600_000)).toBe('30 h');
+    expect(duration(50 * 3_600_000)).toBe('2 days');
+  });
+});
+
+describe('grouping', () => {
+  const a = order(at(18, 17, 30));
+  const b = order(at(18, 13, 0));
+  const c = order(at(19, 12, 0), { type: 'delivery' });
+  const d = order(at(22, 18, 0));
+  const old = order(at(16, 18, 0));
+  const done = order(at(17, 19, 0), { status: 'completed', completedAt: at(17, 18, 50) });
+  const all = [a, b, c, d, old, done];
+
+  it('groups open orders by day, soonest first', () => {
+    const g = groupOpen(all, NOW);
+    expect(g.today.map((o) => o.id)).toEqual([b.id, a.id]);
+    expect(g.tomorrow).toEqual([c]);
+    expect(g.later).toEqual([d]);
+    expect(g.overdue).toEqual([old]);
+  });
+  it('history is completed orders, newest first', () => {
+    const done2 = order(at(10, 9), { status: 'completed' });
+    expect(history([done2, ...all])).toEqual([done, done2]);
+  });
+  it('groups every order by day, newest first', () => {
+    const g = groupByDay(all, NOW);
+    expect(g.map((x) => x.label)).toEqual(['Sun, Nov 22', 'Tomorrow', 'Today', 'Yesterday', 'Mon, Nov 16']);
+    expect(g[2].orders).toEqual([a, b]);
+  });
+  it('labels days', () => {
+    expect(dayLabel(at(18, 23, 59), NOW)).toBe('Today');
+    expect(dayLabel(at(19, 0, 0), NOW)).toBe('Tomorrow');
+  });
+  it('flags orders due within two hours', () => {
+    expect(isSoon(order(NOW + 90 * 60_000), NOW)).toBe(true);
+    expect(isSoon(order(NOW + 150 * 60_000), NOW)).toBe(false);
+    expect(isSoon(order(NOW - 10 * 60_000), NOW)).toBe(true);
+    expect(isSoon(order(NOW + 10 * 60_000, { status: 'completed' }), NOW)).toBe(false);
+  });
+});
+
+describe('form', () => {
+  const good = { ...emptyForm(NOW), customerName: ' Priya ', phone: '555 123 4567', time: '17:30', items: 'Biryani\n\n  Raita  \n', people: '40' };
+
+  it('turns date and time inputs into local ms', () => {
+    expect(fromInputs('2026-11-18', '17:30')).toBe(at(18, 17, 30));
+    expect(fromInputs('', '17:30')).toBeNull();
+  });
+  it('accepts a good form and builds clean fields', () => {
+    expect(validate(good)).toEqual({});
+    const f = orderFields(good);
+    expect(f).toEqual({ customerName: 'Priya', phone: '555 123 4567', dueAt: at(18, 17, 30), type: 'pickup', items: 'Biryani\nRaita', people: 40 });
+    expect(Object.values(f)).not.toContain(undefined);
+    expect('address' in f).toBe(false);
+  });
+  it('requires the main fields', () => {
+    const e = validate(emptyForm(NOW));
+    expect(Object.keys(e).sort()).toEqual(['customerName', 'items', 'phone', 'time']);
+  });
+  it('requires an address for delivery only', () => {
+    expect(validate({ ...good, type: 'delivery' }).address).toMatch(/address/);
+    const f = orderFields({ ...good, type: 'delivery', address: ' 1 Main St ', notes: 'Call' });
+    expect(f.address).toBe('1 Main St');
+    expect(f.notes).toBe('Call');
+    expect(orderFields({ ...good, address: 'left over' }).address).toBeUndefined();
+  });
+  it('checks people and phone', () => {
+    expect(validate({ ...good, people: 'ten' }).people).toBeTruthy();
+    expect(validate({ ...good, people: '0' }).people).toBeTruthy();
+    expect(orderFields({ ...good, people: '' }).people).toBeNull();
+    expect(validate({ ...good, phone: '12' }).phone).toMatch(/short/);
+  });
+  it('round-trips an order through the form', () => {
+    const o = order(at(19, 12, 0), { type: 'delivery', address: 'X', people: 25, notes: 'N' });
+    expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N' });
+  });
+});
