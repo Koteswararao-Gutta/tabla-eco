@@ -1,7 +1,7 @@
 // Manager > Catering: open orders by day, history, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
-import { store, useCollection, useNow, type AlertState, type CateringOrder, type WithId } from '@shared/data';
+import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
 import {
   dayLabel, emptyForm, formFromOrder, formFromScan, groupOpen, history, itemLines, orderFields, timeLabel, validate,
   type FormErrors, type OrderForm,
@@ -229,7 +229,9 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; message?: string }>({ state: 'idle' });
+  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; from?: 'photo' | 'message'; message?: string }>({ state: 'idle' });
+  const [pasting, setPasting] = useState(false);
+  const [pasted, setPasted] = useState('');
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
@@ -239,19 +241,38 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
     if (tried) setErrors(validate(next));
   };
 
-  const scanPhoto = async (photo: File | undefined) => {
-    if (!photo) return;
-    setScan({ state: 'reading' });
+  const fillFrom = async (from: 'photo' | 'message', read: () => Promise<ScannedOrder>) => {
+    setScan({ state: 'reading', from });
     try {
-      const read = await store.readOrderPhoto(photo);
-      if (!read.isOrder) return setScan({ state: 'failed', message: "This photo doesn't look like an order. Please try another photo." });
-      const filled = formFromScan(read, f);
+      const got = await read();
+      if (!got.isOrder) {
+        const message = from === 'photo' ? "This photo doesn't look like an order. Please try another photo." : "This message doesn't look like an order. Please check what you pasted.";
+        return setScan({ state: 'failed', from, message });
+      }
+      const filled = formFromScan(got, f);
       setF(filled.form);
       setUnsure(filled.unsure);
       if (tried) setErrors(validate(filled.form));
-      setScan({ state: 'done' });
+      setScan({ state: 'done', from });
+      setPasting(false);
     } catch (e) {
-      setScan({ state: 'failed', message: e instanceof Error ? e.message : "Couldn't read the photo." });
+      setScan({ state: 'failed', from, message: e instanceof Error ? e.message : `Couldn't read the ${from}.` });
+    }
+  };
+  const scanPhoto = (photo: File | undefined) => photo && fillFrom('photo', () => store.readOrderPhoto(photo));
+  const readPasted = () => {
+    if (pasted.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
+    fillFrom('message', () => store.readOrderText(pasted));
+  };
+  const openPaste = async () => {
+    setPasting(true);
+    setScan({ state: 'idle' });
+    // Saves a step when the phone allows it: whatever was copied lands in the box. Pasting by hand still works.
+    try {
+      const copied = await navigator.clipboard?.readText?.();
+      if (copied && copied.trim()) setPasted((p) => p || copied.slice(0, 8000));
+    } catch {
+      /* not allowed here: the person pastes into the box */
     }
   };
 
@@ -285,7 +306,7 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
     errors[k] ? (
       <small className="c-err" role="alert">{errors[k]}</small>
     ) : (
-      unsure.includes(k) && <small className="c-check">Please check this: it was hard to read.</small>
+      unsure.includes(k) && <small className="c-check">Please check this: it was {scan.from === 'message' ? 'unclear' : 'hard to read'}.</small>
     );
   const count = Object.keys(errors).length;
 
@@ -302,23 +323,51 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
       >
         {!order && (
           <div className="c-scan">
-            <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
-              <input
-                type="file"
-                accept="image/*"
-                className="c-file"
+            <div className="c-scan-row">
+              <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="c-file"
+                  disabled={scan.state === 'reading'}
+                  aria-label="Scan paper order"
+                  onChange={(e) => {
+                    scanPhoto(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+                {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : '📷 Scan paper'}
+              </label>
+              <button
+                type="button"
+                className={'t-btn block c-scan-btn' + (pasting ? ' on' : '')}
                 disabled={scan.state === 'reading'}
-                aria-label="Scan paper order"
-                onChange={(e) => {
-                  scanPhoto(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-              {scan.state === 'reading' ? 'Reading the order…' : '📷 Scan paper order'}
-            </label>
+                aria-expanded={pasting}
+                onClick={() => (pasting ? setPasting(false) : openPaste())}
+              >
+                📋 Paste message
+              </button>
+            </div>
+            {pasting && (
+              <div className="c-paste">
+                <textarea
+                  className="t-input c-paste-box"
+                  aria-label="Customer's message"
+                  placeholder="Paste the customer's text or email here"
+                  rows={5}
+                  maxLength={8000}
+                  value={pasted}
+                  autoFocus
+                  onChange={(e) => setPasted(e.target.value)}
+                />
+                <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={readPasted}>
+                  {scan.state === 'reading' && scan.from === 'message' ? 'Reading the message…' : 'Fill the form'}
+                </button>
+              </div>
+            )}
             {scan.state === 'done' && (
               <p className="c-scan-note" role="status">
-                Filled in from the photo. Please check every field, then tap Save order.
+                Filled in from the {scan.from === 'message' ? 'message' : 'photo'}. Please check every field, then tap Save order.
               </p>
             )}
             {scan.state === 'failed' && (

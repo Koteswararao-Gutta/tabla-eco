@@ -13,6 +13,22 @@ test('checkRequest accepts a normal photo and refuses bad input', () => {
   assert.match(checkRequest({ ...ok, today: 'tomorrow' }), /date/);
 });
 
+const msg = { text: 'Hi, this is Ravi 480-555-0101. Need 2 trays chicken biryani Sat 6pm pickup', today: ok.today, weekday: ok.weekday };
+
+test('checkRequest accepts a pasted message and refuses empty or huge ones', () => {
+  assert.equal(checkRequest(msg), null);
+  assert.match(checkRequest({ ...msg, text: '  ' }), /empty/);
+  assert.match(checkRequest({ ...msg, text: 'x'.repeat(8001) }), /too long/);
+  assert.match(checkRequest({ ...msg, image: ok.image, mediaType: ok.mediaType }), /not both/);
+});
+
+test('buildRequest sends a pasted message as text, with no image', () => {
+  const r = buildRequest(msg);
+  assert.equal(r.messages[0].content.length, 1);
+  assert.match(r.messages[0].content[0].text, /Wednesday, 2026-11-18/);
+  assert.match(r.messages[0].content[0].text, /<message>\nHi, this is Ravi/);
+});
+
 test('buildRequest sends the photo, today and the form schema to the cheap model', () => {
   const r = buildRequest(ok);
   assert.equal(r.model, MODEL);

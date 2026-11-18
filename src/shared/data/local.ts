@@ -173,6 +173,16 @@ export class LocalStore implements DataStore {
   /** No server here: a fixed sample order for tomorrow, so the scan flow can be tried and tested. */
   async readOrderPhoto(photo: Blob): Promise<ScannedOrder> {
     if (!photo.size) throw new Error("That photo couldn't be opened.");
+    return this.sampleScan();
+  }
+
+  /** No server here: the same fixed sample, so the paste flow can be tried and tested. */
+  async readOrderText(text: string): Promise<ScannedOrder> {
+    if (text.trim().length < 5) throw new Error('Please paste the customer’s message first.');
+    return this.sampleScan();
+  }
+
+  private async sampleScan(): Promise<ScannedOrder> {
     await new Promise((r) => setTimeout(r, 300));
     const d = new Date(this.now());
     d.setDate(d.getDate() + 1);

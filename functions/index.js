@@ -17,7 +17,7 @@ import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome } fr
 initializeApp();
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 
-/** Manager app: "Scan paper order". Takes a photo, returns the order form's fields. Never saves anything. */
+/** Manager app: "Scan paper order" and "Paste message". Takes a photo or a pasted message, returns the order form's fields. Never saves anything. */
 export const readOrder = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB', maxInstances: 3 },
   async (req) => {
@@ -29,7 +29,7 @@ export const readOrder = onCall(
       return await readOrderPhoto(client, req.data);
     } catch (e) {
       logger.error('readOrder failed', e);
-      throw new HttpsError('unavailable', 'Could not read the photo right now.');
+      throw new HttpsError('unavailable', 'Could not read the order right now.');
     }
   },
 );

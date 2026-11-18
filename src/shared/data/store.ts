@@ -45,6 +45,8 @@ export interface DataStore {
    *  Saves nothing. Throws with a plain message when it can't (offline, unreadable, server down).
    *  LocalStore returns a fixed sample so previews and tests work without the server. */
   readOrderPhoto(photo: Blob): Promise<ScannedOrder>;
+  /** Same as readOrderPhoto, for a customer's text message or email pasted into the New order sheet. */
+  readOrderText(text: string): Promise<ScannedOrder>;
 
   /** Whether this device gets the 1-hour catering alerts. When on, also refreshes the device's alert address. */
   alertState(): Promise<AlertState>;
