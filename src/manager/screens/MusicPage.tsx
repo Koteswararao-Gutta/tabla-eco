@@ -1,9 +1,9 @@
 // TV 5: music settings and the catering clip shown between songs.
-import { useEffect, useState } from 'react';
-import { store, updateSingleton, useSingleton, type MusicSettings } from '@shared/data';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { store, updateSingleton, useCollection, useSingleton, type MusicSettings } from '@shared/data';
 import { Field, Segmented } from '@shared/ui';
 import { parseSeconds } from './logic';
-import { PictureInput, ScreenPage, StoredPicture } from './parts';
+import { deletePictureIfUnused, PictureInput, ScreenPage, StoredPicture } from './parts';
 
 const DEFAULTS: MusicSettings = {
   playlist: '', shuffle: true, clipMode: 'afterEachSong', everySeconds: 60, clipSeconds: 8,
@@ -12,96 +12,198 @@ const DEFAULTS: MusicSettings = {
 
 type Form = Omit<MusicSettings, 'everySeconds' | 'clipSeconds'> & { everySeconds: string; clipSeconds: string };
 const toForm = (m: MusicSettings): Form => ({ ...m, everySeconds: String(m.everySeconds), clipSeconds: String(m.clipSeconds) });
+type Section = 'music' | 'clip';
+/** Typing waits this long before saving (or saves when the field loses focus, or the page closes). */
+const TYPING_MS = 600;
 
 export default function MusicPage() {
   const music = useSingleton('music');
   return (
-    <ScreenPage id="tv5" sub="Music from YouTube, with a short catering clip between songs.">
+    <ScreenPage id="tv5" sub="Music from YouTube, with a short catering clip between songs. Changes save as you make them.">
       {music === undefined ? <p className="t-sub">Loading…</p> : <MusicForm initial={{ ...DEFAULTS, ...(music ?? {}) }} />}
     </ScreenPage>
   );
 }
 
+/** Saves each change right away (typing: after a short pause), like TV 1 to TV 4.
+ *  Only the changed fields are written, and anything still waiting is saved when the page closes. */
+function useAutoSave() {
+  const pending = useRef<Partial<MusicSettings>>({});
+  const section = useRef<Section>('music');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alive = useRef(true);
+  const [saved, setSaved] = useState<{ section: Section; n: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const flush = useCallback(async () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const patch = pending.current;
+    pending.current = {};
+    if (!Object.keys(patch).length) return;
+    const where = section.current;
+    try {
+      await updateSingleton('music', patch);
+      if (alive.current) {
+        setFailed(false);
+        setSaved((x) => ({ section: where, n: (x?.n ?? 0) + 1 }));
+      }
+    } catch {
+      if (alive.current) setFailed(true);
+    }
+  }, []);
+
+  const save = useCallback(
+    (patch: Partial<MusicSettings>, where: Section, delay = 0) => {
+      pending.current = { ...pending.current, ...patch };
+      section.current = where;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = delay ? setTimeout(flush, delay) : null;
+      if (!delay) void flush();
+    },
+    [flush],
+  );
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      void flush(); // leaving the page never drops a change
+    };
+  }, [flush]);
+
+  useEffect(() => {
+    if (!saved) return;
+    const t = setTimeout(() => setSaved(null), 2000);
+    return () => clearTimeout(t);
+  }, [saved]);
+
+  return { save, flush, saved: saved?.section ?? null, failed };
+}
+
+function SectionHead({ title, saved }: { title: string; saved: boolean }) {
+  return (
+    <div className="sc-head">
+      <h2 className="sc-h2">{title}</h2>
+      <span className="sc-saved" role="status">{saved ? 'Saved' : ''}</span>
+    </div>
+  );
+}
+
 function MusicForm({ initial }: { initial: MusicSettings }) {
   const [f, setF] = useState<Form>(() => toForm(initial));
-  const [status, setStatus] = useState<'' | 'saving' | 'saved' | 'error' | 'invalid'>('');
   const [uploading, setUploading] = useState(false);
-  const set = (patch: Partial<Form>) => {
-    setF((x) => ({ ...x, ...patch }));
-    setStatus('');
-  };
-  useEffect(() => {
-    if (status !== 'saved') return;
-    const t = setTimeout(() => setStatus(''), 2500);
-    return () => clearTimeout(t);
-  }, [status]);
+  const [uploadFailed, setUploadFailed] = useState(false);
+  const { save, flush, saved, failed } = useAutoSave();
+  const slots = useCollection('slots');
+  const pictures = useRef(f.clipPictures);
+  pictures.current = f.clipPictures;
 
   const every = parseSeconds(f.everySeconds);
   const clip = parseSeconds(f.clipSeconds);
 
+  /** Changes the form and saves the matching stored fields. */
+  const set = (patch: Partial<Form>, where: Section, stored: Partial<MusicSettings>, delay = 0) => {
+    setF((x) => ({ ...x, ...patch }));
+    save(stored, where, delay);
+  };
+  const typed = (patch: Partial<Form>, where: Section, stored: Partial<MusicSettings> | null) => {
+    setF((x) => ({ ...x, ...patch }));
+    if (stored) save(stored, where, TYPING_MS);
+  };
+
+  const setPictures = (list: string[]) => {
+    pictures.current = list;
+    set({ clipPictures: list }, 'clip', { clipPictures: list });
+  };
+
   const addPicture = async (file: File) => {
     setUploading(true);
+    setUploadFailed(false);
     try {
       const pic = await store.uploadPicture(file, file.name);
-      set({ clipPictures: [...f.clipPictures, pic.id] });
+      setPictures([...pictures.current, pic.id]);
     } catch {
-      setStatus('error');
+      setUploadFailed(true);
     }
     setUploading(false);
   };
 
-  const save = async () => {
-    if (clip == null || (f.clipMode === 'everySeconds' && every == null)) return setStatus('invalid');
-    setStatus('saving');
-    try {
-      await updateSingleton('music', {
-        playlist: f.playlist.trim(), shuffle: f.shuffle, clipMode: f.clipMode,
-        everySeconds: every ?? initial.everySeconds, clipSeconds: clip,
-        clipPictures: f.clipPictures, clipTitle: f.clipTitle.trim(), clipLine: f.clipLine.trim(),
-      });
-      setStatus('saved');
-    } catch {
-      setStatus('error');
-    }
+  const removePicture = (i: number) => {
+    const id = pictures.current[i];
+    const list = pictures.current.filter((_, j) => j !== i);
+    setPictures(list);
+    if (slots) void deletePictureIfUnused(id, slots, list);
   };
 
   return (
     <div className="t-stack">
       <section className="t-card t-stack">
-        <h2 className="sc-h2">Music</h2>
+        <SectionHead title="Music" saved={saved === 'music'} />
         <Field label="YouTube playlist link">
-          <input className="t-input" type="url" inputMode="url" placeholder="https://www.youtube.com/playlist?list=…" value={f.playlist} onChange={(e) => set({ playlist: e.target.value })} />
+          <input
+            className="t-input"
+            type="url"
+            inputMode="url"
+            placeholder="https://www.youtube.com/playlist?list=…"
+            value={f.playlist}
+            onChange={(e) => typed({ playlist: e.target.value }, 'music', { playlist: e.target.value.trim() })}
+            onBlur={flush}
+          />
         </Field>
-        <Field label="Shuffle">
-          <Segmented label="Shuffle" value={f.shuffle ? 'on' : 'off'} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} onChange={(v) => set({ shuffle: v === 'on' })} />
-        </Field>
+        <div className="t-field" role="group" aria-label="Shuffle">
+          <span>Shuffle</span>
+          <Segmented label="Shuffle" value={f.shuffle ? 'on' : 'off'} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} onChange={(v) => set({ shuffle: v === 'on' }, 'music', { shuffle: v === 'on' })} />
+        </div>
       </section>
 
       <section className="t-card t-stack">
-        <h2 className="sc-h2">Catering clip</h2>
-        <Field label="When it plays">
+        <SectionHead title="Catering clip" saved={saved === 'clip'} />
+        <div className="t-field" role="group" aria-label="When it plays">
+          <span>When it plays</span>
           <Segmented
             label="When it plays"
             value={f.clipMode}
-            options={[{ value: 'afterEachSong', label: 'After each song' }, { value: 'everySeconds', label: 'Every N seconds' }]}
-            onChange={(v) => set({ clipMode: v })}
+            options={[{ value: 'afterEachSong', label: 'After each song' }, { value: 'everySeconds', label: 'On a timer' }]}
+            onChange={(v) => set({ clipMode: v }, 'clip', every == null || v !== 'everySeconds' ? { clipMode: v } : { clipMode: v, everySeconds: every })}
+          />
+        </div>
+        {f.clipMode === 'everySeconds' && (
+          <Field label="Show the clip every … seconds">
+            <input
+              className="t-input sc-seconds"
+              inputMode="numeric"
+              value={f.everySeconds}
+              onChange={(e) => {
+                const n = parseSeconds(e.target.value);
+                typed({ everySeconds: e.target.value }, 'clip', n == null ? null : { everySeconds: n });
+              }}
+              onBlur={flush}
+              aria-invalid={every == null}
+            />
+          </Field>
+        )}
+        <Field label="Clip length (seconds)">
+          <input
+            className="t-input sc-seconds"
+            inputMode="numeric"
+            value={f.clipSeconds}
+            onChange={(e) => {
+              const n = parseSeconds(e.target.value);
+              typed({ clipSeconds: e.target.value }, 'clip', n == null ? null : { clipSeconds: n });
+            }}
+            onBlur={flush}
+            aria-invalid={clip == null}
           />
         </Field>
-        <div className="t-grid2">
-          {f.clipMode === 'everySeconds' && (
-            <Field label="Every (seconds)">
-              <input className="t-input" inputMode="numeric" value={f.everySeconds} onChange={(e) => set({ everySeconds: e.target.value })} aria-invalid={every == null} />
-            </Field>
-          )}
-          <Field label="Clip length (seconds)">
-            <input className="t-input" inputMode="numeric" value={f.clipSeconds} onChange={(e) => set({ clipSeconds: e.target.value })} aria-invalid={clip == null} />
-          </Field>
-        </div>
+        {(clip == null || (f.clipMode === 'everySeconds' && every == null)) && (
+          <p className="sc-error" role="alert">Seconds must be a whole number from 1 to 3600. This is not saved yet.</p>
+        )}
         <Field label="Title">
-          <input className="t-input" value={f.clipTitle} placeholder="We do catering" onChange={(e) => set({ clipTitle: e.target.value })} />
+          <input className="t-input" value={f.clipTitle} placeholder="We do catering" onChange={(e) => typed({ clipTitle: e.target.value }, 'clip', { clipTitle: e.target.value.trim() })} onBlur={flush} />
         </Field>
-        <Field label="Line">
-          <input className="t-input" value={f.clipLine} placeholder="Parties, offices and weddings." onChange={(e) => set({ clipLine: e.target.value })} />
+        <Field label="Smaller line under the title">
+          <input className="t-input" value={f.clipLine} placeholder="Parties, offices and weddings." onChange={(e) => typed({ clipLine: e.target.value }, 'clip', { clipLine: e.target.value.trim() })} onBlur={flush} />
         </Field>
         <div className="t-field">
           <span>Pictures</span>
@@ -109,25 +211,22 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
             {f.clipPictures.map((id, i) => (
               <div key={id + i} className="sc-clip" data-testid="clip-picture">
                 <StoredPicture id={id} alt={`Clip picture ${i + 1}`} />
-                <button className="sc-clip-x" aria-label={`Remove clip picture ${i + 1}`} onClick={() => set({ clipPictures: f.clipPictures.filter((_, j) => j !== i) })}>×</button>
+                <button className="sc-clip-x" aria-label={`Remove clip picture ${i + 1}`} onClick={() => removePicture(i)} />
               </div>
             ))}
             <PictureInput
               className="sc-clip sc-clip-add"
-              label={<><span className="t-plus" aria-hidden>+</span><span>{uploading ? 'Adding…' : 'Add'}</span></>}
+              label={<><span className="t-plus" aria-hidden>+</span><span>{uploading ? 'Adding…' : 'Add picture'}</span></>}
               onFile={addPicture}
               disabled={uploading}
               testId="clip-file"
             />
           </div>
         </div>
+        {uploadFailed && <p className="sc-error" role="alert">That file could not be saved as a picture. Try another one.</p>}
       </section>
 
-      {status === 'invalid' && <p className="sc-error" role="alert">Seconds must be whole numbers from 1 to 3600.</p>}
-      {status === 'error' && <p className="sc-error" role="alert">Could not save. Try again.</p>}
-      <button className="t-btn primary block" onClick={save} disabled={status === 'saving' || uploading}>
-        {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : 'Save'}
-      </button>
+      {failed && <p className="sc-error" role="alert">Could not save. Check the connection and try again.</p>}
     </div>
   );
 }

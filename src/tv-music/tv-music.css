@@ -8,53 +8,67 @@
 .tm-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
 .tm-cover { position: absolute; inset: 0; z-index: 2; cursor: none; }
 
-/* clip */
+/* clip: a picture stage on top, a dark text band under it. Stays mounted while it shows. */
 .tm-clip {
   position: absolute; inset: 0; z-index: 3; overflow: hidden; cursor: none;
+  display: flex; flex-direction: column;
   background-color: inherit;
   background-image: radial-gradient(120% 90% at 70% 30%, color-mix(in srgb, var(--accent) 45%, transparent) 0%, transparent 70%);
   font-family: var(--font); color: inherit;
-  animation: tm-in 600ms ease-out both;
+  animation: tm-in 500ms ease-out both;
 }
-.tm-pics { position: absolute; inset: 0; }
-.tm-pic {
-  position: absolute; inset: 0; background: center / cover no-repeat;
-  opacity: 0; transform-origin: 40% 45%;
-  animation-name: tm-pan; animation-timing-function: linear; animation-fill-mode: both;
-  will-change: transform, opacity;
-}
-.tm-pic.alt { animation-name: tm-pan-alt; transform-origin: 60% 55%; }
-/* the last picture stays up until the clip ends instead of fading to black */
-.tm-pic:last-child { animation-name: tm-pan-last; }
-.tm-pic.alt:last-child { animation-name: tm-pan-alt-last; }
+.tm-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 
-.tm-shade {
-  position: absolute; inset: 0;
-  background:
-    linear-gradient(to top, color-mix(in srgb, var(--ink) 96%, transparent) 0%, color-mix(in srgb, var(--ink) 58%, transparent) 34%, transparent 62%),
-    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 45%, transparent) 0%, transparent 18%);
+/* One opaque layer per picture. The newest fades in on top; the one under it stays fully up
+   until it is covered (then drops away), so a change never passes through black. */
+.tm-layer { position: absolute; inset: 0; overflow: hidden; background: var(--ink); opacity: 0; z-index: 0; transition: opacity 0s linear 1100ms; }
+.tm-layer.under { z-index: 1; }
+.tm-layer.on { opacity: 1; z-index: 2; transition: opacity 1000ms ease-in-out; }
+.tm-layer.on.first { transition: none; }
+.tm-blur {
+  position: absolute; inset: -8%; background: center / cover no-repeat;
+  filter: blur(48px) brightness(0.42) saturate(1.1); transform: translateZ(0);
+}
+/* the whole picture, never cropped; a slow, slight zoom up to full size */
+.tm-layer img {
+  position: absolute; top: 3vh; left: 3vw; width: calc(100% - 6vw); height: calc(100% - 4.5vh);
+  object-fit: contain; transform: scale(0.97); transition: transform 0s linear 1100ms; will-change: transform;
+}
+.tm-layer.on img { transform: scale(1); transition: transform var(--each-ms, 8000ms) linear; }
+
+.tm-band {
+  position: relative; z-index: 1; flex: none; display: flex; align-items: flex-end; gap: 3vw;
+  padding: 3.4vh 4.2vw 4.6vh; background: var(--ink);
+}
+.tm-text { flex: 1 1 auto; min-width: 0; }
+.tm-text h1 {
+  margin: 0; font-size: 3.6vw; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  animation: tm-rise 1000ms 300ms ease-out both;
+}
+.tm-text p {
+  margin: 1.6vh 0 0; max-width: 70vw; font-size: 1.8vw; line-height: 1.3; color: var(--accent-soft); opacity: 0.95;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  animation: tm-rise 1000ms 700ms ease-out both;
+}
+.tm-text::before {
+  content: ''; display: block; width: 5vw; height: 0.45vh; min-height: 3px; margin-bottom: 2vh; border-radius: 99px; background: var(--accent);
+  transform-origin: left; animation: tm-grow 900ms 200ms ease-out both;
 }
 
 .tm-brand {
-  position: absolute; top: 4.2vh; right: 4.2vw; display: flex; align-items: center; gap: 0.7vw;
-  font-size: 1.5vw; font-weight: 650; letter-spacing: 0.04em; color: inherit; opacity: 0.92;
+  flex: none; display: flex; align-items: center; gap: 0.7vw; padding-bottom: 0.6vh;
+  font-size: 1.4vw; font-weight: 650; letter-spacing: 0.04em; color: inherit; opacity: 0.9; white-space: nowrap;
   animation: tm-rise 900ms 200ms ease-out both;
 }
 .tm-brand i { width: 0.75vw; height: 0.75vw; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0.3vw color-mix(in srgb, var(--accent) 35%, transparent); }
 
-.tm-text { position: absolute; left: 4.2vw; right: 4.2vw; bottom: 8vh; }
-.tm-text h1 {
-  margin: 0; font-size: 5.2vw; line-height: 1.05; font-weight: 700; letter-spacing: -0.02em;
-  animation: tm-rise 1100ms 500ms ease-out both;
-}
-.tm-text h1::after {
-  content: ''; display: block; width: 6vw; height: 0.45vh; min-height: 3px; margin-top: 2.4vh; border-radius: 99px; background: var(--accent);
-  transform-origin: left; animation: tm-grow 900ms 1100ms ease-out both;
-}
-.tm-text p {
-  margin: 2.4vh 0 0; max-width: 62vw; font-size: 2vw; line-height: 1.3; color: var(--accent-soft); opacity: 0.95;
-  animation: tm-rise 1100ms 1200ms ease-out both;
-}
+/* no pictures: the title stands alone on the warm gradient */
+.tm-nopics .tm-stage { display: none; }
+.tm-nopics .tm-band { flex: 1 1 auto; align-items: center; padding: 0 8vw; background: transparent; }
+.tm-nopics .tm-text h1 { font-size: 5.2vw; }
+.tm-nopics .tm-text p { font-size: 2vw; }
+.tm-nopics .tm-brand { position: absolute; top: 4.2vh; right: 4.2vw; }
 
 /* small, unobtrusive sound hint */
 .tm-sound {
@@ -65,29 +79,6 @@
 @keyframes tm-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tm-rise { from { opacity: 0; transform: translateY(2.5vh); } to { opacity: 1; transform: none; } }
 @keyframes tm-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@keyframes tm-pan {
-  0% { opacity: 0; transform: scale(1.04) translate(0, 0); }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { opacity: 0; transform: scale(1.16) translate(-2%, -1.5%); }
-}
-@keyframes tm-pan-alt {
-  0% { opacity: 0; transform: scale(1.16) translate(-2%, 1%); }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { opacity: 0; transform: scale(1.04) translate(1.5%, 0); }
-}
-@keyframes tm-pan-last {
-  0% { opacity: 0; transform: scale(1.04) translate(0, 0); }
-  10% { opacity: 1; }
-  100% { opacity: 1; transform: scale(1.16) translate(-2%, -1.5%); }
-}
-@keyframes tm-pan-alt-last {
-  0% { opacity: 0; transform: scale(1.16) translate(-2%, 1%); }
-  10% { opacity: 1; }
-  100% { opacity: 1; transform: scale(1.04) translate(1.5%, 0); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .tm-pic { animation-name: tm-in !important; }
+  .tm-layer img, .tm-layer.on img { transform: none; transition: none; }
 }
