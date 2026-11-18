@@ -35,29 +35,33 @@ let keptSettings: Settings | null = null;
 
 const SHELL = `<div class="wrap">
   <div class="top">
-    <h1>Shift planner</h1>
+    <h1>Staff</h1>
     <span class="savepill" id="savepill" aria-live="polite">Loading…</span>
   </div>
-  <nav class="views" role="tablist">
+  <nav class="views" role="tablist" aria-label="Staff pages">
     <button role="tab" data-v="schedule" aria-selected="true">Schedule</button>
-    <button role="tab" data-v="staff" aria-selected="false">Staff</button>
+    <button role="tab" data-v="people" aria-selected="false">People</button>
     <button role="tab" data-v="settings" aria-selected="false">Settings</button>
   </nav>
   <main id="main"><p class="loading">Loading schedule…</p></main>
 </div>
-<div class="modal" id="ask" hidden role="alertdialog" aria-modal="true" aria-labelledby="askMsg">
-  <div class="sheet askbox">
+<div class="t-sheet-back" id="ask" hidden>
+  <div class="t-sheet askbox" role="alertdialog" aria-modal="true" aria-labelledby="askTitle" aria-describedby="askMsg">
+    <div class="t-sheet-grab" aria-hidden="true"></div>
+    <h2 id="askTitle" tabindex="-1" style="outline:none"></h2>
     <p id="askMsg"></p>
-    <div class="row"><button class="primary" id="askOk">OK</button><button class="ghost" id="askCancel">Cancel</button></div>
+    <div class="ends"><button class="t-btn block primary" id="askOk">OK</button><button class="t-btn block ghost" id="askCancel">Cancel</button></div>
   </div>
 </div>
-<div class="modal sheetwrap" id="edit" hidden role="dialog" aria-modal="true" aria-labelledby="editTitle"><div class="sheet editbox" id="editBox"></div></div>
+<div class="t-sheet-back" id="edit" hidden><div class="t-sheet editbox" id="editBox" role="dialog" aria-modal="true" aria-labelledby="editTitle"></div></div>
 <div class="dragtip" id="dragTip" hidden></div>
-<div class="modal" id="shot" hidden role="dialog" aria-modal="true" aria-label="Schedule picture">
-  <div class="sheet">
+<div class="t-sheet-back" id="shot" hidden>
+  <div class="t-sheet shotbox" role="dialog" aria-modal="true" aria-labelledby="shotTitle">
+    <div class="t-sheet-grab" aria-hidden="true"></div>
+    <h2 id="shotTitle" tabindex="-1" style="outline:none">Send to staff</h2>
     <div class="imgbox"><img id="shotImg" alt="Schedule table"></div>
     <p id="shotMsg">On a phone, press and hold the picture to save or share it.</p>
-    <div class="row"><button class="primary" id="shotShare">Share</button><button class="ghost" id="shotCopy">Copy picture</button><button class="ghost" id="shotClose">Close</button></div>
+    <div class="ends"><button class="t-btn block primary" id="shotShare">Share</button><button class="t-btn block" id="shotCopy">Copy picture</button><button class="t-btn block ghost" id="shotClose">Close</button></div>
   </div>
 </div>`;
 
@@ -99,12 +103,21 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   let DB: PlannerDB | null = null;
   const db = (): PlannerDB => DB as PlannerDB;
   let inflight = 0;
+  let status: 'saved' | 'saving' | 'error' | null = null;
   function setStatus(s: 'saved' | 'saving' | 'error') {
+    status = s;
+    showPill();
+  }
+  // The pill says whether what's on screen is saved. While Settings has unsaved changes it steps
+  // aside (the save bar at the bottom says so), so it never claims "Saved" over unsaved edits.
+  function showPill() {
     const el = $('savepill');
-    if (!el) return;
+    if (!el || !status) return;
     const map = { saved: ['Saved ✓', ''], saving: ['Saving…', 'saving'], error: ['Not saved, try again', 'error'] };
-    el.textContent = map[s][0];
-    el.className = 'savepill ' + map[s][1];
+    const hide = status !== 'error' && view === 'settings' && settingsDirty();
+    el.textContent = map[status][0];
+    el.className = 'savepill ' + map[status][1] + (hide ? ' off' : '');
+    el.setAttribute('aria-hidden', String(hide));
   }
   // Writes from this window echo back through the watchers; while writing, an echo only marks a refresh as due.
   let writing = false;
@@ -139,12 +152,6 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     const c = clone(db().config);
     track(() => io.saveConfig(c));
   };
-  // Replace everything (used by "Paste data"): saves config and every week, deletes weeks that are gone.
-  function replaceAll(next: PlannerDB, oldWeeks: string[]) {
-    DB = next;
-    saveConfig();
-    new Set([...oldWeeks, ...Object.keys(next.weeks)]).forEach((id) => saveWeek(id));
-  }
 
   /* ---------- live data from the store ---------- */
   let rawConfig: unknown | null | undefined;
@@ -205,22 +212,29 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     if (refreshDue && !disposed) refresh();
   }, 800);
 
-  /* ---------- in-page yes/no box ---------- */
-  function ask(msg: string, { ok = 'OK', cancel = 'Cancel' as string | null, danger = false } = {}): Promise<boolean> {
+  /* ---------- in-page yes/no box (a bottom sheet, like the rest of the app) ---------- */
+  // title: the question. body: one short explanation. ok: names the action ("Remove Tarun").
+  // danger makes the action button solid red; the safe choice is always the ghost button below it.
+  function ask(title: string, { body = '', ok = 'OK', cancel = 'Cancel' as string | null, danger = false } = {}): Promise<boolean> {
     return new Promise((res) => {
       const box = must('ask'), okB = must<HTMLButtonElement>('askOk'), noB = must<HTMLButtonElement>('askCancel');
       const back = document.activeElement as HTMLElement | null;
-      must('askMsg').textContent = msg;
+      must('askTitle').textContent = title;
+      const msg = must('askMsg');
+      msg.textContent = body;
+      msg.hidden = !body;
       okB.textContent = ok;
-      okB.className = 'primary' + (danger ? ' red' : '');
+      okB.className = 't-btn block ' + (danger ? 'solid-danger' : 'primary');
       noB.hidden = !cancel;
       if (cancel) noB.textContent = cancel;
       box.hidden = false;
-      okB.focus();
+      // Safe choice gets focus for a destructive question, so Enter never deletes by accident.
+      (danger && cancel ? noB : okB).focus();
       const done = (v: boolean) => {
+        if (box.hidden) return;
         box.hidden = true;
         okB.onclick = noB.onclick = box.onclick = null;
-        document.removeEventListener('keydown', keyH);
+        askClose = null;
         try {
           back?.focus();
         } catch {
@@ -228,30 +242,129 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         }
         res(v);
       };
-      const keyH = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') done(false);
-      };
+      askClose = () => done(false);
       okB.onclick = () => done(true);
       noB.onclick = () => done(false);
       box.onclick = (e) => {
         if (e.target === box) done(false);
       };
-      document.addEventListener('keydown', keyH, sig);
     });
+  }
+  let askClose: (() => void) | null = null;
+
+  /* ---------- sheets: Escape, focus kept inside, drag down to close ---------- */
+  const openSheet = (): HTMLElement | null => {
+    for (const id of ['ask', 'edit', 'shot']) {
+      const el = $(id);
+      if (el && !el.hidden) return el;
+    }
+    return null;
+  };
+  document.addEventListener('keydown', (e) => {
+    const top = openSheet();
+    if (!top) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (top.id === 'ask') askClose?.();
+      else if (top.id === 'edit') closeEdit();
+      else top.hidden = true;
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const items = all<HTMLElement>('button,select,input,[tabindex="0"]', top).filter((x) => !(x as HTMLButtonElement).disabled && !x.closest('[hidden]') && x.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1], a = document.activeElement as HTMLElement | null;
+    if (!a || !top.contains(a)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && a === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && a === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, sig);
+  // Keep the page behind still while a sheet is open.
+  let lockedOverflow: string | null = null;
+  function syncPageLock() {
+    const html = document.documentElement;
+    if (openSheet()) {
+      if (lockedOverflow === null) {
+        lockedOverflow = html.style.overflow;
+        html.style.overflow = 'hidden';
+      }
+    } else if (lockedOverflow !== null) {
+      html.style.overflow = lockedOverflow;
+      lockedOverflow = null;
+    }
+  }
+  const sheetWatch = new MutationObserver(syncPageLock);
+  ['ask', 'edit', 'shot'].forEach((id) => sheetWatch.observe(must(id), { attributes: true, attributeFilter: ['hidden'] }));
+  // Phones: drag a sheet down by its handle (or from the top of its content) to close it,
+  // the same way the app's shared Sheet works. Past ~30% of its height or a quick flick closes it;
+  // otherwise it springs back.
+  function dragToClose(back: HTMLElement, close: () => void) {
+    const el = back.querySelector<HTMLElement>('.t-sheet');
+    if (!el) return;
+    let startY = 0, dy = 0, startT = 0, dragging = false, maybe = false;
+    const set = (y: number, animate: boolean) => {
+      el.style.transition = animate ? 'transform 0.22s ease' : 'none';
+      el.style.transform = y ? `translateY(${y}px)` : '';
+    };
+    el.addEventListener('touchstart', (e) => {
+      const t = e.target as HTMLElement;
+      const onHandle = t.closest('.t-sheet-grab');
+      if (!onHandle && (el.scrollTop > 0 || t.closest('select,input'))) return;
+      maybe = true;
+      dragging = false;
+      startY = e.touches[0].clientY;
+      startT = performance.now();
+      dy = 0;
+    }, { passive: true, signal: ac.signal });
+    el.addEventListener('touchmove', (e) => {
+      if (!maybe) return;
+      dy = e.touches[0].clientY - startY;
+      if (!dragging) {
+        if (dy < 6) {
+          if (dy < 0) maybe = false; // scrolling the content up: not a drag
+          return;
+        }
+        dragging = true;
+      }
+      e.preventDefault();
+      set(Math.max(0, dy), false);
+    }, { passive: false, signal: ac.signal });
+    const up = () => {
+      if (!maybe) return;
+      maybe = false;
+      if (!dragging) return;
+      dragging = false;
+      const fast = dy / Math.max(1, performance.now() - startT) > 0.6;
+      if (dy > Math.min(160, el.offsetHeight * 0.3) || (fast && dy > 40)) {
+        set(el.offsetHeight + 40, true);
+        later(() => {
+          close();
+          set(0, false);
+        }, 200);
+      } else set(0, true);
+    };
+    el.addEventListener('touchend', up, sig);
+    el.addEventListener('touchcancel', up, sig);
   }
 
   /* ---------- data helpers ---------- */
-  let view: 'schedule' | 'staff' | 'settings' = 'schedule';
+  let view: 'schedule' | 'people' | 'settings' = 'schedule';
   let wk = THIS, cur = (today().getDay() + 6) % 7;
   let selSlot: number | null = null, tlScroll: number | null = null, hoursOpen = false, posFlow = false;
   let zoom = prefs.zoom === '1';
-  const phone = () => window.innerWidth <= 560;
   let _hrs = 13;
+  // Whole day: the day's hours fit the panel's width. Zoomed in: a wider hour that scrolls sideways.
   const hourW = (): number => {
     if (zoom) return 64;
-    if (!phone()) return 56;
-    const nw = parseFloat(getComputedStyle(root).getPropertyValue('--namew')) || 62;
-    const avail = Math.min(window.innerWidth, 820) - 24 - 28 - 2 - nw - 6;
+    const nw = parseFloat(getComputedStyle(root).getPropertyValue('--namew')) || 76;
+    const mw = $('main')?.clientWidth || Math.min(window.innerWidth, 560) - 32;
+    const avail = mw - 28 - 2 - nw - 6; // panel padding and border, name column, gap
     return Math.max(18, Math.floor((avail / _hrs) * 10) / 10);
   };
   const P = (): Person[] => db().config.people;
@@ -380,8 +493,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   function render() {
     if (disposed || !DB) return;
     all('.views button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.v === view)));
+    showPill();
     if (view === 'schedule') renderSchedule();
-    else if (view === 'staff') renderStaff();
+    else if (view === 'people') renderStaff();
     else renderSettings();
   }
   all('.views button').forEach(
@@ -391,7 +505,6 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         if (!(await leaveSettingsOk())) return;
         view = b.dataset.v as typeof view;
         selSlot = null;
-        savedMsg = '';
         closeEdit();
         render();
         window.scrollTo(0, 0);
@@ -434,7 +547,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         nav +
         `<section class="empty-week"><h2>No schedule for ${wrange(wk)} yet</h2>
       <p>${p ? "Start from a copy, then change only what's different." : 'Start empty and tap a row in the timeline to add shifts.'}</p>
-      <div class="choices">${p ? `<button class="primary" id="fromPrev">Copy week of ${wrange(p)}</button>` : ''}<button class="ghost" id="fromBlank">Start empty</button></div>
+      <div class="choices">${p ? `<button class="t-btn primary" id="fromPrev">Copy week of ${wrange(p)}</button>` : ''}<button class="t-btn${p ? '' : ' primary'}" id="fromBlank">Start empty</button></div>
       ${wk !== THIS ? '<p class="note"><button class="linkbtn" id="today">Back to this week</button></p>' : ''}</section>`;
       bindNav();
       const fp = $('fromPrev');
@@ -461,13 +574,13 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     }
     tabs += '</div>';
     const banner = L ? '<div class="banner"><b>This week is locked.</b> Nothing can be changed. Tap <b>Unlock</b> at the bottom to make changes.</div>' : '';
-    const dock = `<div class="dock"><button class="lockbtn ${L ? 'on' : ''}" id="lock" aria-pressed="${L}">${L ? LOCK_SVG : UNLOCK_SVG}<span>${L ? 'Unlock' : 'Lock week'}</span></button><button class="${L ? 'primary' : 'ghost'}" id="copyPic">Send to staff</button></div>`;
+    const dock = `<div class="dock"><button class="t-btn lockbtn" id="lock" aria-pressed="${L}">${L ? LOCK_SVG : UNLOCK_SVG}<span>${L ? 'Unlock' : 'Lock week'}</span></button><button class="t-btn primary" id="copyPic">Send to staff</button></div>`;
     main.innerHTML = nav + banner + tabs + `<section class="panel" id="day">${dayHTML(L)}</section>` + weekHTML(L) + dock;
     bindNav();
     all('.tab', main).forEach((b) => (b.onclick = () => goDay(+(b.dataset.d || 0))));
     must('lock').onclick = async () => {
       if (L) {
-        if (!(await ask(`Unlock the week of ${wrange(wk)} so it can be changed?`, { ok: 'Unlock' }))) return;
+        if (!(await ask('Unlock this week?', { body: `The week of ${wrange(wk)} can be changed again.`, ok: 'Unlock week' }))) return;
         w.locked = false;
       } else w.locked = true;
       saveWeek(wk);
@@ -540,7 +653,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         const bars = sh
           .map(
             ([a, b, r], k) =>
-              `<div class="bar ${r || 'unset'} ${L ? 'ro' : ''}" data-p="${p.id}" data-k="${k}" data-a="${a}" data-b="${b}" style="left:${pct(a)};width:${wid(a, b)}" role="button" tabindex="0" aria-label="${esc(p.name)} ${rng(a, b)} ${r ? POS[r] : 'no position yet'}">${L ? '' : '<i class="h l"></i>'}<span>${r ? '' : '? '}${short(a)}–${short(b)}</span>${L ? '' : '<i class="h r"></i>'}</div>`,
+              `<div class="bar ${r || 'unset'} ${L ? 'ro' : ''}" data-p="${p.id}" data-k="${k}" data-a="${a}" data-b="${b}" style="left:${pct(a)};width:${wid(a, b)}" role="button" tabindex="0" aria-label="${esc(p.name)} ${rng(a, b)} ${r ? POS[r] : 'no position yet'}">${L ? '' : '<i class="h l"></i>'}<span>${short(a)}–${short(b)}</span>${L ? '' : '<i class="h r"></i>'}</div>`,
           )
           .join('');
         const hint = !sh.length && !L && p.active ? '<span class="addhint">Tap to add a shift</span>' : '';
@@ -559,20 +672,20 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     }
     const touchTip = matchMedia('(hover:none)').matches
       ? '<b>Tap</b> a shift to edit it. <b>Hold</b> it for a moment, then drag to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.'
-      : '<b>Click</b> a shift to edit it. <b>Drag</b> it to move it, or drag its ends. <b>Click an empty spot</b> to add a shift.';
+      : '<b>Tap</b> a shift to edit it. <b>Drag</b> it to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.';
 
     return `<div class="dayhead"><h2>${DAYS[d]}, ${dshort(date)}</h2></div>
     ${hours}<div class="chips">${chips}</div>
-    ${shown.length ? `${!L && prefs.tip !== '1' ? `<div class="tip1"><p>${touchTip}</p><button id="tipOk">Got it</button></div>` : ''}
-    <div class="tlbar"><span class="note" style="margin:0">${phone() && !zoom ? 'Whole day' : 'Zoomed in'}</span><button class="linkbtn" id="zoomBtn">${zoom ? 'Show whole day' : 'Zoom in'}</button></div>
+    ${shown.length ? `${!L && prefs.tip !== '1' ? `<div class="tip1"><p>${touchTip}</p><button class="t-btn ghost" id="tipOk">Got it</button></div>` : ''}
+    <div class="tlbar"><span class="note" style="margin:0">${zoom ? 'Zoomed in' : 'Whole day'}</span><button class="linkbtn" id="zoomBtn">${zoom ? 'Show whole day' : 'Zoom in'}</button></div>
     <div class="tlscroll" id="tlscroll"><div class="tlin" style="--hrs:${span / 60};--hourw:${hw}px;--tspan:${tstep / 15}">
       <div class="tlrow"><span class="tlname"></span><div class="ticks" style="${cols}">${ticks}</div></div>
       <div class="tlrow"><span class="tlname cov">Working</span><div class="covrow" style="${cols}">${covCells}</div></div>
       ${rows}
     </div></div>
     <p class="info" id="info">${info}</p>
-    <div class="key"><span><i style="background:var(--sp-on)"></i>Food prep</span><span><i style="background:var(--sp-accent)"></i>Food runner</span><span><i style="border:2px dashed var(--sp-muted)"></i>No position yet</span><span><i style="background:var(--sp-bg);border:1px solid var(--sp-line)"></i>Open</span></div>`
-      : '<p class="note">Nobody on staff yet. Add people on the Staff page.</p>'}`;
+    <div class="key"><span><i class="k-prep"></i>Food prep</span><span><i class="k-runner"></i>Food runner</span><span><i class="k-unset"></i>No position yet</span><span><i class="k-open"></i>Open hours</span></div>`
+      : '<p class="note">Nobody on staff yet. Add people on the People page.</p>'}`;
   }
 
   let covTipTimer: number | undefined;
@@ -596,7 +709,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       if (w_ && w_ < 84) b.classList.add('narrow');
       if (w_ && w_ < 56) {
         const a = +(b.dataset.a || 0), sp_ = b.querySelector('span');
-        if (sp_) sp_.textContent = (b.classList.contains('unset') ? '? ' : '') + short(a);
+        if (sp_) sp_.textContent = short(a);
       }
     });
     all('.covrow button:not(.closed)', el).forEach(
@@ -833,7 +946,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         const v = spm.value, base = SET().days[d];
         if (v === 'closed') {
           const n = Object.values(Sd).reduce((a, l) => a + l.length, 0);
-          if (n && (await ask(`${DAYS[d]} has ${n} ${n === 1 ? 'shift' : 'shifts'}. Remove ${n === 1 ? 'it' : 'them'} too?`, { ok: 'Remove shifts', cancel: 'Keep them' }))) {
+          if (n && (await ask(`Remove ${DAYS[d]}'s shifts too?`, { body: `${DAYS[d]} has ${n} ${n === 1 ? 'shift' : 'shifts'}. The day is marked closed either way.`, ok: n === 1 ? 'Remove shift' : `Remove ${n} shifts`, cancel: 'Keep them', danger: true }))) {
             Object.keys(Sd).forEach((k) => delete Sd[k]);
             saveWeek(wk);
           }
@@ -890,7 +1003,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
             )
             .join('')}</ul>`
         : `<p class="none">${h.closed ? 'Closed' : 'Nobody scheduled'}</p>`;
-      days += `<details class="dayblock ${d === cur ? 'cur' : ''}"><summary><span class="dn">${SHORT[d]} ${addDays(m, d).getDate()}</span><span class="ds">${sum}</span><span class="dot ${h.closed ? 'closed' : ok ? 'ok' : ''}" aria-hidden="true">${h.closed ? '–' : ok ? '✓' : '!'}</span></summary>${list}<button class="ghost go" data-d="${d}">Open ${DAYS[d]}</button></details>`;
+      days += `<details class="dayblock ${d === cur ? 'cur' : ''}"><summary><span class="dn">${SHORT[d]} ${addDays(m, d).getDate()}</span><span class="ds">${sum}</span><span class="dot ${h.closed ? 'closed' : ok ? 'ok' : ''}" aria-hidden="true">${h.closed ? '–' : ok ? '✓' : '!'}</span></summary>${list}<button class="t-btn go" data-d="${d}">Open ${DAYS[d]}</button></details>`;
     }
     const tot = peopleIn(wk)
       .map((pp) => {
@@ -904,7 +1017,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     ${p ? `<p class="legend"><i></i>Changed from the week of ${wrange(p)}</p>` : ''}
     <details class="more"><summary>Hours, text copy and more</summary>
       ${tot.length ? `<ul class="hrs">${tot.map((o) => `<li><span>${esc(o.pp.name)}</span><b>${hstr(o.t)}</b></li>`).join('')}</ul>` : ''}
-      <div class="choices"><button class="ghost" id="copyTxt">Copy as text</button>${L ? '' : '<button class="danger" id="delWeek">Delete this week</button>'}</div>
+      <div class="choices"><button class="t-btn" id="copyTxt">Copy as text</button>${L ? '' : '<button class="t-btn danger" id="delWeek">Delete this week</button>'}</div>
     </details></section>`;
   }
   function bindWeek(L: boolean) {
@@ -919,7 +1032,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     );
     if (L) return;
     must('delWeek').onclick = async () => {
-      if (await ask(`Delete the schedule for ${wrange(wk)}? This can't be undone.`, { ok: 'Delete', danger: true })) {
+      if (await ask('Delete this week?', { body: `The schedule for ${wrange(wk)} is removed. This can't be undone.`, ok: 'Delete week', cancel: 'Keep', danger: true })) {
         delete db().weeks[wk];
         saveWeek(wk);
         render();
@@ -1007,14 +1120,14 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       if (o[0] >= v[1]) hi = Math.min(hi, o[0]);
     });
     const dis = L ? 'disabled' : '';
-    el.innerHTML = `<div class="grab" aria-hidden="true"></div>
-    <h3 id="editTitle" tabindex="-1" style="outline:none">${esc(nameOf(pid))}${isActive(pid) ? '' : ' <small style="color:var(--sp-muted);font-weight:600">(removed from staff)</small>'}</h3>
-    <p class="when">${DAYS[d]}, ${dshort(addDays(parse(wk), d))} · ${rng(v[0], v[1])} · ${hstr((v[1] - v[0]) / 60)}</p>
+    el.innerHTML = `<div class="t-sheet-grab" aria-hidden="true"></div>
+    <h2 id="editTitle" tabindex="-1" style="outline:none">${esc(nameOf(pid))}${isActive(pid) ? '' : ' <small>(removed from staff)</small>'}</h2>
+    <p class="when">${DAYS[d]}, ${dshort(addDays(parse(wk), d))} · ${rng(v[0], v[1])} · ${hstr((v[1] - v[0]) / 60)}${v[2] ? '' : ' · No position yet'}</p>
     <div class="poschoice" role="group" aria-label="Position">${(Object.keys(POS) as Pos[]).map((r) => `<button data-r="${r}" aria-pressed="${v[2] === r}" ${dis}>${POS[r]}</button>`).join('')}</div>
     <div class="stepper"><span class="lbl">Start</span><button data-s="0" data-dir="-1" aria-label="Start 15 minutes earlier" ${dis}>−</button><select id="eS" aria-label="Start time" ${dis}>${opts(Math.min(lo, v[0]), Math.max(v[1] - MINLEN, v[0]), v[0])}</select><button data-s="0" data-dir="1" aria-label="Start 15 minutes later" ${dis}>+</button></div>
     <div class="stepper"><span class="lbl">End</span><button data-s="1" data-dir="-1" aria-label="End 15 minutes earlier" ${dis}>−</button><select id="eE" aria-label="End time" ${dis}>${opts(Math.min(v[0] + MINLEN, v[1]), Math.max(hi, v[1]), v[1])}</select><button data-s="1" data-dir="1" aria-label="End 15 minutes later" ${dis}>+</button></div>
-    ${!L && nextUnset(d, { pid, k }) ? `<button class="ghost nextbtn" id="eNext">Next shift without a position (${unsetCount(wk, d) - (v[2] ? 0 : 1)} left) →</button>` : ''}
-    <div class="row">${L ? '' : '<button class="textdanger" id="eDel">Remove shift</button>'}<button class="primary" id="eDone">Done</button></div>`;
+    ${!L && nextUnset(d, { pid, k }) ? `<button class="t-btn block" id="eNext">Next shift without a position (${unsetCount(wk, d) - (v[2] ? 0 : 1)} left) →</button>` : ''}
+    <div class="ends"><button class="t-btn block primary" id="eDone">Done</button>${L ? '' : '<button class="t-btn block textdanger" id="eDel">Remove shift</button>'}</div>`;
     box.hidden = false;
     box.onclick = (e) => {
       if (e.target === box) closeEdit();
@@ -1081,7 +1194,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       apply();
     };
     must('eDel').onclick = async () => {
-      if (!(await ask(`Remove ${nameOf(pid)}'s ${rng(v[0], v[1])} shift?`, { ok: 'Remove', danger: true }))) return;
+      if (!(await ask('Remove this shift?', { body: `${nameOf(pid)}, ${DAYS[d]} ${rng(v[0], v[1])}.`, ok: 'Remove shift', cancel: 'Keep', danger: true }))) return;
       list.splice(k, 1);
       if (!list.length) delete dayShifts(d)[pid];
       saveWeek(wk);
@@ -1099,9 +1212,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       }
     }, 250);
   }, sig);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !must('edit').hidden && must('ask').hidden) closeEdit();
-  }, sig);
+  dragToClose(must('edit'), closeEdit);
+  dragToClose(must('ask'), () => askClose?.());
+  dragToClose(must('shot'), () => (must('shot').hidden = true));
   // A new week may have started while the page sat in the background.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !DB) return;
@@ -1267,9 +1380,12 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     shotBlob = await toBlob(c);
     if (disposed) return;
     const file = new File([shotBlob], 'shift-schedule-' + wk + '.png', { type: 'image/png' });
-    must('shotShare').hidden = !(typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] }));
+    const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+    must('shotShare').hidden = !canShare;
+    must('shotCopy').className = 't-btn block' + (canShare ? '' : ' primary');
     msg.textContent = 'On a phone, press and hold the picture to save or share it.';
     must('shot').hidden = false;
+    must('shotTitle').focus({ preventScroll: true });
     if ((await copied) && !disposed) msg.textContent = 'Copied. Paste it into WhatsApp, or press and hold the picture to save it.';
   }
   must('shotCopy').onclick = async () => {
@@ -1299,7 +1415,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   function renderStaff() {
     const main = must('main');
     const act = P().filter((p) => p.active), gone = P().filter((p) => !p.active);
-    main.innerHTML = `<section class="card"><h2>Staff</h2>
+    main.innerHTML = `<section class="card"><h2>People</h2>
     <p class="sub">Change a name by typing over it. The order here is the order on the schedule.</p>
     <div id="staffList">${
       act
@@ -1312,12 +1428,12 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         )
         .join('') || '<p class="note">No staff yet.</p>'
     }</div>
-    <div class="addrow"><input type="text" id="newName" placeholder="New person's name" aria-label="New person's name"><button class="primary" id="addP">Add person</button></div>
+    <div class="addrow"><input type="text" id="newName" placeholder="New person's name" aria-label="New person's name"><button class="t-btn primary" id="addP">Add person</button></div>
     <div class="err" id="staffErr"></div></section>
     ${
       gone.length
         ? `<section class="card"><h2>Removed</h2><p class="sub">They still show in the weeks they worked, but not in new weeks.</p>
-      ${gone.map((p) => `<div class="staffrow"><span style="flex:1">${esc(p.name)}</span><button class="ghost" data-restore="${p.id}">Add back</button></div>`).join('')}</section>`
+      ${gone.map((p) => `<div class="staffrow"><span class="rname" title="${esc(p.name)}">${esc(p.name)}</span><button class="t-btn" data-restore="${p.id}">Add back</button></div>`).join('')}</section>`
         : ''
     }`;
     const err = must('staffErr');
@@ -1361,7 +1477,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         (b.onclick = async () => {
           const p = P().find((x) => x.id === b.dataset.rm);
           if (!p) return;
-          if (!(await ask(`Remove ${p.name}? They stay in this week and past weeks. Their shifts in later weeks are taken off, except in locked weeks.`, { ok: 'Remove', danger: true }))) return;
+          if (!(await ask(`Remove ${p.name}?`, { body: 'They stay in this week and past weeks. Their shifts in later weeks are taken off, except in locked weeks.', ok: `Remove ${p.name}`, cancel: 'Keep', danger: true }))) return;
           p.active = false;
           Object.keys(db().weeks)
             .filter((id) => id > THIS && !db().weeks[id].locked)
@@ -1416,7 +1532,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }
 
   /* ---------- render: settings (edits a draft; nothing changes until Save) ---------- */
-  let draft: Settings | null = null, savedMsg = '';
+  let draft: Settings | null = null;
   function settingsDirty(): boolean {
     return !!draft && !!DB && JSON.stringify(draft) !== JSON.stringify(SET());
   }
@@ -1440,51 +1556,40 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     <span class="dname"><b>${DAYS[d]}</b></span>
     <input type="time" step="900" data-d="${d}" data-f="open" value="${toHM(h.open)}" aria-label="${DAYS[d]} opens">
     <input type="time" step="900" data-d="${d}" data-f="close" value="${toHM(h.close)}" aria-label="${DAYS[d]} closes">
-    <span class="brk brkcell"><label><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''}> Break</label>
-      ${h.brk ? `<input type="time" step="900" data-d="${d}" data-f="b0" value="${toHM(h.brk[0])}" aria-label="${DAYS[d]} break starts"> to <input type="time" step="900" data-d="${d}" data-f="b1" value="${toHM(h.brk[1])}" aria-label="${DAYS[d]} break ends">` : ''}</span>`,
+    <span class="brk brkcell"><label class="toggle"><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''}> Break</label>
+      ${h.brk ? `<input type="time" step="900" data-d="${d}" data-f="b0" value="${toHM(h.brk[0])}" aria-label="${DAYS[d]} break starts"><input type="time" step="900" data-d="${d}" data-f="b1" value="${toHM(h.brk[1])}" aria-label="${DAYS[d]} break ends">` : ''}</span>`,
       )
       .join('');
-    const bar = `<div class="savebar ${dirty ? 'dirty' : ''}">
-      <span>${dirty ? '<b>You have unsaved changes.</b>' : savedMsg || 'No changes.'}</span>
-      <span class="choices"><button class="ghost" id="discard" ${dirty ? '' : 'disabled'}>Discard changes</button><button class="primary" id="saveSettings" ${dirty ? '' : 'disabled'}>Save settings</button></span>
-    </div><div class="err" id="sErr"></div>`;
+    // Nothing at the bottom until something changes; then one row: Unsaved changes · Discard · Save.
+    const bar = `<div class="savebar" id="savebar" ${dirty ? '' : 'hidden'}>
+      <div class="sbrow"><span class="sbmsg">Unsaved changes</span><button class="t-btn" id="discard">Discard</button><button class="t-btn primary" id="saveSettings">Save</button></div>
+      <div class="err" id="sErr" role="alert"></div>
+    </div>`;
     main.innerHTML = `<section class="card"><h2>Opening hours</h2>
       <p class="sub">Normal hours for every week. To change one date only (a holiday, say), use the hours menu on that day in the schedule.</p>
-      <div class="hgrid"><span class="hd">Day</span><span class="hd">Opens</span><span class="hd">Closes</span><span class="hd brkhd">Break (closed between)</span>${rows}</div></section>
+      <div class="hgrid">${rows}</div></section>
     <section class="card"><h2>Staffing rules</h2>
       <p class="sub">These decide when the Working row on the timeline turns red.</p>
       <div class="field"><label for="prepStart">Before opening, first person starts at</label><input type="time" step="900" id="prepStart" value="${toHM(S.prepStart)}"></div>
       <div class="field"><label for="secondAt">Second person starts at</label><input type="time" step="900" id="secondAt" value="${toHM(S.secondAt)}"></div>
       <div class="field"><label for="minStaff">People you need while open</label><select id="minStaff">${[1, 2, 3, 4, 5, 6].map((n) => `<option ${n === S.minStaff ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    </section>${bar}
-    <section class="card"><h2>Move your data</h2>
-      <p class="sub">To move everything (staff, settings and all weeks) to another device or to your website: tap Copy all data here, then on the other one paste it below and tap Replace.</p>
-      <div class="choices"><button class="ghost" id="dataCopy">Copy all data</button></div>
-      <p class="sub" style="margin:14px 0 6px">Paste data from another device</p>
-      <textarea class="data" id="dataIn" aria-label="Paste data here" placeholder="Paste here"></textarea>
-      <div class="choices" style="margin-top:8px"><button class="danger" id="dataUse">Use pasted data</button></div>
-      <div class="err" id="dataErr"></div></section>`;
+    </section>
+    <section class="card"><h2>Backup</h2>
+      <p class="sub">Staff data already syncs to every phone with this app. To keep an extra copy somewhere safe, copy it as text and paste it into a note or email.</p>
+      <div class="choices"><button class="t-btn" id="dataCopy">Copy backup</button></div></section>${bar}`;
     const updBar = () => {
-      const b = main.querySelector('.savebar'), dty = settingsDirty();
-      if (!b) return;
-      b.classList.toggle('dirty', dty);
-      const sp = b.querySelector('span');
-      if (sp) sp.innerHTML = dty ? '<b>You have unsaved changes.</b>' : savedMsg || 'No changes.';
-      must<HTMLButtonElement>('discard').disabled = !dty;
-      must<HTMLButtonElement>('saveSettings').disabled = !dty;
+      const dty = settingsDirty();
+      must('savebar').hidden = !dty;
       must('sErr').textContent = '';
+      showPill();
     };
-    const touch = () => {
-      savedMsg = '';
-      updBar();
-    };
+    const touch = updBar;
     all<HTMLInputElement>('.hgrid input[type=checkbox]', main).forEach(
       (inp) =>
         (inp.onchange = () => {
           const h = S.days[+(inp.dataset.d || 0)];
           // Default break: 2pm-5pm, kept inside opening hours
           h.brk = inp.checked ? [Math.max(h.open + 15, Math.min(840, h.close - 30)), Math.min(Math.max(h.open + 30, 1020), h.close - 15)] : null;
-          savedMsg = '';
           renderSettings();
         }),
     );
@@ -1522,83 +1627,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       touch();
     };
     must('dataCopy').onclick = (e) =>
-      copyText(JSON.stringify({ app: 'shift-planner', v: 1, config: db().config, weeks: db().weeks }), e.currentTarget as HTMLElement, 'Copy all data');
-    must('dataUse').onclick = async () => {
-      const err = must('dataErr'), dataIn = must<HTMLTextAreaElement>('dataIn');
-      const bad = "That doesn't look like copied planner data. Copy it again and paste the whole thing.";
-      // "Add" codes carry only weeks, with people by name. They add or replace those weeks and leave everything else alone.
-      let raw: { add?: unknown; weeks?: Record<string, { shifts?: unknown }> } | null = null;
-      try {
-        raw = JSON.parse(dataIn.value.trim());
-      } catch {
-        /* not JSON */
-      }
-      if (raw && raw.add === true && raw.weeks && typeof raw.weeks === 'object') {
-        const rw = raw.weeks;
-        const ids = Object.keys(rw).filter((id) => /^\d{4}-\d{2}-\d{2}$/.test(id) && rw[id] && Array.isArray(rw[id].shifts));
-        if (!ids.length) {
-          err.textContent = bad;
-          return;
-        }
-        const daysOf = (id: string) => rw[id].shifts as (Record<string, unknown> | null)[];
-        const names = new Set<string>();
-        ids.forEach((id) => daysOf(id).forEach((day) => Object.keys(day || {}).forEach((n) => names.add(n.trim()))));
-        const existing = ids.filter((id) => db().weeks[id]);
-        if (!(await ask(`Add ${ids.map(wrange).join(', ')} (${names.size} people)?${existing.length ? " This replaces what's saved for " + (existing.length === 1 ? 'that week' : 'those weeks') + '.' : ''} Nothing else changes.`, { ok: 'Add' }))) return;
-        const idOf = (n: string) => {
-          const k = n.trim().toLowerCase();
-          let p = P().find((x) => x.name.trim().toLowerCase() === k);
-          if (!p) {
-            p = { id: newPersonId(), name: n.trim(), active: true };
-            P().push(p);
-          } else if (!p.active) p.active = true;
-          return p.id;
-        };
-        ids.forEach((id) => {
-          const w = emptyWeek();
-          daysOf(id).slice(0, 7).forEach((day, d) =>
-            Object.entries(day || {}).forEach(([n, l]) => {
-              if (Array.isArray(l) && l.length) w.shifts[d][idOf(n)] = l as Shift[];
-            }),
-          );
-          const n_ = normalizeDB({ config: db().config, weeks: { [id]: w } });
-          if (n_) db().weeks[id] = n_.weeks[id];
-          saveWeek(id);
-        });
-        saveConfig();
-        wk = ids[0];
-        cur = 0;
-        dataIn.value = '';
-        err.textContent = '';
-        savedMsg = 'Week added ✓';
-        draft = null;
-        view = 'schedule';
-        tlScroll = null;
-        render();
-        window.scrollTo(0, 0);
-        return;
-      }
-      let j: PlannerDB | null = null;
-      try {
-        j = normalizeDB(JSON.parse(dataIn.value.trim()));
-      } catch {
-        j = null;
-      }
-      if (!j || !j.config.people.length) {
-        err.textContent = bad;
-        return;
-      }
-      const n = Object.keys(j.weeks).length;
-      if (!(await ask(`Replace everything here with the pasted data (${j.config.people.length} staff, ${n} ${n === 1 ? 'week' : 'weeks'})? What's here now will be lost.`, { ok: 'Replace', danger: true }))) return;
-      replaceAll(j, Object.keys(db().weeks));
-      draft = null;
-      savedMsg = 'Data replaced ✓';
-      err.textContent = '';
-      renderSettings();
-    };
+      copyText(JSON.stringify({ app: 'shift-planner', v: 1, config: db().config, weeks: db().weeks }), e.currentTarget as HTMLElement, 'Copy backup');
     must('discard').onclick = () => {
       draft = null;
-      savedMsg = 'Changes discarded.';
       renderSettings();
     };
     must('saveSettings').onclick = () => {
@@ -1610,14 +1641,14 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       db().config.settings = clone(S);
       saveConfig();
       draft = null;
-      savedMsg = 'Settings saved ✓';
       renderSettings();
     };
+    showPill();
   }
   // Ask before leaving the Settings page with unsaved changes.
   async function leaveSettingsOk(): Promise<boolean> {
     if (view !== 'settings') return true;
-    if (settingsDirty() && !(await ask('You have unsaved settings. Leave without saving?', { ok: 'Leave without saving', cancel: 'Stay' }))) return false;
+    if (settingsDirty() && !(await ask('Leave without saving?', { body: 'Your changes to the settings will be lost.', ok: 'Leave without saving', cancel: 'Keep editing', danger: true }))) return false;
     draft = null;
     return true;
   }
@@ -1640,6 +1671,8 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   return () => {
     keptSettings = settingsDirty() ? draft : null;
     disposed = true;
+    sheetWatch.disconnect();
+    if (lockedOverflow !== null) document.documentElement.style.overflow = lockedOverflow;
     unConfig();
     unWeeks();
     ac.abort();
