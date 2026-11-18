@@ -9,12 +9,12 @@ export default function ManagerShell() {
   return (
     <>
       <Routes>
-        <Route index element={<Navigate to="screens" replace />} />
+        <Route index element={<Navigate to="catering" replace />} />
         <Route path="screens/*" element={<Screens />} />
         <Route path="catering/*" element={<Catering />} />
         <Route path="staff/*" element={<Staff />} />
       </Routes>
-      <TabBar tabs={[{ to: '/manager/screens', label: 'Screens' }, { to: '/manager/catering', label: 'Catering' }, { to: '/manager/staff', label: 'Staff' }]} />
+      <TabBar tabs={[{ to: '/manager/catering', label: 'Catering' }, { to: '/manager/screens', label: 'Screens' }, { to: '/manager/staff', label: 'Staff' }]} />
     </>
   );
 }
