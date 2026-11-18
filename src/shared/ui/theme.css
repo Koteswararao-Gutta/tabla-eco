@@ -79,10 +79,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .t-tabbar a.active { color: var(--accent); }
 
 /* sheet (bottom sheet on phones, dialog on wide screens) */
-.t-sheet-back { position: fixed; inset: 0; background: rgba(20, 18, 15, 0.45); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-.t-sheet { background: var(--bg); width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; border-radius: 22px 22px 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0)); display: flex; flex-direction: column; gap: 14px; }
+.t-sheet-back { position: fixed; inset: 0; background: rgba(20, 18, 15, 0.45); display: flex; align-items: flex-end; justify-content: center; z-index: 50; overscroll-behavior: contain; animation: t-fade 0.18s ease; }
+.t-sheet { background: var(--bg); width: 100%; max-width: 560px; max-height: 92vh; max-height: 92dvh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border-radius: 22px 22px 0 0; padding: 8px 16px calc(20px + env(safe-area-inset-bottom, 0)); display: flex; flex-direction: column; gap: 14px; animation: t-rise 0.24s ease; }
 .t-sheet h2 { margin: 0; font-size: 1.2rem; }
-@media (min-width: 700px) { .t-sheet-back { align-items: center; } .t-sheet { border-radius: 22px; } }
+.t-sheet-grab { flex: none; align-self: center; width: 124px; height: 22px; margin: -2px 0 -6px; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: grab; }
+.t-sheet-grab::before { content: ''; width: 44px; height: 5px; border-radius: 3px; background: var(--line); }
+/* Keep form fields inside the sheet: iPhone date and time fields otherwise push past the edge and the sheet slides sideways. */
+.t-sheet .t-grid2 > *, .t-field { min-width: 0; }
+.t-sheet input[type='date'], .t-sheet input[type='time'] { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; display: block; text-align: left; }
+.t-sheet input::-webkit-date-and-time-value { text-align: left; }
+@keyframes t-rise { from { transform: translateY(40px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes t-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (min-width: 700px) { .t-sheet-back { align-items: center; } .t-sheet { border-radius: 22px; padding-top: 20px; } .t-sheet-grab { display: none; } }
+@media (prefers-reduced-motion: reduce) { .t-sheet, .t-sheet-back { animation: none; } }
 
 .t-empty { text-align: center; color: var(--muted); padding: 32px 16px; border: 1.5px dashed var(--line); border-radius: var(--radius); }
 

@@ -1,5 +1,5 @@
 // Shared building blocks. Screens compose these; they don't restyle them.
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import './theme.css';
 
@@ -46,18 +46,87 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
   );
 }
 
-/** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap and Escape. */
+/** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap, Escape,
+ *  or (phones) dragging it down from the handle or from the top of its content. */
 export function Sheet({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
+  const sheet = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [open, onClose]);
+    // Keep the page behind still while the sheet is open.
+    const html = document.documentElement;
+    const before = html.style.overflow;
+    html.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', k);
+      html.style.overflow = before;
+    };
+  }, [open]);
+
+  // Drag down to close. Starts only when the content is scrolled to the top (or on the handle),
+  // so scrolling a long form still works.
+  useEffect(() => {
+    const el = sheet.current;
+    if (!open || !el) return;
+    let startY = 0, dy = 0, startT = 0, dragging = false, maybe = false;
+    const set = (y: number, animate: boolean) => {
+      el.style.transition = animate ? 'transform 0.22s ease' : 'none';
+      el.style.transform = y ? `translateY(${y}px)` : '';
+    };
+    const down = (e: TouchEvent) => {
+      const onHandle = (e.target as HTMLElement).closest('.t-sheet-grab');
+      if (!onHandle && el.scrollTop > 0) return;
+      maybe = true;
+      dragging = false;
+      startY = e.touches[0].clientY;
+      startT = performance.now();
+      dy = 0;
+    };
+    const move = (e: TouchEvent) => {
+      if (!maybe) return;
+      dy = e.touches[0].clientY - startY;
+      if (!dragging) {
+        if (dy < 6) {
+          if (dy < 0) maybe = false; // scrolling up the content: not a drag
+          return;
+        }
+        dragging = true;
+      }
+      e.preventDefault();
+      set(Math.max(0, dy), false);
+    };
+    const up = () => {
+      if (!maybe) return;
+      maybe = false;
+      if (!dragging) return;
+      dragging = false;
+      const fast = dy / Math.max(1, performance.now() - startT) > 0.6;
+      if (dy > Math.min(160, el.offsetHeight * 0.3) || (fast && dy > 40)) {
+        set(el.offsetHeight + 40, true);
+        setTimeout(() => close.current(), 200);
+      } else set(0, true);
+    };
+    el.addEventListener('touchstart', down, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', up);
+    el.addEventListener('touchcancel', up);
+    return () => {
+      el.removeEventListener('touchstart', down);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', up);
+      el.removeEventListener('touchcancel', up);
+    };
+  }, [open]);
+
   if (!open) return null;
   return (
     <div className="t-sheet-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="t-sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="t-sheet-grab" aria-hidden="true" />
         <h2>{title}</h2>
         {children}
       </div>
