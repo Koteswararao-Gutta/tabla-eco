@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, orderFields, validate } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, validate } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -132,5 +132,37 @@ describe('formFromScan', () => {
     expect(form.people).toBe('');
     expect(form.items).toBe('');
     expect(unsure).toEqual(['phone', 'date', 'type']);
+  });
+});
+
+describe('month calendar', () => {
+  it('lays out November 2026 Sunday first', () => {
+    const weeks = monthGrid(2026, 10);
+    expect(weeks).toHaveLength(5);
+    expect(weeks[0].slice(0, 1)).toEqual([new Date(2026, 10, 1).getTime()]); // Nov 1, 2026 is a Sunday
+    expect(weeks[4].filter(Boolean)).toHaveLength(2); // Nov 29, 30
+    expect(weeks.flat().filter(Boolean)).toHaveLength(30);
+  });
+  it('pads the first week of a month that starts mid-week', () => {
+    const weeks = monthGrid(2026, 11); // Dec 1, 2026 is a Tuesday
+    expect(weeks[0].slice(0, 2)).toEqual([null, null]);
+    expect(weeks.every((w) => w.length === 7)).toBe(true);
+  });
+  it('groups orders by day, earliest first', () => {
+    const late = order(at(20, 18));
+    const early = order(at(20, 11));
+    const days = ordersByDay([late, order(at(21, 12)), early]);
+    expect(days.get(new Date(2026, 10, 20).getTime())).toEqual([early, late]);
+    expect(days.size).toBe(2);
+  });
+  it('lists the other open orders that day and marks the ones within an hour', () => {
+    const a = order(at(20, 17, 30));
+    const b = order(at(20, 12));
+    const done = order(at(20, 18), { status: 'completed' });
+    const other = order(at(21, 18));
+    const got = sameDayOrders([a, b, done, other], at(20, 18));
+    expect(got.map((g) => [g.order, g.close])).toEqual([[b, false], [a, true]]);
+    expect(sameDayOrders([a, b], at(20, 17, 30), a.id).map((g) => g.order)).toEqual([b]); // editing a: skip itself
+    expect(sameDayOrders([a], at(20, 18, 30))[0].close).toBe(false); // exactly 1 hour apart is fine
   });
 });

@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, groupOpen, history, itemLines, orderFields, timeLabel, validate,
+  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, orderFields, sameDayOrders, timeLabel, validate,
   type FormErrors, type OrderForm,
 } from './orders';
+import { CalendarSheet } from './calendar';
 import './catering.css';
 
 type Order = WithId<CateringOrder>;
@@ -22,6 +23,8 @@ export default function Catering() {
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [calendar, setCalendar] = useState(false);
+  const [newDay, setNewDay] = useState<number | undefined>(undefined);
   // "Marked completed" toast with Undo, for a few seconds.
   const [done, setDone] = useState<{ id: string; name: string } | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -57,9 +60,20 @@ export default function Catering() {
       <PageHeader
         title="Catering"
         action={
-          <button className="t-btn accent" onClick={() => setEditing('new')}>
-            + New order
-          </button>
+          <div className="c-head-actions">
+            <button className="t-btn c-cal-btn" aria-label="Calendar" title="Calendar" onClick={() => setCalendar(true)}>
+              📅
+            </button>
+            <button
+              className="t-btn accent"
+              onClick={() => {
+                setNewDay(undefined);
+                setEditing('new');
+              }}
+            >
+              + New order
+            </button>
+          </div>
         }
       />
 
@@ -88,10 +102,28 @@ export default function Catering() {
         </div>
       )}
 
+      {calendar && orders && (
+        <CalendarSheet
+          orders={orders}
+          now={now}
+          onClose={() => setCalendar(false)}
+          onOpen={(o) => {
+            setCalendar(false);
+            setEditing(o.id);
+          }}
+          onNew={(day) => {
+            setCalendar(false);
+            setNewDay(day);
+            setEditing('new');
+          }}
+        />
+      )}
+
       {sheetOpen && (
         <OrderSheet
           key={editing!}
           order={editOrder}
+          day={newDay}
           onClose={() => setEditing(null)}
           onCompleted={markedCompleted}
           onDelete={(o) => {
@@ -213,7 +245,7 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-function OrderSheet(props: { order: Order | null; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void }) {
+function OrderSheet(props: { order: Order | null; day?: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void }) {
   const { order, onClose, onCompleted, onDelete } = props;
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
@@ -225,7 +257,8 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
     first.scrollIntoView({ block: 'center', behavior: 'smooth' });
     first.focus({ preventScroll: true });
   }, [attempt]);
-  const [f, setF] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now())));
+  const [f, setF] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now(), props.day)));
+  const allOrders = useCollection('orders');
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -395,6 +428,7 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
             {err('time')}
           </Field>
         </div>
+        <SameDay orders={allOrders ?? []} date={f.date} time={f.time} skipId={order?.id} />
         <div className="t-field">
           <span>Pickup or delivery</span>
           <Segmented
@@ -452,5 +486,32 @@ function OrderSheet(props: { order: Order | null; onClose: () => void; onComplet
         </button>
       </form>
     </Sheet>
+  );
+}
+
+/** Under the date and time: the other orders that day, and a warning when one is within an hour. */
+function SameDay({ orders, date, time, skipId }: { orders: Order[]; date: string; time: string; skipId?: string }) {
+  const at = fromInputs(date, time || '12:00');
+  if (at === null) return null;
+  const others = sameDayOrders(orders, at, skipId);
+  if (others.length === 0) return <p className="c-sameday" data-testid="same-day">No other orders that day.</p>;
+  const close = time ? others.filter((o) => o.close) : [];
+  return (
+    <div className={'c-sameday' + (close.length ? ' clash' : '')} data-testid="same-day">
+      {close.length > 0 && (
+        <p className="c-clash" role="status">
+          ⚠ Within 1 hour of {close.map((c) => `${c.order.customerName} (${timeLabel(c.order.dueAt)})`).join(' and ')}.
+        </p>
+      )}
+      <p>
+        {others.length === 1 ? 'Also that day: ' : `${others.length} other orders that day: `}
+        {others.map((o, i) => (
+          <span key={o.order.id} className={o.close && time ? 'c-sameday-close' : ''}>
+            {i > 0 && ', '}
+            {timeLabel(o.order.dueAt)} {o.order.customerName}
+          </span>
+        ))}
+      </p>
+    </div>
   );
 }
