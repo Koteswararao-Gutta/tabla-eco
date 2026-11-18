@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaults, normalizeDB, fromHM, fmt, wrange, mondayOf, iso, SEED_WEEK } from './model';
+import { defaults, encodeWeek, normalizeDB, fromHM, fmt, wrange, mondayOf, iso, SEED_WEEK } from './model';
 
 describe('shift planner model', () => {
   it('defaults have the 7 staff and the seeded week', () => {
@@ -37,5 +37,21 @@ describe('shift planner model', () => {
     expect(fmt(645)).toBe('10:45am');
     expect(wrange('2026-09-21')).toBe('Sep 21 – 27');
     expect(iso(mondayOf(new Date(2026, 10, 18)))).toBe('2026-11-16');
+  });
+
+  it('a saved week has no array directly inside an array, and reads back the same', () => {
+    const d = defaults();
+    const w = d.weeks[SEED_WEEK];
+    w.shifts[0].p1[0] = [600, 840, 'prep'];
+    const stored = encodeWeek(w);
+    const nested = (v: unknown, inArray: boolean): boolean =>
+      Array.isArray(v)
+        ? inArray || v.some((x) => nested(x, true))
+        : !!v && typeof v === 'object' && Object.values(v).some((x) => nested(x, false));
+    expect(nested(stored, false)).toBe(false);
+    expect(stored.shifts[0].p1).toEqual([{ s: 600, e: 840, pos: 'prep' }, { s: 1020, e: 1260 }]);
+    expect(JSON.stringify(stored)).not.toContain('undefined');
+    const back = normalizeDB({ config: d.config, weeks: { [SEED_WEEK]: JSON.parse(JSON.stringify(stored)) } });
+    expect(back?.weeks[SEED_WEEK]).toEqual(w);
   });
 });

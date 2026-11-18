@@ -15,7 +15,7 @@ type Person = { id: string; name: string; active: boolean };
 const staffConfig = (page: Page) =>
   page.evaluate(() => JSON.parse(localStorage.getItem('tabla:singletons') || '{}').staffConfig as { people: Person[] } | undefined);
 const staffWeeks = (page: Page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('tabla:staffWeeks') || '{}') as Record<string, { shifts: Record<string, number[][]>[] }>);
+  page.evaluate(() => JSON.parse(localStorage.getItem('tabla:staffWeeks') || '{}') as Record<string, { shifts: Record<string, { s: number; e: number; pos?: string }[]>[] }>);
 
 /** The bottom of `sel` must sit above the manager's fixed tab bar. */
 async function aboveTabBar(page: Page, sel: string) {
@@ -71,7 +71,7 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   await expect(page.locator('#edit')).toBeVisible();
   await page.locator('#editBox').getByRole('button', { name: 'Food prep' }).click();
   await expect(page.locator('#edit')).toBeHidden();
-  await expect.poll(async () => (await staffWeeks(page))['2026-09-21']?.shifts[0][meena!.id]?.[0]?.[2]).toBe('prep');
+  await expect.poll(async () => (await staffWeeks(page))['2026-09-21']?.shifts[0][meena!.id]?.[0]?.pos).toBe('prep');
   await expect(track.locator('.bar.prep')).toHaveCount(1);
   // ...and the other window has it too.
   await page2.locator('.views [data-v="schedule"]').click();
@@ -85,6 +85,12 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   await page.screenshot({ path: `${SHOTS}/staff-settings.png` });
   await page.locator('#minStaff').selectOption('3');
   await aboveTabBar(page, '.savebar');
+  // Unsaved settings survive a trip to another manager tab.
+  await page.getByRole('link', { name: 'Screens' }).click();
+  await expect(page.getByTestId('staff-planner')).toHaveCount(0);
+  await page.getByRole('link', { name: 'Staff' }).click();
+  await expect(page.locator('.savebar.dirty')).toBeVisible();
+  await expect(page.locator('#minStaff')).toHaveValue('3');
   await page.getByRole('button', { name: 'Save settings' }).click();
   await expect.poll(async () => ((await staffConfig(page)) as unknown as { settings: { minStaff: number } }).settings.minStaff).toBe(3);
 
