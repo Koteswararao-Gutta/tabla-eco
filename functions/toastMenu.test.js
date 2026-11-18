@@ -84,7 +84,7 @@ test('readToastMenu falls back to the next way and reports every reason', async 
   );
 });
 
-test('nextStatus alerts once after 30 minutes of failing, and once when it works again', () => {
+test('nextStatus alerts once after failing for an hour, and once when it works again', () => {
   const t0 = Date.UTC(2026, 10, 18, 22, 0);
   let s = nextStatus(null, { ok: true, source: 'page' }, t0);
   assert.equal(s.alert, null);

@@ -10,7 +10,7 @@ export const TOAST_PAGE =
 export const MENU_LINK = 'https://koteswararao-gutta.github.io/tabla-eco/#/manager/screens';
 
 /** Tell the kitchen/manager phones after the menu has failed to update for this long. */
-export const ALERT_AFTER_MS = 30 * 60_000;
+export const ALERT_AFTER_MS = 60 * 60_000; // two failed hourly runs in a row
 
 const BROWSERS = [
   // Desktop Chrome first, then a phone (Toast serves the same data to both).

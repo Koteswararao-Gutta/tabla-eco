@@ -90,12 +90,12 @@ export const orderReminder = onTaskDispatched(
 // ---------- Toast menu ----------
 
 /**
- * Every 5 minutes: reads the menu from Tabla's Toast ordering page and saves it to toastMenu/current
+ * Every hour: reads the menu from Tabla's Toast ordering page and saves it to toastMenu/current
  * (only when something changed). Backup: a hidden Chrome. If both fail, the last good menu stays and,
- * after 30 minutes, the phones get one alert.
+ * after two failed runs in a row, the phones get one alert.
  */
 export const syncToastMenu = onSchedule(
-  { schedule: 'every 5 minutes', timeZone: TIME_ZONE, memory: '2GiB', timeoutSeconds: 120, maxInstances: 1, retryCount: 0 },
+  { schedule: 'every 1 hours', timeZone: TIME_ZONE, memory: '2GiB', timeoutSeconds: 120, maxInstances: 1, retryCount: 0 },
   async () => {
     const db = getFirestore();
     const currentRef = db.doc('toastMenu/current');
