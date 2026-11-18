@@ -7,10 +7,12 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { checkRequest, readOrderPhoto } from './readOrder.js';
-import { alertFor, deadTokens, onRing, planReminder } from './reminders.js';
+import { alertFor, deadTokens, onRing, planReminder, TIME_ZONE } from './reminders.js';
+import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome } from './toastMenu.js';
 
 initializeApp();
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
@@ -84,3 +86,52 @@ export const orderReminder = onTaskDispatched(
     logger.info(`orderReminder ${orderId}: sent ${res.successCount}, failed ${res.failureCount}, removed ${dead.length}`);
   },
 );
+
+// ---------- Toast menu ----------
+
+/**
+ * Every hour: reads the menu from Tabla's Toast ordering page and saves it to toastMenu/current
+ * (only when something changed). Backup: a hidden Chrome. If both fail, the last good menu stays and,
+ * after two failed runs in a row, the phones get one alert.
+ */
+export const syncToastMenu = onSchedule(
+  { schedule: 'every 1 hours', timeZone: TIME_ZONE, memory: '2GiB', timeoutSeconds: 120, maxInstances: 1, retryCount: 0 },
+  async () => {
+    const db = getFirestore();
+    const currentRef = db.doc('toastMenu/current');
+    const statusRef = db.doc('toastMenu/status');
+    const now = Date.now();
+    let result;
+    try {
+      const { menu, source } = await readToastMenu([
+        ['page', () => readFromPage()],
+        ['chrome', () => readWithChrome()],
+      ]);
+      const saved = await currentRef.get();
+      if (saved.get('hash') !== menu.hash) {
+        await currentRef.set({ ...menu, changedAt: now, source });
+        logger.info(`syncToastMenu: menu changed (${menu.itemCount} items, ${menu.soldOutCount} sold out) via ${source}`);
+      }
+      result = { ok: true, source };
+    } catch (e) {
+      logger.warn('syncToastMenu: could not read the Toast menu', e?.message ?? e);
+      result = { ok: false, error: e?.message ?? e };
+    }
+    const prev = (await statusRef.get()).data() ?? null;
+    const { status, alert } = nextStatus(prev, result, now);
+    await statusRef.set(status);
+    if (alert) await sendToAllDevices({ ...alert, link: MENU_LINK }, 'toast-menu');
+  },
+);
+
+/** Sends one alert to every phone that turned alerts on. */
+async function sendToAllDevices(alert, tag) {
+  const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
+  if (!docs.length) return;
+  const res = await getMessaging().sendEachForMulticast({
+    tokens: docs.map((d) => d.get('token')),
+    data: { ...alert, tag },
+    webpush: { headers: { Urgency: 'normal', TTL: '3600' } },
+  });
+  logger.info(`${tag} alert: sent ${res.successCount}, failed ${res.failureCount}`);
+}
