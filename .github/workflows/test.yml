@@ -18,6 +18,8 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --trace retain-on-failure
+      - if: failure()
+        run: for f in test-results/*/error-context.md; do echo "=== $f"; cat "$f"; done
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
