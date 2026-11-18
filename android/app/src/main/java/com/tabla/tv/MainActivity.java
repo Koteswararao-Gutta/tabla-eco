@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
     private boolean loadFailed;
     private int backPresses;
     private long firstBackAt;
-    private int lastReloadDay = -1;
+    private long lastLoadAt;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
-                loadFailed = false;
+                if (!loadFailed) lastLoadAt = System.currentTimeMillis();
             }
 
             @Override
@@ -203,24 +203,36 @@ public class MainActivity extends Activity {
 
     private final Runnable retry = () -> {
         if (web == null || !loadFailed) return;
+        loadFailed = false;
         web.getSettings().setCacheMode(online() ? WebSettings.LOAD_DEFAULT : WebSettings.LOAD_CACHE_ELSE_NETWORK);
         web.loadUrl(SITE + prefs.getString("screen", "tv/1"));
     };
 
-    /** Reloads once a night at 4 AM so screens pick up app updates and start fresh. */
+    /**
+     * Reloads once a day, after 4 AM, so screens pick up app updates and start fresh.
+     * If the TV was off or asleep at 4 AM, it catches up as soon as it is on again.
+     */
     private final Runnable nightly = new Runnable() {
         @Override
         public void run() {
-            Calendar c = Calendar.getInstance();
-            int day = c.get(Calendar.DAY_OF_YEAR);
-            if (web != null && c.get(Calendar.HOUR_OF_DAY) == 4 && day != lastReloadDay && online()) {
-                lastReloadDay = day;
-                web.clearCache(false);
-                web.reload();
-            }
+            reloadIfStale();
             handler.postDelayed(this, CHECK_MS);
         }
     };
+
+    private void reloadIfStale() {
+        if (web == null || loadFailed || lastLoadAt == 0 || !online()) return;
+        Calendar c = Calendar.getInstance();
+        if (c.get(Calendar.HOUR_OF_DAY) < 4) c.add(Calendar.DAY_OF_YEAR, -1);
+        c.set(Calendar.HOUR_OF_DAY, 4);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        if (lastLoadAt < c.getTimeInMillis()) {
+            lastLoadAt = System.currentTimeMillis();
+            web.clearCache(false);
+            web.reload();
+        }
+    }
 
     private boolean online() {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -270,7 +282,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (web != null) web.onResume();
+        if (web != null) {
+            web.onResume();
+            reloadIfStale(); // TV woke from standby after missing the 4 AM reload
+        }
     }
 
     @Override
