@@ -1,0 +1,63 @@
+name: Deploy server code
+# Deploys functions/ (photo-to-order, reminders) and firestore.rules to Firebase on every merge to main.
+# Needs two repository secrets: FIREBASE_SERVICE_ACCOUNT (JSON key) and ANTHROPIC_API_KEY.
+on:
+  push:
+    branches: [main]
+    paths: ['functions/**', 'firestore.rules', 'firebase.json', '.github/workflows/functions.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: functions
+  cancel-in-progress: false
+env:
+  PROJECT: tabla-eco-2e94b
+  FIREBASE: npx --yes firebase-tools@15.36.0
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - id: check
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$SA" ] || [ -z "$KEY" ]; then
+            echo "::warning::Skipped: add the FIREBASE_SERVICE_ACCOUNT and ANTHROPIC_API_KEY secrets first."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - if: steps.check.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - if: steps.check.outputs.ready == 'true'
+        run: npm ci --prefix functions && npm test --prefix functions
+      - if: steps.check.outputs.ready == 'true'
+        name: Sign in to Google Cloud
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - if: steps.check.outputs.ready == 'true'
+        name: Store the Anthropic key in Secret Manager (only when it changed)
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          current=$($FIREBASE functions:secrets:access ANTHROPIC_API_KEY --project $PROJECT 2>/dev/null || true)
+          if [ "$current" != "$KEY" ]; then
+            printf '%s' "$KEY" | $FIREBASE functions:secrets:set ANTHROPIC_API_KEY --data-file=- --project $PROJECT --non-interactive --force
+          fi
+      - if: steps.check.outputs.ready == 'true'
+        run: $FIREBASE deploy --only functions,firestore:rules --project $PROJECT --non-interactive --force
+      - if: steps.check.outputs.ready == 'true'
+        name: Remove old key versions
+        continue-on-error: true
+        run: $FIREBASE functions:secrets:prune --project $PROJECT --force
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

@@ -787,7 +787,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
             return;
           }
           if (e.type === 'pointerup' && !s.moved && !s.cancel) {
-            swallowNextClick();
+            swallowNextClick(e);
             openEdit(pid, k);
             return;
           }
@@ -821,7 +821,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         (Sd[pid] = list).push([ns, ne]);
         saveWeek(wk);
         render();
-        swallowNextClick();
+        swallowNextClick(e);
         openEdit(pid, list.length - 1);
       });
     });
@@ -930,11 +930,18 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   /* ---------- tap safety ---------- */
   // On phones the browser sends a click right after a tap ends. When that tap opened the editor,
   // the click would land on the sheet that just appeared. Swallow that one click.
-  let swallowUntil = 0;
-  const swallowNextClick = () => (swallowUntil = performance.now() + 450);
+  // Only a click at the tap's own spot is swallowed: a real click on another button (e.g. a
+  // fast mouse user picking a position) always goes through, even straight away.
+  let swallowUntil = 0, swallowX = 0, swallowY = 0;
+  const swallowNextClick = (at: { clientX: number; clientY: number }) => {
+    swallowUntil = performance.now() + 450;
+    swallowX = at.clientX;
+    swallowY = at.clientY;
+  };
   document.addEventListener('click', (e) => {
     if (performance.now() < swallowUntil) {
       swallowUntil = 0;
+      if (Math.abs(e.clientX - swallowX) > 12 || Math.abs(e.clientY - swallowY) > 12) return;
       e.stopPropagation();
       e.preventDefault();
     }

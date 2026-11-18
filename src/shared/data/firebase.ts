@@ -6,7 +6,7 @@
 //   Storage needs a paid plan. Pictures are shrunk to stay well under Firestore's 1 MB document limit.
 // - now() is corrected to the server clock, so every TV agrees on the loop position.
 
-import { initializeApp, type FirebaseOptions } from 'firebase/app';
+import { initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import {
   deleteDoc as fsDelete,
@@ -23,10 +23,11 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import type { CollectionName, Collections, Picture } from './types';
+import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
@@ -34,13 +35,14 @@ const CLOCK_REFRESH_MS = 60 * 60 * 1000;
 
 export class FirebaseStore implements DataStore {
   readonly mode = 'firebase' as const;
+  private app: FirebaseApp;
   private db: Firestore;
   private ready: Promise<void>;
   private offset = 0;
   private urlCache = new Map<string, Promise<string | null>>();
 
   constructor(config: FirebaseOptions) {
-    const app = initializeApp(config);
+    const app = (this.app = initializeApp(config));
     this.db = initializeFirestore(app, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
       ignoreUndefinedProperties: true,
@@ -187,6 +189,45 @@ export class FirebaseStore implements DataStore {
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
   }
+
+  // ---------- reading paper orders ----------
+  async readOrderPhoto(photo: Blob): Promise<ScannedOrder> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please try again when online.');
+    let jpeg: Blob;
+    try {
+      jpeg = await scanSize(photo);
+    } catch {
+      throw new Error("That photo couldn't be opened. Please try another one.");
+    }
+    await this.ready;
+    const d = new Date(this.now());
+    const p = (n: number) => String(n).padStart(2, '0');
+    const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
+    try {
+      const res = await call({
+        image: await toBase64(jpeg),
+        mediaType: 'image/jpeg',
+        today: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+        weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
+      });
+      return res.data;
+    } catch (e) {
+      console.warn('readOrder', e);
+      throw new Error("Couldn't read the photo right now. Please try again, or type the order in.");
+    }
+  }
+}
+
+/** Long side 1600 px, JPEG: sharp enough to read handwriting, small enough to send quickly. */
+async function scanSize(photo: Blob): Promise<Blob> {
+  const bmp = await createImageBitmap(photo);
+  const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return new Promise<Blob>((r, j) => canvas.toBlob((b) => (b ? r(b) : j(new Error('encode'))), 'image/jpeg', 0.85));
 }
 
 /** A stable id for this device, used only for its clock document. */
