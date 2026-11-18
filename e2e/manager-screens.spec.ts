@@ -47,6 +47,7 @@ test('adding a picture creates a slot after that spot and restarts the loop on i
   await page.getByRole('button', { name: 'Add a picture after picture 1' }).click();
   const sheet = page.getByRole('dialog');
   await expect(sheet).toBeVisible();
+  await expect(page.getByTestId('add-hint')).toContainText('TV 2 shows the restaurant name in this spot');
   await page.getByTestId('add-file').setInputFiles({ name: 'dish.png', mimeType: 'image/png', buffer: PNG });
   await expect(sheet.locator('img')).toBeVisible();
   await sheet.getByRole('button', { name: 'Special' }).click();

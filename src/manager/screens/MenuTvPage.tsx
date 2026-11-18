@@ -1,4 +1,7 @@
 // One front menu TV (TV 1 to TV 4): its pictures in play order, + to add, tap to change.
+// Writes: picture changes save the whole slot (so a removed TV entry really goes, even on a
+// merging backend); seconds, transition, order and end date update only that field, so two
+// phones editing different things never overwrite each other.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
@@ -178,6 +181,15 @@ const KINDS: { value: Kind; label: string }[] = [
   { value: 'catering', label: 'Catering' },
 ];
 
+/** What the TVs show for a newly added picture, in plain words. */
+function addHint(tv: ScreenId, kind: Kind): string {
+  const partner = PARTNER[tv];
+  const other = partner ? screenName(partner) : 'The other TV';
+  return kind === 'menu'
+    ? `${screenName(tv)} shows it right away, then in this spot in the loop. ${other} shows the restaurant name in this spot until you add its picture.`
+    : `It shows right away, then in this spot in the loop. ${other} shows it too until you add a picture for ${other}.`;
+}
+
 function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; after: number; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<Kind>('menu');
@@ -220,7 +232,7 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
           <input className="t-input" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} />
         </Field>
       )}
-      <p className="sc-hint">It plays right away on all front TVs, then in this spot in the loop.</p>
+      <p className="sc-hint" data-testid="add-hint">{addHint(tv, kind)}</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
       <div className="sc-actions">
         <button className="t-btn" onClick={onClose}>Cancel</button>
@@ -263,7 +275,7 @@ function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   const save = () => {
     if (secs == null) return setError('Seconds must be a whole number from 1 to 3600.');
     run(async () => {
-      await store.setDoc('slots', slot.id, { ...slot, seconds: secs, transition });
+      await store.updateDoc('slots', slot.id, { seconds: secs, transition });
       await restartLoop(slot.id);
       onClose();
     });
@@ -297,12 +309,12 @@ function OptionsSheet({ tv, sorted, slot, onClose, onReplace }: { tv: ScreenId; 
 
   const move = (dir: -1 | 1) =>
     run(async () => {
-      for (const s of moveSlot(sorted, index, dir)) await store.setDoc('slots', s.id, s);
+      for (const s of moveSlot(sorted, index, dir)) await store.updateDoc('slots', s.id, { order: s.order });
       await restartLoop(slot.id);
     });
   const saveEnds = (value: number | null) =>
     run(async () => {
-      await store.setDoc('slots', slot.id, { ...slot, endsAt: value });
+      await store.updateDoc('slots', slot.id, { endsAt: value });
       await restartLoop(slot.id);
       if (value == null) setEnds('');
     });
