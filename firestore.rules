@@ -9,13 +9,13 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function small() { return request.resource.data.size() <= 100; }
 
-    match /screens/{id}     { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /slots/{id}       { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /pictures/{id}    { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /orders/{id}      { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /staffWeeks/{id}  { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /heartbeats/{id}  { allow read: if signedIn(); allow write: if signedIn() && small(); }
-    match /clocks/{id}      { allow read: if signedIn(); allow write: if signedIn() && small(); }
+    match /screens/{id}     { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /slots/{id}       { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /pictures/{id}    { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /orders/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    match /clocks/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     // Phone alert addresses: devices can save their own, but nobody can read the list (only the server does).
     match /pushTokens/{id} {
       allow read: if false;
