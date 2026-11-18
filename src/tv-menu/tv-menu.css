@@ -1,7 +1,8 @@
-/* Front menu TV. Whole picture on black (never cropped); new picture comes in over the old one. */
+/* Front menu TV. Whole picture on the screen's black (never cropped); new picture comes in over the old one.
+   Layers are opaque (the .t-screen background, inherited) so a picture with a different shape fully covers the old one. */
 .tvm, .tvm * { cursor: none; }
-.tvm { position: absolute; inset: 0; overflow: hidden; background: #000; }
-.tvm-layer { position: absolute; inset: 0; background: #000; will-change: opacity, transform; }
+.tvm { position: absolute; inset: 0; overflow: hidden; background: inherit; }
+.tvm-layer { position: absolute; inset: 0; background: inherit; will-change: opacity, transform; }
 .tvm-pic { display: block; width: 100%; height: 100%; object-fit: contain; }
 
 .tvm-in-fade { animation: tvm-fade-in 700ms ease-in-out both; }

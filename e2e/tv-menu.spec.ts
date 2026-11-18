@@ -119,6 +119,46 @@ test('no picture, a broken picture or an empty loop shows the idle look', async 
   await expect(now(tv1)).toHaveCSS('cursor', 'none');
 });
 
+// Test-only: take a picture's bytes out of (or back into) the local picture storage.
+async function pictureBytes(page: Page, id: string, action: 'remove' | 'restore') {
+  await page.evaluate(
+    ({ id, action }) =>
+      new Promise<void>((resolve, reject) => {
+        const w = window as unknown as { __saved?: Blob };
+        const open = indexedDB.open('tabla-pictures', 1);
+        open.onsuccess = () => {
+          const s = open.result.transaction('blobs', 'readwrite').objectStore('blobs');
+          if (action === 'restore') {
+            s.put(w.__saved, id).onsuccess = () => resolve();
+          } else {
+            const get = s.get(id);
+            get.onsuccess = () => {
+              w.__saved = get.result;
+              s.delete(id).onsuccess = () => resolve();
+            };
+          }
+        };
+        open.onerror = () => reject(open.error);
+      }),
+    { id, action },
+  );
+}
+
+test('a picture that is missing at first shows once it is back', async ({ context }) => {
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const pic = all['slot-menu-1'].pictures.tv1;
+  await pictureBytes(control, pic, 'remove');
+  await setLoop(control, { replace: true, patch: { 'slot-menu-1': { ...all['slot-menu-1'], seconds: 1.5 }, 'slot-menu-2': { ...all['slot-menu-2'], seconds: 1.5 } }, firstSlotId: 'slot-menu-1' });
+  const [tv1] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-slot-id', 'slot-menu-1');
+  await expect(now(tv1)).toHaveAttribute('data-state', 'idle');
+  await pictureBytes(control, pic, 'restore');
+  // next time round the loop the picture is asked for again and shows
+  await expect(now(tv1)).toHaveAttribute('data-picture-id', pic, { timeout: 5_000 });
+  await expect(now(tv1)).toHaveAttribute('data-slot-id', 'slot-menu-1');
+});
+
 test('screenshots at 1920x1080', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const { control, tvs } = await openTvs(context);

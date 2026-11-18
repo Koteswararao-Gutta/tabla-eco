@@ -9,6 +9,8 @@ import './tv-menu.css';
 
 /** How long a leaving picture stays on screen; matches the CSS animations. */
 const TRANSITION_MS = 700;
+/** Longest a switch waits for a picture that is still loading. */
+const MAX_WAIT_MS = 500;
 
 interface Layer {
   n: number;
@@ -19,8 +21,10 @@ interface Layer {
   anim: Transition;
 }
 
-/** Loads picture URLs (and decodes them) ahead of time. `undefined` = still loading, `null` = missing or broken. */
-function usePictures(ids: (string | null)[]) {
+/** Loads picture URLs (and decodes them) ahead of time. `undefined` = still loading, `null` = missing or broken.
+ *  A miss is never final: the id is asked again on the next slot change (`retry`), so a picture
+ *  that was briefly unreachable comes back on its own. */
+function usePictures(ids: (string | null)[], retry: number) {
   const [urls, setUrls] = useState<Record<string, string | null>>({});
   const asked = useRef(new Set<string>());
   const key = ids.join('|');
@@ -38,11 +42,17 @@ function usePictures(ids: (string | null)[]) {
           return url;
         })
         .catch(() => null)
-        .then((url) => setUrls((m) => ({ ...m, [id]: url })));
+        .then((url) => {
+          if (!url) asked.current.delete(id); // try again next time
+          setUrls((m) => ({ ...m, [id]: url }));
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  const broken = (id: string) => setUrls((m) => ({ ...m, [id]: null }));
+  }, [key, retry]);
+  const broken = (id: string) => {
+    asked.current.delete(id);
+    setUrls((m) => ({ ...m, [id]: null }));
+  };
   return { urls, broken };
 }
 
@@ -69,15 +79,27 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   }, []);
 
   const target: Target | null = ready ? targetFor(slots!, screens!, loop ?? null, screenId, store.now()) : null;
-  const { urls, broken } = usePictures([target?.pictureId ?? null, target?.nextPictureId ?? null]);
+  const { urls, broken } = usePictures([target?.pictureId ?? null, target?.nextPictureId ?? null], tick);
   const resolved = !!target && (target.pictureId === null || urls[target.pictureId] !== undefined);
 
-  // Switch only once the new picture is ready; until then the old one stays up.
+  // Switch once the new picture is ready, so the old one stays up instead of a black flash.
+  // If it is slow (not preloaded, e.g. just after a restart), switch anyway after a short wait
+  // so this TV stays in step with the others; the picture shows when it arrives.
+  const [late, setLate] = useState<string | null>(null);
+  useEffect(() => {
+    if (!target || resolved) return;
+    const k = target.key;
+    const t = setTimeout(() => setLate(k), MAX_WAIT_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target?.key, resolved]);
+  const canSwitch = resolved || (!!target && late === target.key);
+
   const [shown, setShown] = useState<Layer | null>(null);
   const [leaving, setLeaving] = useState<Layer | null>(null);
   const counter = useRef(0);
   useEffect(() => {
-    if (!target || !resolved || shown?.key === target.key) return;
+    if (!target || !canSwitch || shown?.key === target.key) return;
     setLeaving(shown);
     setShown({
       n: ++counter.current,
@@ -87,14 +109,15 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
       anim: shown ? target.transition : 'none',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target?.key, resolved]);
+  }, [target?.key, canSwitch]);
   useEffect(() => {
     if (!leaving) return;
     const t = setTimeout(() => setLeaving(null), TRANSITION_MS + 100);
     return () => clearTimeout(t);
   }, [leaving]);
 
-  const urlOf = (l: Layer) => (l.pictureId ? urls[l.pictureId] ?? null : null);
+  /** A layer's URL: a string, null (show idle) or undefined (still loading: stay black). */
+  const urlOf = (l: Layer) => (l.pictureId ? urls[l.pictureId] : null);
   const layer = (l: Layer, out: boolean) => {
     const url = urlOf(l);
     const anim = out ? (shown?.anim ?? 'none') : l.anim;
@@ -102,20 +125,20 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
       <div key={l.n} className={`tvm-layer tvm-${out ? 'out' : 'in'}-${anim}`} aria-hidden={out || undefined}>
         {url ? (
           <img className="tvm-pic" src={url} alt="" draggable={false} onError={() => l.pictureId && broken(l.pictureId)} />
-        ) : (
+        ) : url === null ? (
           <Idle line={name} />
-        )}
+        ) : null}
       </div>
     );
   };
 
-  const shownUrl = shown ? urlOf(shown) : null;
+  const shownUrl = shown ? urlOf(shown) : undefined;
   return (
     <ScreenSurface testId="menu-tv">
       <div
         className="tvm"
         data-testid="menu-tv-now"
-        data-state={!shown ? 'loading' : shownUrl ? 'picture' : 'idle'}
+        data-state={shownUrl === undefined ? 'loading' : shownUrl ? 'picture' : 'idle'}
         data-slot-id={shown?.slotId ?? ''}
         data-picture-id={shownUrl ? shown!.pictureId! : ''}
       >
