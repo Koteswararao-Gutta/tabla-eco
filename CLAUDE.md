@@ -1,0 +1,48 @@
+# Tabla Eco
+
+Small internal system for Tabla, an Indian restaurant: 5 TVs, a kitchen tablet and a manager phone app. No login, no payments. Keep everything simple and minimal (ChatGPT/Claude-like look).
+
+Plans: system plan https://claude.ai/artifact/LxM1Y7otkLEgTrYQpzoZTa · build plan https://claude.ai/artifact/Dx3DdyjXJTSJvGXeCBHQRj
+
+## Stage 1: everything runs in Chrome
+
+One web app (Vite + React + TypeScript), hash routes:
+
+| Route | Screen | Folder (owner) |
+| --- | --- | --- |
+| `#/tv/1` … `#/tv/4` | Front menu TVs. TV 1 left, TV 2 right; TV 3/TV 4 mirror them | `src/tv-menu/` (agent 1) |
+| `#/manager/screens` | Manager: TV tiles, picture list per TV, + to add | `src/manager/screens/` (agent 2) |
+| `#/tv/5` | Music TV: YouTube playlist + catering clip between songs | `src/tv-music/` (agent 3) |
+| `#/manager/catering`, `#/kitchen` | Catering orders; kitchen tablet with PIN | `src/manager/catering/`, `src/kitchen/` (agent 4) |
+| `#/manager/staff` | Shift planner (port of `reference/shift-planner.html`) | `src/manager/staff/` (agent 5) |
+
+Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**`, `src/App.tsx`, `src/main.tsx`, `src/manager/ManagerShell.tsx`, configs, `e2e/helpers.ts`, `e2e/foundation.spec.ts`, this file.
+
+## Rules
+
+- **Data only through `@shared/data`** (`store`, `useCollection`, `useDoc`, `usePictureUrl`, `useNow`, `useHeartbeat`). Never touch localStorage, IndexedDB or a backend directly. Stage 1 runs on `LocalStore` (one browser; windows sync via the storage event); Firebase replaces it later behind the same `DataStore` interface, so screens must not depend on local-only behaviour.
+- **Time:** use `store.now()` / `useNow()` for anything synced, never `Date.now()`.
+- **Menu loop sync:** use `loopPosition` and `pictureFor` from `@shared/clock/loop`. Seconds and transition live on the `Slot`, shared by all menu TVs.
+- **Look:** use `@shared/ui` components and `.t-*` classes / CSS variables from `theme.css`. Area-specific CSS goes in a `.css` file inside your folder, using the variables. No new colours, no UI libraries.
+- **Screens must survive:** reloads, the internet dropping, missing pictures, empty data. TVs never show a browser error or a blank white page.
+- **Keep it simple.** No features beyond the plan. Big touch targets (48 px+). Plain words in the UI.
+- Each area exports a default component from its `index.tsx`. Tests for an area go in `e2e/<area>.spec.ts` (e.g. `e2e/tv-menu.spec.ts`) and unit tests next to the code as `*.test.ts`.
+
+## Commands
+
+```
+npm install
+npm run dev          # http://localhost:5173/#/  (open screens in separate windows)
+npm run typecheck
+npm test             # unit tests (vitest)
+npm run e2e          # Chrome tests (Playwright). In the cloud container: PW_CHROMIUM=/opt/pw-browsers/chromium npm run e2e
+```
+
+Sample data seeds on first load (PIN 1234). Reset by clearing site data, or `resetDemoData()` from `@shared/seed/seed`.
+
+## Definition of done (every agent)
+
+1. `npm run typecheck`, `npm test` and your `e2e/<area>.spec.ts` pass.
+2. Screenshots of your screens checked by eye (TV views at 1920x1080, phone views at 390x844).
+3. Only files in your folder (plus your e2e spec) changed.
+4. The architect agent approves (must-fix items cleared).
