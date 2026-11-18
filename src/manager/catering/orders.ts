@@ -109,6 +109,42 @@ export const isSoon = (o: Order, now: number) => o.status === 'open' && o.dueAt 
 export const itemLines = (items: string) =>
   items.split('\n').map((l) => l.trim()).filter(Boolean);
 
+// ---------- month calendar ----------
+
+/** The weeks shown for a month, Sunday first: each day is local midnight (ms), or null outside the month. */
+export function monthGrid(year: number, month: number): (number | null)[][] {
+  const first = new Date(year, month, 1);
+  const days = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = Array(first.getDay()).fill(null);
+  for (let d = 1; d <= days; d++) cells.push(new Date(year, month, d).getTime());
+  while (cells.length % 7) cells.push(null);
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+/** Orders by their day (local midnight), each day's orders earliest first. */
+export function ordersByDay<T extends Order>(orders: T[]): Map<number, T[]> {
+  const days = new Map<number, T[]>();
+  for (const o of [...orders].sort(byDueAsc)) {
+    const d = dayStart(o.dueAt);
+    days.set(d, [...(days.get(d) ?? []), o]);
+  }
+  return days;
+}
+
+/** Orders within this long of each other count as a clash: the kitchen would be making both at once. */
+export const CLASH_MS = 60 * MIN;
+
+/** Other open orders on the same day as `dueAt`, earliest first, with the ones within an hour marked. */
+export function sameDayOrders<T extends Order & { id?: string }>(orders: T[], dueAt: number, skipId?: string): { order: T; close: boolean }[] {
+  const day = dayStart(dueAt);
+  return orders
+    .filter((o) => o.status === 'open' && o.id !== skipId && dayStart(o.dueAt) === day)
+    .sort(byDueAsc)
+    .map((order) => ({ order, close: Math.abs(order.dueAt - dueAt) < CLASH_MS }));
+}
+
 // ---------- form ----------
 
 export interface OrderForm {
@@ -143,8 +179,8 @@ export function fromInputs(date: string, time: string): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-export function emptyForm(now: number): OrderForm {
-  return { customerName: '', phone: '', date: toDateInput(now), time: '', type: 'pickup', address: '', people: '', items: '', notes: '' };
+export function emptyForm(now: number, day?: number): OrderForm {
+  return { customerName: '', phone: '', date: toDateInput(day ?? now), time: '', type: 'pickup', address: '', people: '', items: '', notes: '' };
 }
 
 export function formFromOrder(o: Order): OrderForm {

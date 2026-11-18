@@ -302,6 +302,36 @@ test('paste a customer message fills the new order form, then saves', async ({ b
   await context.close();
 });
 
+test('calendar shows the month, and a new order from it warns about a nearby order', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: 'Calendar' }).click();
+  const cal = manager.getByRole('dialog', { name: 'Calendar' });
+  const long = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  // Seed: Priya today, Desert Tech tomorrow at 12:00 PM.
+  await expect(cal.getByRole('button', { name: `${long(today)}: 1 order` })).toBeVisible();
+  await expect(cal.getByRole('button', { name: 'Priya Sharma', exact: false })).toBeVisible();
+  await manager.waitForTimeout(500); // let the sheet finish sliding in
+  await shot(manager, 'manager-calendar');
+  if (tomorrow.getMonth() !== today.getMonth()) await cal.getByRole('button', { name: 'Next month' }).click();
+  await cal.getByRole('button', { name: `${long(tomorrow)}: 1 order` }).click();
+  await expect(cal.getByText('Desert Tech office')).toBeVisible();
+  await cal.getByRole('button', { name: /^\+ New order on/ }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  const pad = (n: number) => String(n).padStart(2, '0');
+  await expect(sheet.getByLabel('Date')).toHaveValue(`${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`);
+  await expect(sheet.getByTestId('same-day')).toContainText('Also that day: 12:00 PM Desert Tech office');
+  await sheet.getByLabel('Time').fill('12:30');
+  await expect(sheet.getByText('⚠ Within 1 hour of Desert Tech office (12:00 PM).')).toBeVisible();
+  await manager.waitForTimeout(500);
+  await shot(manager, 'manager-calendar-clash');
+  await sheet.getByLabel('Time').fill('15:00');
+  await expect(sheet.getByText(/Within 1 hour/)).toHaveCount(0);
+  await context.close();
+});
+
 test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
