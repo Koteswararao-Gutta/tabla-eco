@@ -73,16 +73,17 @@ export function useNow(everyMs = 250): number {
   return now;
 }
 
-/** Screens call this so the manager can show a green (online) or grey (offline) dot. */
+/** Screens call this so the manager can show a green (online) or grey (offline) dot.
+ *  Every 2 minutes: 6 screens x 720 = ~4,300 writes a day, well inside Firestore's free 20,000. */
 export function useHeartbeat(screenId: ScreenId): void {
   useEffect(() => {
-    const beat = () => store.updateDoc('screens', screenId, { lastSeen: store.now() });
+    const beat = () => store.setDoc('heartbeats', screenId, { lastSeen: store.now() });
     beat();
-    const t = setInterval(beat, 30_000);
+    const t = setInterval(beat, 120_000);
     return () => clearInterval(t);
   }, [screenId]);
 }
 
-/** A screen counts as online if it reported in the last 75 seconds. */
+/** A screen counts as online if it reported in the last 5 minutes. */
 export const isOnline = (lastSeen: number | undefined, now: number): boolean =>
-  !!lastSeen && now - lastSeen < 75_000;
+  !!lastSeen && now - lastSeen < 300_000;

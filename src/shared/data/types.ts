@@ -12,8 +12,6 @@ export interface Screen {
   side?: 'left' | 'right';
   /** Menu TVs only: when set, this TV shows exactly what the named TV shows. */
   mirrorOf?: ScreenId | null;
-  /** Written by the screen itself every 30 s so the manager can show online/offline. */
-  lastSeen?: number;
 }
 
 export type Transition = 'fade' | 'slide' | 'none';
@@ -118,5 +116,8 @@ export interface Collections {
   /** Single documents: use useSingleton / saveSingleton rather than this collection directly. */
   singletons: Singletons[SingletonId];
   staffWeeks: StaffWeek;
+  /** One doc per screen id: when it last reported in. Kept apart from `screens` so a
+   *  heartbeat doesn't wake every TV's listener (Firestore free-plan read limits). */
+  heartbeats: { lastSeen: number };
 }
 export type CollectionName = keyof Collections;

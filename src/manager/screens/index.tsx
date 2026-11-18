@@ -20,6 +20,7 @@ export default function Screens() {
 
 function Home() {
   const screens = useCollection('screens');
+  const beats = useCollection('heartbeats');
   const now = useNow(5000);
   const nav = useNavigate();
   return (
@@ -34,7 +35,7 @@ function Home() {
               testId={'tile-' + id}
               name={screenName(id)}
               sub={tileLine({ id, mirrorOf: s?.mirrorOf })}
-              online={isOnline(s?.lastSeen, now)}
+              online={isOnline(beats?.find((b) => b.id === id)?.lastSeen, now)}
               onClick={() => nav('/manager/screens/' + id)}
             />
           );
