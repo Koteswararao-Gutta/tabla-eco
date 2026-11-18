@@ -4,6 +4,7 @@ import { ScreenSurface } from '@shared/ui';
 import { store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, groupByDay, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
 import { PIN_LENGTH, expectedPin, press } from './pin';
+import { ackKey, chime, dueReminders } from './reminder';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -128,6 +129,19 @@ function Board() {
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
+  // 1-hour heads-up: a banner per order, with a chime when a new one appears.
+  const [acked, setAcked] = useState<Set<string>>(() => new Set());
+  const reminders = dueReminders(orders ?? [], now, acked);
+  const remindIds = reminders.map(ackKey).join(',');
+  const chimed = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = reminders.filter((o) => !chimed.current.has(ackKey(o)));
+    fresh.forEach((o) => chimed.current.add(ackKey(o)));
+    if (fresh.length) chime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remindIds]);
+  const ack = (o: Order) => setAcked((s) => new Set(s).add(ackKey(o)));
+
   return (
     <div className="k-board">
       <header className="k-bar">
@@ -147,6 +161,18 @@ function Board() {
           </button>
         )}
       </header>
+      {reminders.length > 0 && (
+        <div className="k-remind" role="alert" data-testid="kitchen-reminder">
+          {reminders.map((o) => (
+            <div key={o.id} className="k-remind-row">
+              <span>
+                <b>{o.customerName}</b> {o.type === 'delivery' ? 'delivery' : 'pickup'} at {timeLabel(o.dueAt)}, {countdown(o.dueAt, now).text}
+              </span>
+              <button className="t-btn" onClick={() => ack(o)}>Got it</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!orders ? null : showAll ? (
         <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />
