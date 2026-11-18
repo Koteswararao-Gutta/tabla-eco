@@ -1,5 +1,5 @@
 name: Deploy server code
-# Deploys functions/ (photo-to-order, reminders) and firestore.rules to Firebase on every merge to main.
+# Deploys functions/ (photo-to-order, reminders, Toast menu sync) and firestore.rules to Firebase on every merge to main.
 # Needs two repository secrets: FIREBASE_SERVICE_ACCOUNT (JSON key) and ANTHROPIC_API_KEY.
 on:
   push:

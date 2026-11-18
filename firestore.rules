@@ -24,6 +24,8 @@ service cloud.firestore {
         && request.resource.data.token is string
         && request.resource.data.token.size() <= 4096;
     }
+    // Toast menu: saved only by the server (syncToastMenu); screens can read it.
+    match /toastMenu/{id}   { allow read: if signedIn(); allow write: if false; }
     match /singletons/{id} {
       allow read: if signedIn();
       allow write: if signedIn() && id in ['seeded', 'loop', 'music', 'settings', 'staffConfig'];
