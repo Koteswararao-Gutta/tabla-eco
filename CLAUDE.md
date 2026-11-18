@@ -24,6 +24,7 @@ Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**
 - **Time:** use `store.now()` / `useNow()` for anything synced, never `Date.now()`.
 - **Menu loop sync:** use `loopPosition(slots, now, loop)` and `pictureFor` from `@shared/clock/loop`, with `loop = useSingleton('loop')`. Seconds and transition live on the `Slot`, shared by all menu TVs. After any change to slots, the manager calls `restartLoop(slotId)` so every TV shows the change at once.
 - **Picture fallback:** in a `special` or `catering` slot, a TV with no picture shows its partner's (one picture fills the pair). In a `menu` slot it never borrows; a menu picture added to TV 1 stays on TV 1.
+- **Loading vs missing:** `useSingleton`/`useDoc` return `undefined` while loading and `null` when missing. Wait while `undefined` (e.g. a TV must not compute its slot before `loop` arrives); treat `null` as "use defaults" (no loop anchor, kitchen PIN `1234` if settings are missing).
 - **Single documents** (music, settings, staffConfig, loop): `useSingleton`, `saveSingleton`, `updateSingleton`. Never pass `undefined` field values; use `null` to clear.
 - **Pictures:** `pictureUrl` already serves from a local cache that works offline. Don't build another cache; the menu TV preloads the `next` slot's picture.
 - **Look:** use `@shared/ui` components and `.t-*` classes / CSS variables from `theme.css`. Area-specific CSS goes in a `.css` file inside your folder, using the variables. No new colours, no UI libraries.
