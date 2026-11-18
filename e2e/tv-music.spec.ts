@@ -27,8 +27,10 @@ const FAKE_YT = `
     getPlaylist() { return ['a', 'b', 'c']; }
     getPlaylistIndex() { return this.index; }
     getPlayerState() { return this.state; }
-    playVideoAt(i) { this.index = i; yt.calls.push('playAt:' + i); if (!(yt.blockSound && !this.muted)) this.later(1); }
-    playVideo() { yt.calls.push('play'); if (!(yt.blockSound && !this.muted)) this.later(1); }
+    // blocked unmuted autoplay sits in BUFFERING, as Chrome can do
+    go() { this.later(yt.blockSound && !this.muted ? 3 : 1); }
+    playVideoAt(i) { this.index = i; yt.calls.push('playAt:' + i); this.go(); }
+    playVideo() { yt.calls.push('play'); this.go(); }
     pauseVideo() { yt.calls.push('pause'); this.state = 2; }
     nextVideo() { this.index = (this.index + 1) % 3; yt.calls.push('next:' + this.index); this.later(1); }
     mute() { this.muted = true; yt.calls.push('mute'); }
@@ -107,8 +109,24 @@ test('plays the playlist; clip after each song, then the next video', async ({ c
   await tv.evaluate(() => (window as unknown as { __yt: { fire(s: number): void } }).__yt.fire(0)); // ENDED
   await expect(root(tv)).toHaveAttribute('data-mode', 'clip');
   await expect(tv.getByTestId('clip-title')).toBeVisible();
+  expect((await calls()).slice(-2)).toEqual(['state:0', 'mute']); // next song stays silent under the clip
   await expect(root(tv)).toHaveAttribute('data-mode', 'video', { timeout: 6000 });
-  expect(await calls()).toContain('next:1');
+  const after = await calls();
+  expect(after.indexOf('unmute')).toBeGreaterThan(after.indexOf('mute'));
+  expect(after.indexOf('next:1')).toBeGreaterThan(after.indexOf('unmute'));
+});
+
+test('stalled video (spinner, no error) → clip loop after 20 s', async ({ context }) => {
+  test.setTimeout(60_000);
+  await fakeYouTube(context);
+  await setMusic(context, { playlist: PLAYLIST });
+  const tv = await openScreen(context, '/tv/5');
+  await expect(root(tv)).toHaveAttribute('data-mode', 'video');
+  await tv.evaluate(() => (window as unknown as { __yt: { fire(s: number): void } }).__yt.fire(3)); // BUFFERING forever
+  await tv.waitForTimeout(15_000);
+  await expect(root(tv)).toHaveAttribute('data-mode', 'video'); // not yet
+  await expect(root(tv)).toHaveAttribute('data-mode', 'fallback', { timeout: 15_000 });
+  await expect(root(tv)).toHaveAttribute('data-reason', 'allFailed');
 });
 
 test('everySeconds: pauses for the clip, then resumes', async ({ context }) => {

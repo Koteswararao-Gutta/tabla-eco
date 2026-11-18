@@ -84,7 +84,14 @@ export function startIndex(count: number, shuffle: boolean, rand: number): numbe
   return Math.min(count - 1, Math.floor(rand * count));
 }
 
-export type Fallback = 'noPlaylist' | 'offline' | 'apiFailed' | 'allFailed';
+export const STALL_MS = 20_000;
+
+/** Video mode: has the player gone `limitMs` without playing? (a spinner with no error event) */
+export function stalled(lastPlayingAt: number, now: number, limitMs = STALL_MS): boolean {
+  return now - lastPlayingAt >= limitMs;
+}
+
+export type Fallback ='noPlaylist' | 'offline' | 'apiFailed' | 'allFailed';
 export type Mode = 'connecting' | 'video' | 'clip' | 'fallback';
 
 /** What the screen shows. A fallback always wins: never a YouTube error or a blank page. */

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScreenSurface } from '@shared/ui';
 import { store, useHeartbeat, useSingleton, type MusicSettings } from '@shared/data';
 import { Clip } from './Clip';
-import { afterClip, clipDue, nextPlayable, onVideoEnded, planFrom, screenMode, startIndex } from './schedule';
+import { afterClip, clipDue, nextPlayable, onVideoEnded, planFrom, screenMode, stalled, startIndex } from './schedule';
 import { loadYouTube, YT_STATE, type YtPlayer } from './youtube';
 import './tv-music.css';
 
@@ -14,6 +14,8 @@ const RETRY_MS = 60_000;
 const AUTOPLAY_CHECK_MS = 2500;
 /** No video playing this long after the player is ready → treat the playlist as broken. */
 const WATCHDOG_MS = 30_000;
+/** How often video mode checks that the player is really playing. */
+const STALL_CHECK_MS = 5000;
 
 export default function MusicTv() {
   useHeartbeat('tv5');
@@ -69,6 +71,10 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
   clipRef.current = clip;
   /** When the video last started counting toward an 'everySeconds' clip. */
   const sinceRef = useRef<number | null>(null);
+  /** Last time the player was seen PLAYING in video mode (clip time not counted). */
+  const lastPlayingRef = useRef(0);
+  const needSoundRef = useRef(needSound);
+  needSoundRef.current = needSound;
 
   const { mode, reason } = screenMode({ hasPlaylist: !!plan.playlistId, online, apiFailed, allFailed, inClip: !!clip, started });
 
@@ -131,27 +137,31 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
                   p.setShuffle(shuffle);
                   p.playVideoAt(startIndex(items.length, shuffle, Math.random()));
                 });
+                // Unmuted autoplay can be blocked (it may also sit in BUFFERING). Not actually playing
+                // after 2.5 s → play muted with the sound note; check once more and nudge it again.
+                const notPlaying = () => alive && !begun && p.getPlayerState() !== YT_STATE.PLAYING;
                 timers.push(
                   setTimeout(() => {
-                    if (!alive || begun) return;
-                    const st = p.getPlayerState();
-                    if (st !== YT_STATE.PLAYING && st !== YT_STATE.BUFFERING) {
-                      safe(() => {
-                        p.mute();
-                        p.playVideo();
-                      });
-                      setNeedSound(true);
-                    }
+                    if (!notPlaying()) return;
+                    safe(() => {
+                      p.mute();
+                      p.playVideo();
+                    });
+                    setNeedSound(true);
+                    timers.push(setTimeout(() => notPlaying() && safe(() => p.playVideo()), AUTOPLAY_CHECK_MS));
                   }, AUTOPLAY_CHECK_MS),
                 );
               } else if (e.data === YT_STATE.PLAYING) {
                 if (clipRef.current) return safe(() => p.pauseVideo()); // the playlist moved on by itself under the clip
                 begun = true;
+                lastPlayingRef.current = store.now();
                 setStarted(true);
                 if (sinceRef.current === null) sinceRef.current = store.now();
                 safe(() => p.isMuted() && setNeedSound(true));
               } else if (e.data === YT_STATE.ENDED) {
                 if (onVideoEnded(planRef.current) === 'clip') {
+                  // The playlist moves on by itself; keep the next song's first moment silent until after the clip.
+                  safe(() => p.mute());
                   let idx: number | null = null;
                   safe(() => (idx = p.getPlaylistIndex()));
                   setClip({ cause: 'ended', endedIndex: idx, key: store.now() });
@@ -202,6 +212,7 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
       const p = playerRef.current;
       if (p) {
         try {
+          if (clip.cause === 'ended' && !needSoundRef.current) p.unMute();
           if (afterClip(clip.cause, clip.endedIndex, p.getPlaylistIndex()) === 'next') p.nextVideo();
           else p.playVideo();
         } catch {
@@ -232,6 +243,25 @@ function MusicPlayer({ music, brand }: { music: MusicSettings | null; brand: str
     }, 500);
     return () => clearInterval(t);
   }, [mode, plan.clipMode]);
+
+  // Stall watchdog: the network can drop behind a working router and leave YouTube on a spinner
+  // with no error. Not PLAYING for 20 s of video time → clip loop, and the 1-minute retry takes over.
+  useEffect(() => {
+    if (mode !== 'video') return;
+    lastPlayingRef.current = store.now(); // time in a clip doesn't count
+    const t = setInterval(() => {
+      let st: number = YT_STATE.UNSTARTED;
+      try {
+        st = playerRef.current?.getPlayerState() ?? YT_STATE.UNSTARTED;
+      } catch {
+        /* treat as not playing */
+      }
+      const now = store.now();
+      if (st === YT_STATE.PLAYING) lastPlayingRef.current = now;
+      else if (stalled(lastPlayingRef.current, now)) setAllFailed(true);
+    }, STALL_CHECK_MS);
+    return () => clearInterval(t);
+  }, [mode]);
 
   // Fallback / connecting: replay the clip again and again.
   const looping = mode === 'fallback' || mode === 'connecting';

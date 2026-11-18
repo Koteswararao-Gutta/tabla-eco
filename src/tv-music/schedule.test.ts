@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { afterClip, clipDue, DEFAULT_MUSIC, nextPlayable, onVideoEnded, planFrom, screenMode, startIndex } from './schedule';
+import { afterClip, clipDue, DEFAULT_MUSIC, nextPlayable, onVideoEnded, planFrom, screenMode, stalled, startIndex } from './schedule';
+
+describe('stalled', () => {
+  it('is stalled after 20 s without playing', () => {
+    expect(stalled(1000, 1000 + 19_999)).toBe(false);
+    expect(stalled(1000, 1000 + 20_000)).toBe(true);
+    expect(stalled(1000, 1000 + 4000, 3000)).toBe(true);
+  });
+});
 
 const ID = 'PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG';
 
