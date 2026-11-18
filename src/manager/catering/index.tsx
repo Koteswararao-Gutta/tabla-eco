@@ -293,19 +293,25 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
     }
   };
   const scanPhoto = (photo: File | undefined) => photo && fillFrom('photo', () => store.readOrderPhoto(photo));
-  const readPasted = () => {
-    if (pasted.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
-    fillFrom('message', () => store.readOrderText(pasted));
+  const readPasted = (text = pasted) => {
+    if (text.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
+    fillFrom('message', () => store.readOrderText(text));
   };
+  // One tap: read what was copied and fill the form at once. If the phone won't share the clipboard,
+  // the box opens instead, and pasting into it fills the form the same way.
   const openPaste = async () => {
-    setPasting(true);
     setScan({ state: 'idle' });
-    // Saves a step when the phone allows it: whatever was copied lands in the box. Pasting by hand still works.
+    let copied = '';
     try {
-      const copied = await navigator.clipboard?.readText?.();
-      if (copied && copied.trim()) setPasted((p) => p || copied.slice(0, 8000));
+      copied = ((await navigator.clipboard?.readText?.()) ?? '').slice(0, 8000);
     } catch {
       /* not allowed here: the person pastes into the box */
+    }
+    if (copied.trim().length >= 5) {
+      setPasted(copied);
+      readPasted(copied);
+    } else {
+      setPasting(true);
     }
   };
 
@@ -378,7 +384,7 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
                 aria-expanded={pasting}
                 onClick={() => (pasting ? setPasting(false) : openPaste())}
               >
-                📋 Paste message
+                {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : '📋 Paste message'}
               </button>
             </div>
             {pasting && (
@@ -386,14 +392,21 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
                 <textarea
                   className="t-input c-paste-box"
                   aria-label="Customer's message"
-                  placeholder="Paste the customer's text or email here"
+                  placeholder="Press and hold here, then tap Paste"
                   rows={5}
                   maxLength={8000}
                   value={pasted}
                   autoFocus
                   onChange={(e) => setPasted(e.target.value)}
+                  onPaste={(e) => {
+                    const text = e.clipboardData.getData('text').slice(0, 8000);
+                    if (pasted.trim() || text.trim().length < 5) return; // adding to typed text: let them tap Fill the form
+                    e.preventDefault();
+                    setPasted(text);
+                    readPasted(text);
+                  }}
                 />
-                <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={readPasted}>
+                <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={() => readPasted()}>
                   {scan.state === 'reading' && scan.from === 'message' ? 'Reading the message…' : 'Fill the form'}
                 </button>
               </div>
