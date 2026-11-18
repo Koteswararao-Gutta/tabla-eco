@@ -24,6 +24,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # The Android screen app, served from the same site: <site>/tabla.apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+      - run: gradle -p android assembleRelease --no-daemon
+      - run: cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
