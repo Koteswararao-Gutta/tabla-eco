@@ -1,7 +1,7 @@
 // Tabla service worker.
 // 1. Keeps the app opening when the internet is down: the page and its built files are cached.
 // 2. Shows the 1-hour catering reminders sent by the server, even when the app is closed.
-const CACHE = 'tabla-shell-v1';
+const CACHE = 'tabla-shell-v2';
 
 // On install, keep a copy of the page and the built files it names, so the very next reload works offline.
 self.addEventListener('install', (e) => {
@@ -54,7 +54,9 @@ async function networkFirst(event, shellKey) {
   const req = event.request;
   const cache = await caches.open(CACHE);
   try {
-    const res = await fetch(req);
+    // no-cache: skip the browser's own copy (GitHub Pages lets it keep the page for 10 minutes), so a
+    // new version shows on the next open. The server still answers "not changed" cheaply when it isn't.
+    const res = shellKey ? await fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : await fetch(req);
     if (res.ok && !res.redirected) {
       const copy = res.clone();
       // Every route is the same page (routes live after the #), so keep one copy under the app's address.
