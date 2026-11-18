@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
 import { store, useCollection, useNow, type CateringOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, groupOpen, history, itemLines, orderFields, timeLabel, validate,
+  dayLabel, emptyForm, formFromOrder, formFromScan, groupOpen, history, itemLines, orderFields, timeLabel, validate,
   type FormErrors, type OrderForm,
 } from './orders';
 import './catering.css';
@@ -135,11 +135,30 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; message?: string }>({ state: 'idle' });
+  const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
     setF(next);
+    setUnsure((u) => u.filter((x) => x !== k));
     if (tried) setErrors(validate(next));
+  };
+
+  const scanPhoto = async (photo: File | undefined) => {
+    if (!photo) return;
+    setScan({ state: 'reading' });
+    try {
+      const read = await store.readOrderPhoto(photo);
+      if (!read.isOrder) return setScan({ state: 'failed', message: "This photo doesn't look like an order. Please try another photo." });
+      const filled = formFromScan(read, f);
+      setF(filled.form);
+      setUnsure(filled.unsure);
+      if (tried) setErrors(validate(filled.form));
+      setScan({ state: 'done' });
+    } catch (e) {
+      setScan({ state: 'failed', message: e instanceof Error ? e.message : "Couldn't read the photo." });
+    }
   };
 
   const save = async () => {
@@ -168,7 +187,12 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
     onClose();
   };
 
-  const err = (k: keyof OrderForm) => errors[k] && <small className="c-err" role="alert">{errors[k]}</small>;
+  const err = (k: keyof OrderForm) =>
+    errors[k] ? (
+      <small className="c-err" role="alert">{errors[k]}</small>
+    ) : (
+      unsure.includes(k) && <small className="c-check">Please check this: it was hard to read.</small>
+    );
   const count = Object.keys(errors).length;
 
   return (
@@ -181,6 +205,34 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
           save();
         }}
       >
+        {!order && (
+          <div className="c-scan">
+            <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                disabled={scan.state === 'reading'}
+                aria-label="Scan paper order"
+                onChange={(e) => {
+                  scanPhoto(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+              {scan.state === 'reading' ? 'Reading the order…' : '📷 Scan paper order'}
+            </label>
+            {scan.state === 'done' && (
+              <p className="c-scan-note" role="status">
+                Filled in from the photo. Please check every field, then tap Save order.
+              </p>
+            )}
+            {scan.state === 'failed' && (
+              <p className="c-err" role="alert">
+                {scan.message}
+              </p>
+            )}
+          </div>
+        )}
         <Field label="Customer name">
           <input className="t-input" value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
           {err('customerName')}
@@ -210,6 +262,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
               { value: 'delivery', label: 'Delivery' },
             ]}
           />
+          {err('type')}
         </div>
         {f.type === 'delivery' && (
           <Field label="Delivery address">
@@ -227,6 +280,7 @@ function OrderSheet({ order, onClose, onDelete }: { order: Order | null; onClose
         </Field>
         <Field label="Notes (optional)">
           <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
+          {err('notes')}
         </Field>
 
         {count > 0 && <p className="c-err c-err-summary">Please fix the {count === 1 ? 'field' : `${count} fields`} marked above.</p>}

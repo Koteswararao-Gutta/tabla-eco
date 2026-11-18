@@ -5,7 +5,7 @@
 
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import type { CollectionName, Collections, Picture } from './types';
+import type { CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 const PREFIX = 'tabla:';
 type Table = Record<string, unknown>;
@@ -159,6 +159,28 @@ export class LocalStore implements DataStore {
     if (url) URL.revokeObjectURL(url);
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
+  }
+
+  /** No server here: a fixed sample order for tomorrow, so the scan flow can be tried and tested. */
+  async readOrderPhoto(photo: Blob): Promise<ScannedOrder> {
+    if (!photo.size) throw new Error("That photo couldn't be opened.");
+    await new Promise((r) => setTimeout(r, 300));
+    const d = new Date(this.now());
+    d.setDate(d.getDate() + 1);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return {
+      isOrder: true,
+      customerName: 'Meera Iyer',
+      phone: '555 404 1212',
+      date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+      time: '18:30',
+      type: 'pickup',
+      address: '',
+      people: '40',
+      items: ['Veg biryani, 2 large trays', 'Gulab jamun, 50'],
+      notes: 'Less spicy',
+      unsure: ['phone'],
+    };
   }
 }
 

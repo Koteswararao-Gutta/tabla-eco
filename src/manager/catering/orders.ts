@@ -1,6 +1,6 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
-import type { CateringOrder } from '@shared/data';
+import type { CateringOrder, ScannedOrder } from '@shared/data';
 
 type Order = CateringOrder;
 
@@ -176,4 +176,35 @@ export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' 
   if (f.type === 'delivery') out.address = f.address.trim();
   if (f.notes.trim()) out.notes = f.notes.trim();
   return out;
+}
+
+// ---------- scanned paper orders ----------
+
+const FORM_KEYS: (keyof OrderForm)[] = ['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'items', 'notes'];
+
+/** Fills the form from what the AI read. Anything missing or malformed keeps the form's current value,
+ *  and is listed in `unsure` along with the fields the AI flagged, so the sheet can ask to check them. */
+export function formFromScan(s: ScannedOrder, base: OrderForm): { form: OrderForm; unsure: (keyof OrderForm)[] } {
+  const unsure = new Set(FORM_KEYS.filter((k) => s.unsure?.includes(k)));
+  const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text(s.date)) && fromInputs(text(s.date), '12:00') !== null ? text(s.date) : '';
+  const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(text(s.time)) ? text(s.time) : '';
+  const people = text(s.people).replace(/\D/g, '');
+  const address = text(s.address);
+  const type = s.type === 'pickup' || s.type === 'delivery' ? s.type : address ? 'delivery' : base.type;
+  const items = (Array.isArray(s.items) ? s.items : []).map(text).filter(Boolean).join('\n');
+  const form: OrderForm = {
+    customerName: text(s.customerName) || base.customerName,
+    phone: text(s.phone) || base.phone,
+    date: date || base.date,
+    time: time || base.time,
+    type,
+    address: address || base.address,
+    people: people && +people > 0 ? people : base.people,
+    items: items || base.items,
+    notes: text(s.notes) || base.notes,
+  };
+  if (!date) unsure.add('date');
+  if (s.type !== 'pickup' && s.type !== 'delivery') unsure.add('type');
+  return { form, unsure: FORM_KEYS.filter((k) => unsure.has(k)) };
 }

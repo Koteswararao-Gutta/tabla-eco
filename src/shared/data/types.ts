@@ -75,6 +75,26 @@ export interface CateringOrder {
   updatedAt: number;
 }
 
+/** What "Scan paper order" read from a photo. Empty strings mean "not on the paper". */
+export interface ScannedOrder {
+  /** false when the photo doesn't look like an order at all. */
+  isOrder: boolean;
+  customerName: string;
+  phone: string;
+  /** yyyy-mm-dd or '' */
+  date: string;
+  /** HH:MM (24-hour) or '' */
+  time: string;
+  type: 'pickup' | 'delivery' | 'unknown';
+  address: string;
+  /** Digits or '' */
+  people: string;
+  items: string[];
+  notes: string;
+  /** Form fields that were hard to read. */
+  unsure: string[];
+}
+
 export interface AppSettings {
   kitchenPin: string; // 4 digits
   restaurantName: string;
