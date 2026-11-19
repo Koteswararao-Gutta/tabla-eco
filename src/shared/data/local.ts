@@ -90,6 +90,12 @@ export class LocalStore implements DataStore {
     return Object.keys(this.read(col)).length > 0;
   }
 
+  async createIfMissing<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<boolean> {
+    if (this.read(col)[id]) return false;
+    await this.setDoc(col, id, data);
+    return true;
+  }
+
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     const t = this.read(col);
     t[id] = { ...clean(data as object), id };

@@ -112,3 +112,5 @@
 .c-sum-h { margin: 0 0 6px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .c-sum-items { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 1.05rem; }
 .c-sum-notes { margin: 0; white-space: pre-wrap; }
+/* A field the keyboard scrolls to stays clear of the Save bar pinned below it. */
+.c-form .t-input, .c-form .t-textarea, .c-form .t-seg button { scroll-margin-bottom: 96px; }

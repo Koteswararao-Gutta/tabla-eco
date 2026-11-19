@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, orderFields, sameDayOrders, telHref, timeLabel, validate,
+  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, telHref, timeLabel, validate,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -289,12 +289,14 @@ type SheetProps = { order: Order | null; day?: number; now: number; onClose: () 
 function OrderSheet(props: SheetProps) {
   const { order } = props;
   const [editing, setEditing] = useState(!order);
-  const [dirty, setDirty] = useState(false);
+  // Set by the form while it renders, and read by the Sheet at the moment of closing, so a key typed
+  // just before Escape always counts.
+  const dirty = useRef(false);
   const title = !editing ? 'Order details' : order ? 'Edit order' : 'New order';
-  const confirm = editing && dirty ? (order ? 'Discard your changes?' : 'Discard this order?') : null;
+  const confirm = () => (editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
   return (
     <Sheet open title={title} onClose={props.onClose} confirmClose={confirm}>
-      {!editing && order ? <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} /> : <OrderFormView {...props} onDirty={setDirty} />}
+      {!editing && order ? <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} /> : <OrderFormView {...props} dirty={dirty} />}
     </Sheet>
   );
 }
@@ -376,8 +378,8 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
   );
 }
 
-function OrderFormView(props: SheetProps & { onDirty: (dirty: boolean) => void }) {
-  const { order, onClose, onCompleted, onDelete, onDirty } = props;
+function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
+  const { order, onClose, onCompleted, onDelete } = props;
   const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
@@ -401,8 +403,7 @@ function OrderFormView(props: SheetProps & { onDirty: (dirty: boolean) => void }
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
   const changed = JSON.stringify(f) !== JSON.stringify(start);
-  const dirty = changed || scan.state === 'done' || pasted.trim() !== '';
-  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  props.dirty.current = changed || scan.state === 'done' || pasted.trim() !== '';
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
@@ -573,7 +574,7 @@ function OrderFormView(props: SheetProps & { onDirty: (dirty: boolean) => void }
         </div>
       )}
       <Field label="Customer name">
-        <input className="t-input" maxLength={200} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
+        <input className="t-input" maxLength={NAME_MAX} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
         {err('customerName')}
       </Field>
       <Field label="Phone">

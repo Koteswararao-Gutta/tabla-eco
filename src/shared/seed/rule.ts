@@ -17,6 +17,7 @@ export type SeedDecision = 'seed' | 'skip';
  *   (offline, error, or no answer within `waitMs`, so a screen never waits long to open), do nothing;
  *   it is asked again on the next start.
  * So deleting the marker on a live system can never reset screens, slots, music, the PIN or orders.
+ * Use claimSeed(), which also takes the marker so only one device ever seeds.
  */
 export async function seedDecision(s: Pick<DataStore, 'mode' | 'getDoc' | 'hasAnyDoc'>, waitMs = 8000): Promise<SeedDecision> {
   if (await s.getDoc('singletons', 'seeded')) return 'skip';
@@ -32,4 +33,12 @@ export async function seedDecision(s: Pick<DataStore, 'mode' | 'getDoc' | 'hasAn
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** True only for the one device that may seed: the database is empty (seedDecision) and this device's
+ *  create-if-missing of the marker is the one that created it. Two devices starting together on a new,
+ *  empty project can both pass seedDecision, but only one wins the marker. Nothing is ever deleted. */
+export async function claimSeed(s: Pick<DataStore, 'mode' | 'getDoc' | 'hasAnyDoc' | 'createIfMissing' | 'now'>, waitMs = 8000): Promise<boolean> {
+  if ((await seedDecision(s, waitMs)) !== 'seed') return false;
+  return s.createIfMissing('singletons', 'seeded', { at: s.now() }).catch(() => false);
 }

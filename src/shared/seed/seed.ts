@@ -3,7 +3,7 @@
 // empty project, never over real data). resetDemoData() wipes and reseeds the local preview.
 
 import { store } from '../data';
-import { seedDecision } from './rule';
+import { claimSeed } from './rule';
 import type { AppSettings, CateringOrder, MusicSettings, Screen, Slot } from '../data/types';
 
 const W = 1920;
@@ -39,10 +39,8 @@ const SCREENS: Screen[] = [
 
 export async function seedIfEmpty(): Promise<void> {
   // Never writes, changes or removes anything when the database already has data (see rule.ts).
-  if ((await seedDecision(store)) !== 'seed') return;
-  // The marker is written first, so a seed that fails partway never runs twice and duplicates data.
-  await store.setDoc('singletons', 'seeded', { at: store.now() });
-  await seed();
+  // The marker is taken first, so a seed that fails partway never runs twice and duplicates data.
+  if (await claimSeed(store)) await seed();
 }
 
 export async function resetDemoData(): Promise<void> {
