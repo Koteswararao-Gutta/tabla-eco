@@ -3,6 +3,7 @@ package com.tabla.tv;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.media.AudioManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -261,6 +262,7 @@ public class MainActivity extends Activity {
 
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new PrintBridge(), "TablaPrint");
+        web.addJavascriptInterface(new AlarmBridge(), "TablaAlarm");
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
@@ -305,6 +307,31 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     printing = false;
                     Watchdog.quiet(MainActivity.this, false);
+                }
+            });
+        }
+    }
+
+    /** window.TablaAlarm.loud(on): the kitchen's 1-hour alarm turns the volume all the way up while it rings,
+     *  then puts it back to where it was. */
+    private class AlarmBridge {
+        private int before = -1;
+
+        @JavascriptInterface
+        public void loud(boolean on) {
+            handler.post(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am == null) return;
+                    if (on) {
+                        if (before < 0) before = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+                    } else if (before >= 0) {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, before, 0);
+                        before = -1;
+                    }
+                } catch (Exception ignored) {
+                    // Do Not Disturb or a locked volume: the alarm still plays at the current volume.
                 }
             });
         }

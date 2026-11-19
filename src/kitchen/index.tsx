@@ -7,7 +7,8 @@ import { EditHistory, EditOrderSheet } from '../manager/catering';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
-import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
+import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
+import { Alarm } from './Alarm';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -41,9 +42,11 @@ export default function Kitchen() {
 
   const orders = useCollection('orders');
   const now = useNow(15_000);
-  // The heads-up runs on every kitchen view, locked or not. Its chime lives here, so locking or
-  // unlocking never replays it or restarts the 45 s repeat.
-  const reminders = useHeadsUp(orders, now);
+  // The heads-up runs on every kitchen view, locked or not. Its alarm lives here, so locking or
+  // unlocking never restarts it. It rings only while the kitchen is staffed (staff schedule hours).
+  const staff = useSingleton('staffConfig');
+  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
+  const alarmOn = reminders.length > 0 && staffedAt(now, staff);
   const banner = <HeadsUp reminders={reminders} now={now} />;
   const soundNote = useSoundOn() ? null : (
     <span className="k-sound" role="status">
@@ -63,31 +66,13 @@ export default function Kitchen() {
             <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
           </div>
         )}
+        <Alarm reminders={reminders} now={now} on={alarmOn} />
       </div>
     </ScreenSurface>
   );
 }
 
 // ---------- 1-hour heads-up ----------
-
-/** Orders whose 1-hour heads-up is due, with a chime when a new one appears and again every 45 s
- *  until "Got it". Rings only while the kitchen is staffed (staff schedule hours); waits for those to load. */
-function useHeadsUp(orders: Order[] | null, now: number): KitchenOrder[] {
-  const staff = useSingleton('staffConfig');
-  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
-  const remindIds = reminders.map(ackKey).join(',');
-  const chimed = useRef(new Set<string>());
-  useEffect(() => {
-    const fresh = reminders.filter((o) => !chimed.current.has(ackKey(o)));
-    fresh.forEach((o) => chimed.current.add(ackKey(o)));
-    if (fresh.length) chime();
-    if (!remindIds) return;
-    const t = setInterval(chime, CHIME_REPEAT_MS);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remindIds]);
-  return reminders;
-}
 
 /** False while the browser keeps sound off (until someone taps the screen). */
 function useSoundOn(): boolean {
@@ -101,7 +86,7 @@ function useSoundOn(): boolean {
   return on;
 }
 
-/** One banner row per due heads-up. "Got it" needs no PIN. */
+/** One banner row per due heads-up (under the alarm, and on its own after hours). "Got it" needs no PIN. */
 function HeadsUp({ reminders, now }: { reminders: KitchenOrder[]; now: number }) {
   // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet. No PIN needed.
   const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
