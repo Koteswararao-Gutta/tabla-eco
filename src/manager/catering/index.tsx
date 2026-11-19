@@ -573,7 +573,7 @@ function OrderFormView(props: SheetProps & { onDirty: (dirty: boolean) => void }
         </div>
       )}
       <Field label="Customer name">
-        <input className="t-input" value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
+        <input className="t-input" maxLength={200} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
         {err('customerName')}
       </Field>
       <Field label="Phone">
