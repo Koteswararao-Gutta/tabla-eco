@@ -960,7 +960,7 @@ test('order amount: manager only, kept apart from the order, never on the kitche
 
   // Manager list card and details show it.
   const mCard = manager.getByRole('button', { name: /Mehta Party/ });
-  await expect(mCard).toContainText('$1,250.50');
+  await expect(mCard).toContainText('$1,250.50 · Not paid');
   await mCard.click();
   const details = manager.getByRole('dialog', { name: 'Order details' });
   await expect(details.getByTestId('order-amount')).toHaveText(/Amount\s*\$1,250\.50/);
@@ -992,22 +992,38 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await details.getByRole('button', { name: 'Edit' }).click();
   const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
   await expect(mEdit.getByLabel('Amount $ (optional, manager only)')).toHaveValue('1250.50');
+  await expect(mEdit.getByRole('button', { name: 'Not paid' })).toHaveAttribute('aria-pressed', 'true');
   await mEdit.getByLabel('Amount $ (optional, manager only)').fill('200');
+  await mEdit.getByRole('button', { name: 'Paid', exact: true }).click();
+  await mEdit.getByRole('button', { name: 'Paid', exact: true }).scrollIntoViewIfNeeded();
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-edit-paid');
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
-  await expect(mCard).toContainText('$200');
+  await expect(mCard).toContainText('$200 · Paid');
+  const paidNow = await readCollection<{ id: string; amount: number | null; paid?: boolean }>(manager, 'orderAmounts');
+  expect(paidNow.find((a) => a.id === o.id)).toMatchObject({ amount: 200, paid: true });
+  await mCard.click();
+  await expect(details.getByTestId('order-amount')).toContainText('✓ Paid');
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-order-paid-details');
+  await details.getByRole('button', { name: 'Close' }).click();
   const after = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.id === o.id)!;
   expect(after.history).toHaveLength(1);
   await kitchen.getByRole('button', { name: /Show all orders/ }).click();
   await expect(kitchen.getByText('Mehta Party').first()).toBeVisible();
   await expect(kitchen.locator('body')).not.toContainText('$200');
+  await expect(kitchen.locator('body')).not.toContainText('Paid');
+  await expect(kitchen.locator('body')).not.toContainText('paid');
 
   // Clearing it removes it from the card.
   await mCard.click();
   await details.getByRole('button', { name: 'Edit' }).click();
   await mEdit.getByLabel('Amount $ (optional, manager only)').fill('');
+  await mEdit.getByRole('button', { name: 'Not paid' }).click();
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
   await expect(mCard).not.toContainText('$');
+  await expect(mCard).not.toContainText('aid');
   await context.close();
 });
