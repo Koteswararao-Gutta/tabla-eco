@@ -33,6 +33,9 @@ export interface DataStore {
   deleteDoc(col: CollectionName, id: string): Promise<void>;
   /** Creates a document with a new id and returns the id. */
   addDoc<C extends CollectionName>(col: C, data: Omit<Collections[C], 'id'>): Promise<string>;
+  /** True when the collection holds at least one document. FirebaseStore asks the server (never its
+   *  local copy) and throws when it can't reach it, so "empty" is only ever a confirmed answer. */
+  hasAnyDoc(col: CollectionName): Promise<boolean>;
 
   /** Stores a picture (resized to fit 1920x1080 for menu use) and returns its record. */
   uploadPicture(file: Blob, name: string): Promise<WithId<Picture>>;

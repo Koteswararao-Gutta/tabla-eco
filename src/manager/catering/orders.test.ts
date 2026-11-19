@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, validate } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, telHref, validate } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -164,5 +164,12 @@ describe('month calendar', () => {
     expect(got.map((g) => [g.order, g.close])).toEqual([[b, false], [a, true]]);
     expect(sameDayOrders([a, b], at(20, 17, 30), a.id).map((g) => g.order)).toEqual([b]); // editing a: skip itself
     expect(sameDayOrders([a], at(20, 18, 30))[0].close).toBe(false); // exactly 1 hour apart is fine
+  });
+});
+
+describe('telHref', () => {
+  it('keeps only digits and a leading plus', () => {
+    expect(telHref('555 123-4567')).toBe('tel:5551234567');
+    expect(telHref('+1 (480) 555-0101')).toBe('tel:+14805550101');
   });
 });

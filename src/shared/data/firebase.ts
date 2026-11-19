@@ -14,6 +14,9 @@ import {
   collection,
   getDoc as fsGet,
   getDocFromServer,
+  getDocsFromServer,
+  limit,
+  query,
   initializeFirestore,
   onSnapshot,
   persistentLocalCache,
@@ -128,6 +131,11 @@ export class FirebaseStore implements DataStore {
     await this.ready;
     const s = await fsGet(this.ref(col, id));
     return s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null;
+  }
+
+  async hasAnyDoc(col: CollectionName): Promise<boolean> {
+    await this.ready;
+    return !(await getDocsFromServer(query(collection(this.db, col), limit(1)))).empty;
   }
 
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {

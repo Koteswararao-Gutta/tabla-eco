@@ -258,3 +258,8 @@ export function formFromScan(s: ScannedOrder, base: OrderForm): { form: OrderFor
   if (s.type !== 'pickup' && s.type !== 'delivery') unsure.add('type');
   return { form, unsure: FORM_KEYS.filter((k) => unsure.has(k)) };
 }
+
+/** A tel: link for a typed phone number ("555 123-4567" -> "tel:5551234567"). */
+export function telHref(phone: string): string {
+  return 'tel:' + phone.replace(/[^\d+]/g, '');
+}

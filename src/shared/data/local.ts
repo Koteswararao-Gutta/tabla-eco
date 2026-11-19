@@ -86,6 +86,10 @@ export class LocalStore implements DataStore {
     return raw ? ({ ...(raw as object), id } as WithId<Collections[C]>) : null;
   }
 
+  async hasAnyDoc(col: CollectionName): Promise<boolean> {
+    return Object.keys(this.read(col)).length > 0;
+  }
+
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     const t = this.read(col);
     t[id] = { ...clean(data as object), id };
