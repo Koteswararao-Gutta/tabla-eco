@@ -101,11 +101,14 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await kitchen.getByRole('button', { name: '← Back to open orders' }).click();
   await expect(card).toBeVisible();
 
-  // The manager sees the kitchen's change and can complete / delete from the edit sheet.
+  // The manager sees the kitchen's change and can complete / delete from the order summary.
   await manager.getByRole('button', { name: /Anika Wedding/ }).click();
-  const edit = manager.getByRole('dialog', { name: 'Edit order' });
-  await expect(edit.getByLabel('Delivery address')).toHaveValue('48 Lake View Rd, Hall B');
-  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  const summary = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(summary.getByText('Tomorrow, 1:30 PM')).toBeVisible();
+  await expect(summary.getByText('48 Lake View Rd, Hall B')).toBeVisible();
+  await expect(summary.getByRole('listitem')).toHaveText(['Chicken dum biryani, 4 large trays', 'Paneer butter masala, 2 trays', 'Garlic naan, 150']);
+  await shot(manager, 'manager-order-summary');
+  await summary.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
   // Quick feedback with Undo.
   const toast = manager.getByRole('status').filter({ hasText: 'Marked completed: Anika Wedding' });
@@ -114,15 +117,16 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await toast.getByRole('button', { name: 'Undo' }).click();
   await expect(card).toBeVisible();
   await manager.getByRole('button', { name: /Anika Wedding/ }).click();
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Mark completed' }).click();
+  await summary.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
   await manager.getByRole('button', { name: /History/ }).click();
   await manager.getByRole('region', { name: 'History' }).getByRole('button', { name: /Anika Wedding/ }).click();
   // Delete, then "Keep it" goes back to the order.
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(summary.getByRole('button', { name: 'Reopen' })).toBeVisible();
+  await summary.getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Keep it' }).click();
-  await expect(manager.getByRole('dialog', { name: 'Edit order' }).getByLabel('Customer name')).toHaveValue('Anika Wedding');
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(summary.getByText('Anika Wedding')).toBeVisible();
+  await summary.getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
   await expect(manager.getByText('Anika Wedding')).toHaveCount(0);
   expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Anika Wedding')).toBe(false);
@@ -151,6 +155,7 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
 
   // Manager opens the edit sheet...
   await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
   const edit = manager.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
 
@@ -370,5 +375,104 @@ test('catering list fits a phone with a long no-space customer name', async ({ b
   await expect(manager.getByText(/Supercali/)).toBeVisible();
   expect(await manager.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await shot(manager, 'manager-long-name');
+  await context.close();
+});
+
+test('order summary: big time, Call link, items; Edit opens the form', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const summary = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(summary.getByText('Today, 5:30 PM')).toBeVisible();
+  await expect(summary.getByRole('link', { name: /Call 555 123 4567/ })).toHaveAttribute('href', 'tel:5551234567');
+  await expect(summary.getByRole('listitem')).toHaveCount(4);
+  await expect(summary.getByText('Less spicy, add serving spoons')).toBeVisible();
+  await expect(summary.getByLabel('Customer name')).toHaveCount(0); // not the form
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-summary-priya');
+  await summary.getByRole('button', { name: 'Edit' }).click();
+  await expect(manager.getByRole('dialog', { name: 'Edit order' }).getByLabel('Customer name')).toHaveValue('Priya Sharma');
+  // Calendar taps open the same summary.
+  await manager.keyboard.press('Escape');
+  await manager.getByRole('button', { name: 'Calendar' }).click();
+  await manager.getByRole('dialog', { name: 'Calendar' }).getByRole('button', { name: /Priya Sharma/ }).click();
+  await expect(manager.getByRole('dialog', { name: 'Order details' })).toBeVisible();
+  await context.close();
+});
+
+test('closing a form with typed changes asks first; untouched forms close at once', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  // Untouched new order: Escape closes straight away.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await manager.keyboard.press('Escape');
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+
+  // Typed something: Cancel, Escape and a backdrop tap all ask.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await sheet.getByLabel('Customer name').fill('Half typed');
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  const ask = manager.getByRole('dialog', { name: 'Discard this order?' });
+  await expect(ask).toBeVisible();
+  await shot(manager, 'manager-discard-ask');
+  await ask.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await manager.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await manager.keyboard.press('Escape'); // Escape on the question = keep editing
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await manager.mouse.click(195, 10); // the dimmed backdrop above the sheet
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Half typed')).toBe(false);
+
+  // Editing an existing order asks "Discard your changes?".
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await edit.getByLabel('Notes (optional)').fill('Changed');
+  await edit.getByRole('button', { name: 'Cancel' }).click();
+  await manager.getByRole('dialog', { name: 'Discard your changes?' }).getByRole('button', { name: 'Discard' }).click();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect((await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Priya Sharma')!.notes).toBe('Less spicy, add serving spoons');
+  await context.close();
+});
+
+test('Mark completed in the edit form saves the typed changes too, and checks them first', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  // An invalid change: shown, and the status is left alone.
+  await edit.getByLabel('Customer name').fill('');
+  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  await expect(edit.getByText("Please enter the customer's name.")).toBeVisible();
+  const priya = async () => (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.phone === '555 123 4567')!;
+  expect((await priya()).status).toBe('open');
+  // Fixed: both the edits and the status are saved.
+  await edit.getByLabel('Customer name').fill('Priya S.');
+  await edit.getByLabel('Notes (optional)').fill('Extra raita');
+  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  await expect(edit).toHaveCount(0);
+  expect(await priya()).toMatchObject({ customerName: 'Priya S.', notes: 'Extra raita', status: 'completed', completedAt: expect.any(Number) });
+  await expect(manager.getByRole('status').filter({ hasText: 'Marked completed' })).toBeVisible();
+  await context.close();
+});
+
+test('Save stays visible at the bottom of a long order form', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  const save = sheet.getByRole('button', { name: 'Save order' });
+  await manager.waitForTimeout(400);
+  const box = (await save.boundingBox())!;
+  const sheetBox = (await sheet.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(sheetBox.y + sheetBox.height);
+  expect(box.y).toBeGreaterThan(sheetBox.y + sheetBox.height - 120); // pinned to the bottom, not far down the form
+  await shot(manager, 'manager-form-sticky-save');
   await context.close();
 });

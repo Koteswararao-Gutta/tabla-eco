@@ -1,5 +1,5 @@
 // Shared building blocks. Screens compose these; they don't restyle them.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import './theme.css';
 
@@ -53,12 +53,31 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+const SheetClose = createContext<() => void>(() => {});
+/** Inside a Sheet: closes it the same way a backdrop tap does (asking first when `confirmClose` is set).
+ *  Use it for the sheet's own Cancel button. */
+export const useSheetClose = () => useContext(SheetClose);
+
 /** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap, Escape,
- *  or (phones) dragging it down from the handle or from the top of its content. */
-export function Sheet({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
+ *  or (phones) dragging it down from the handle or from the top of its content.
+ *  `confirmClose` (e.g. "Discard your changes?"): while set, those ways of closing ask first,
+ *  with "Discard" and "Keep editing". The content stays mounted behind the question. */
+export function Sheet({ open, title, onClose, confirmClose, children }: { open: boolean; title: string; onClose: () => void; confirmClose?: string | null; children: ReactNode }) {
   const sheet = useRef<HTMLDivElement>(null);
+  const [asking, setAsking] = useState(false);
   const close = useRef(onClose);
   close.current = onClose;
+  const askFirst = useRef(confirmClose);
+  askFirst.current = confirmClose;
+  const askingRef = useRef(asking);
+  askingRef.current = asking;
+  const request = useRef(() => (askFirst.current ? setAsking(true) : close.current()));
+  useEffect(() => {
+    if (!open || !confirmClose) setAsking(false);
+  }, [open, confirmClose]);
+  useEffect(() => {
+    if (asking) sheet.current?.focus({ preventScroll: true });
+  }, [asking]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +89,7 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
     // The sheet itself takes focus (not its first field), so phones don't pop up the keyboard.
     if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
     const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') return close.current();
+      if (e.key === 'Escape') return askingRef.current ? setAsking(false) : request.current();
       if (e.key !== 'Tab' || !el) return;
       const list = focusables();
       if (!list.length) return e.preventDefault(), el.focus();
@@ -135,6 +154,11 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
       dragging = false;
       const fast = dy / Math.max(1, performance.now() - startT) > 0.6;
       if (dy > Math.min(160, el.offsetHeight * 0.3) || (fast && dy > 40)) {
+        if (askFirst.current) {
+          set(0, true);
+          setAsking(true);
+          return;
+        }
         set(el.offsetHeight + 40, true);
         setTimeout(() => close.current(), 200);
       } else set(0, true);
@@ -153,13 +177,27 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
 
   if (!open) return null;
   return (
-    <div className="t-sheet-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
+    <div className="t-sheet-back" onClick={(e) => e.target === e.currentTarget && !asking && request.current()}>
+      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={asking && confirmClose ? confirmClose : title} tabIndex={-1}>
         <div className="t-sheet-head">
           <div className="t-sheet-grab" aria-hidden="true" />
-          <h2>{title}</h2>
+          <h2>{asking && confirmClose ? confirmClose : title}</h2>
         </div>
-        {children}
+        {asking && confirmClose && (
+          <div className="t-stack">
+            <button type="button" className="t-btn block danger" onClick={() => close.current()}>
+              Discard
+            </button>
+            <button type="button" className="t-btn primary block" onClick={() => setAsking(false)}>
+              Keep editing
+            </button>
+          </div>
+        )}
+        <SheetClose.Provider value={request.current}>
+          <div className="t-sheet-body" hidden={asking && !!confirmClose}>
+            {children}
+          </div>
+        </SheetClose.Provider>
       </div>
     </div>
   );
