@@ -17,8 +17,30 @@ env:
   PROJECT: tabla-eco-2e94b
   FIREBASE: npx --yes firebase-tools@15.36.0
 jobs:
-  deploy:
+  # Deploy only the newest tested commit: a slower, older Tests run finishing late must not overwrite a newer deploy.
+  latest:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.tip.outputs.ok }}
+    steps:
+      - id: tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -z "$TESTED" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi  # started by hand
+          tip=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          if [ "$tip" = "$TESTED" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipped: $TESTED is no longer the tip of main ($tip); the newer commit's run deploys."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: latest
+    if: needs.latest.outputs.ok == 'true'
     runs-on: ubuntu-latest
     steps:
       - id: check

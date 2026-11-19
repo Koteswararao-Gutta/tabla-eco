@@ -120,3 +120,18 @@ export function scheduleClockSync(
     opts.events?.removeEventListener('online', onOnline);
   };
 }
+
+/** Wraps an async job so a new call while the last one is still running starts nothing and returns null. */
+export function singleFlight<T>(job: () => Promise<T>): () => Promise<T> | null {
+  let running: Promise<T> | null = null;
+  return () => {
+    if (running) return null;
+    const p = job();
+    running = p;
+    const done = () => {
+      if (running === p) running = null;
+    };
+    p.then(done, done);
+    return p;
+  };
+}

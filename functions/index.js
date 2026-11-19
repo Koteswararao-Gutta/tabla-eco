@@ -12,7 +12,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
-import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome } from './toastMenu.js';
+import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome, settleKilled } from './toastMenu.js';
 
 initializeApp();
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
@@ -28,8 +28,10 @@ export const readOrder = onCall(
       const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value(), maxRetries: 2 });
       return await readOrderPhoto(client, req.data);
     } catch (e) {
-      logger.error('readOrder failed', e);
-      if (readError(e) === 'unreadable') throw new HttpsError('invalid-argument', req.data.text !== undefined ? UNREADABLE_TEXT : UNREADABLE);
+      const kind = readError(e);
+      if (kind === 'setup') logger.error(`readOrder: the request was refused, check the model and settings: ${e?.message ?? e}`, e);
+      else logger.error('readOrder failed', e);
+      if (kind === 'unreadable') throw new HttpsError('invalid-argument', req.data.text !== undefined ? UNREADABLE_TEXT : UNREADABLE);
       throw new HttpsError('unavailable', 'Could not read the order right now.');
     }
   },
@@ -92,7 +94,14 @@ export const syncToastMenu = onSchedule(
     const currentRef = db.doc('toastMenu/current');
     const statusRef = db.doc('toastMenu/status');
     const now = Date.now();
-    // Mark the try first, so a run that gets killed (time limit, memory) still shows: startedAt newer than lastTryAt.
+    // If the last run was killed before saving how it went, count it as failed now (so repeated kills still alert).
+    const saved0 = (await statusRef.get()).data() ?? null;
+    const { status: prev, alert: killedAlert } = settleKilled(saved0);
+    if (prev !== saved0) {
+      await statusRef.set(prev);
+      if (killedAlert) await sendToAllDevices({ ...killedAlert, link: MENU_LINK }, 'toast-menu');
+    }
+    // Mark this try first, so a run that gets killed (time limit, memory) still shows: startedAt newer than lastTryAt.
     await statusRef.set({ startedAt: now }, { merge: true });
     let result;
     try {
@@ -110,8 +119,7 @@ export const syncToastMenu = onSchedule(
       logger.warn('syncToastMenu: could not read the Toast menu', e?.message ?? e);
       result = { ok: false, error: e?.message ?? e };
     }
-    const prev = (await statusRef.get()).data() ?? null;
-    const { status, alert } = nextStatus(prev, result, now);
+    const { status, alert } = nextStatus(prev, result, now); // prev from the start: the saved one now has this run's startedAt
     await statusRef.set({ ...status, startedAt: now });
     if (alert) await sendToAllDevices({ ...alert, link: MENU_LINK }, 'toast-menu');
   },

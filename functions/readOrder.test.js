@@ -49,7 +49,13 @@ test('readOrderPhoto returns the parsed form, and fails when there is none', asy
 });
 
 test('readError tells a photo that cannot be read from a service that is down', () => {
-  assert.equal(readError(Object.assign(new Error('invalid image'), { status: 400 })), 'unreadable');
+  const bad = (message, inner) => Object.assign(new Error(message), { status: 400, error: inner ? { error: { message: inner } } : undefined });
+  assert.equal(readError(bad('invalid image')), 'unreadable');
+  assert.equal(readError(bad('400 {"type":"error"}', 'Could not process image')), 'unreadable');
+  assert.equal(readError(bad('messages.0.content.0.image.source.base64: image exceeds 5 MB maximum')), 'unreadable');
+  // Setup mistakes are not the photo's fault: report them as a passing problem and log them.
+  assert.equal(readError(bad('model: claude-nope not found')), 'setup');
+  assert.equal(readError(bad('output_config.effort: unknown field')), 'setup');
   assert.equal(readError(Object.assign(new Error('too big'), { status: 413 })), 'unreadable');
   assert.equal(readError(new Error('Failed to parse structured output as JSON: Unexpected end')), 'unreadable');
   assert.equal(readError(Object.assign(new Error('overloaded'), { status: 529 })), 'unavailable');

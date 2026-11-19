@@ -55,7 +55,7 @@ public class MainActivity extends Activity {
     static final long RETRY_MS = 15_000;
     static final long CHECK_MS = 30 * 60_000;
     /** Older web viewers can't run the Tabla web app. */
-    static final int MIN_CHROME = 87;
+    static final int MIN_CHROME = 93; // the web app uses Object.hasOwn (Chrome 93)
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -332,7 +332,11 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         Watchdog.inFront = true;
-        if (web != null) {
+        String screen = prefs.getString("screen", null);
+        if (web == null && screen != null && !Watchdog.isQuiet(this)) {
+            // Chooser left open (e.g. the owner went into settings) and the quiet time is over: back to work.
+            showScreen(screen);
+        } else if (web != null) {
             web.onResume();
             reloadIfStale(); // TV woke from standby after missing the 4 AM reload
         }

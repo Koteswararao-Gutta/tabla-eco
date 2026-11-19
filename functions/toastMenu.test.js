@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu } from './toastMenu.js';
+import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu, settleKilled, wasKilled } from './toastMenu.js';
 
 // Shaped like Tabla's real ordering page (checked 2026-11-18): the menu sits in window.__OO_STATE__.
 const state = {
@@ -100,4 +100,32 @@ test('nextStatus alerts once after failing for an hour, and once when it works a
   assert.match(s.alert.title, /again/);
   assert.equal(s.status.failingSince, null);
   assert.equal(nextStatus(s.status, { ok: true, source: 'page' }, since + 4 * ALERT_AFTER_MS).alert, null);
+});
+
+test('a run killed before it saved counts as a failed try, so repeated kills still alert', () => {
+  const H = 60 * 60_000;
+  const t0 = Date.UTC(2026, 10, 18, 22, 0);
+  const ok = nextStatus(null, { ok: true, source: 'page' }, t0).status;
+  assert.equal(wasKilled(ok), false);
+  // Run 1 (t0 + 1h) writes startedAt and is killed; run 2 finds it.
+  let saved = { ...ok, startedAt: t0 + H };
+  assert.equal(wasKilled(saved), true);
+  let s = settleKilled(saved);
+  assert.equal(s.status.failingSince, t0 + H);
+  assert.equal(s.status.lastTryAt, t0 + H);
+  assert.match(s.status.lastError, /stopped/);
+  assert.equal(s.alert, null);
+  assert.equal(wasKilled(s.status), false);
+  // Run 2 (t0 + 2h) is killed too; run 3 finds it: failing for an hour, so one alert.
+  saved = { ...s.status, startedAt: t0 + 2 * H };
+  s = settleKilled(saved);
+  assert.match(s.alert.title, /stopped/);
+  assert.equal(s.status.alerted, true);
+  // nextStatus does the same when it is handed a killed status.
+  const n = nextStatus({ ...ok, startedAt: t0 + H }, { ok: false, error: 'blocked' }, t0 + 2 * H);
+  assert.equal(n.status.failingSince, t0 + H);
+  assert.match(n.alert.title, /stopped/);
+  // A finished run's status (startedAt equal to lastTryAt) is not a kill.
+  assert.equal(wasKilled({ ...ok, startedAt: ok.lastTryAt }), false);
+  assert.deepEqual(settleKilled(null), { status: null, alert: null });
 });
