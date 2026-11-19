@@ -20,7 +20,7 @@ import android.os.SystemClock;
  * "Display over other apps" permission (the device setup guide grants it). Without it the attempt is
  * simply ignored by the system.
  *
- * It stays quiet while the screen hasn't been chosen yet, and for 30 minutes after the screen chooser
+ * It never acts on the manager app (a phone). It stays quiet while the screen hasn't been chosen yet, and for 30 minutes after the screen chooser
  * was opened (Back 5 times), so the owner can change settings without being pulled back.
  */
 public class Watchdog extends BroadcastReceiver {
@@ -70,8 +70,10 @@ public class Watchdog extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (inFront) return;
         SharedPreferences p = prefs(context);
-        if (p.getString("screen", null) == null) return; // not set up yet
-        if (System.currentTimeMillis() < p.getLong("quietUntil", 0)) return;
+        String screen = p.getString("screen", null);
+        if (screen == null) return; // not set up yet
+        if (screen.startsWith("manager")) return; // a manager phone is a normal phone: never take it over
+        if (isQuiet(context)) return;
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         if (pm != null && !pm.isInteractive()) return; // screen off: wait for it to come on
         Intent open = new Intent(context, MainActivity.class);
@@ -81,6 +83,11 @@ public class Watchdog extends BroadcastReceiver {
         } catch (Exception ignored) {
             // The system refused (no "Display over other apps" permission); try again next time.
         }
+    }
+
+    /** True for 30 minutes after the screen chooser was opened. */
+    static boolean isQuiet(Context context) {
+        return System.currentTimeMillis() < prefs(context).getLong("quietUntil", 0);
     }
 
     private static SharedPreferences prefs(Context context) {
