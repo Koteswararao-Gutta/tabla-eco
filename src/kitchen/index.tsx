@@ -4,6 +4,7 @@ import { ScreenSurface } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
+import { useToastBridge } from './toastBridge';
 import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
 import './kitchen.css';
 
@@ -16,6 +17,7 @@ const UNLOCK_KEY = 'kitchenUnlock';
 
 export default function Kitchen() {
   useHeartbeat('kitchen');
+  useToastBridge();
   const pin = expectedPin(useSingleton('settings'));
   // Stays unlocked through reloads and restarts, until someone taps Lock or the manager changes the PIN.
   const [saved, setSaved] = useState(() => deviceValue(UNLOCK_KEY));

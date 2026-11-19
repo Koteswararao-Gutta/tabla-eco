@@ -57,7 +57,7 @@ service cloud.firestore {
         && request.resource.data.device.size() <= 200
         && request.resource.data.updatedAt is number;
     }
-    // Toast menu: saved only by the server (syncToastMenu); screens can read it.
+    // Toast menu: saved only by the server (reportToastMenu, fed by the kitchen tablet); screens can read it.
     match /toastMenu/{id}   { allow read: if signedIn(); allow write: if false; }
     match /singletons/{id} {
       allow read: if signedIn();
