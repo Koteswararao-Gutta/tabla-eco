@@ -38,11 +38,11 @@ const SCREENS: Screen[] = [
 ];
 
 export async function seedIfEmpty(): Promise<void> {
-  const decision = await seedDecision(store);
-  if (decision === 'skip') return;
+  // Never writes, changes or removes anything when the database already has data (see rule.ts).
+  if ((await seedDecision(store)) !== 'seed') return;
   // The marker is written first, so a seed that fails partway never runs twice and duplicates data.
   await store.setDoc('singletons', 'seeded', { at: store.now() });
-  if (decision === 'seed') await seed();
+  await seed();
 }
 
 export async function resetDemoData(): Promise<void> {

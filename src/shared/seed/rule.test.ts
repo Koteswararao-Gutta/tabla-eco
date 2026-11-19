@@ -24,8 +24,8 @@ describe('seedDecision', () => {
     expect(await seedDecision(fake('local', { has: ['orders'] }))).toBe('seed');
   });
 
-  it('firebase never seeds over existing data: any real collection only puts the marker back', async () => {
-    for (const col of REAL_DATA) expect(await seedDecision(fake('firebase', { has: [col] }))).toBe('mark-only');
+  it('firebase never seeds or writes anything when any real collection has data', async () => {
+    for (const col of REAL_DATA) expect(await seedDecision(fake('firebase', { has: [col] }))).toBe('skip');
   });
 
   it('firebase seeds only a confirmed empty project', async () => {
