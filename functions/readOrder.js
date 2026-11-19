@@ -66,16 +66,45 @@ export function buildRequest({ image, mediaType, text, today, weekday }) {
         ];
   return {
     model: MODEL,
-    max_tokens: 2000,
+    // Room for the model's thinking plus a long order, so it isn't cut off; low effort keeps it quick and cheap.
+    max_tokens: 8000,
     system: SYSTEM,
     messages: [{ role: 'user', content }],
-    output_config: { format: zodOutputFormat(ScannedOrder) },
+    output_config: { format: zodOutputFormat(ScannedOrder), effort: 'low' },
   };
 }
 
 /** Reads one photo or message. `client` is an Anthropic client. */
 export async function readOrderPhoto(client, data) {
   const res = await client.messages.parse(buildRequest(data));
-  if (!res.parsed_output) throw new Error(`No order in the reply (stop reason ${res.stop_reason})`);
+  if (!res.parsed_output) {
+    const e = new Error(`No order in the reply (stop reason ${res.stop_reason})`);
+    e.unreadable = true;
+    throw e;
+  }
   return res.parsed_output;
+}
+
+/** What the manager sees when the photo or message can't be read (as opposed to the service being down). */
+export const UNREADABLE = "Couldn't read this. Please try another photo or type the order in.";
+export const UNREADABLE_TEXT = "Couldn't read this. Please check the message or type the order in.";
+
+/** What a 400 from the API says when the problem is the photo or message itself (not our setup). */
+const INPUT_PROBLEM = /image|media type|base64|too large|too long|exceed|refus/i;
+
+/**
+ * Sorts a failure:
+ *  - 'unreadable': trying again with the same photo won't help (the image couldn't be processed or is too
+ *    large, the model refused, or no form came back),
+ *  - 'setup': any other 400 (a wrong model name or setting: our mistake, needs a fix in the code),
+ *  - 'unavailable': network trouble, overload or server errors that may pass.
+ */
+export function readError(e) {
+  if (e?.unreadable) return 'unreadable';
+  const status = e?.status;
+  const message = `${e?.message ?? ''} ${e?.error?.error?.message ?? ''}`;
+  if (status === 413) return 'unreadable';
+  if (status === 400) return INPUT_PROBLEM.test(message) ? 'unreadable' : 'setup';
+  if (status === undefined && /Failed to parse structured output/.test(message)) return 'unreadable';
+  return 'unavailable';
 }

@@ -101,11 +101,14 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await kitchen.getByRole('button', { name: '← Back to open orders' }).click();
   await expect(card).toBeVisible();
 
-  // The manager sees the kitchen's change and can complete / delete from the edit sheet.
+  // The manager sees the kitchen's change and can complete / delete from the order summary.
   await manager.getByRole('button', { name: /Anika Wedding/ }).click();
-  const edit = manager.getByRole('dialog', { name: 'Edit order' });
-  await expect(edit.getByLabel('Delivery address')).toHaveValue('48 Lake View Rd, Hall B');
-  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  const summary = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(summary.getByText('Tomorrow, 1:30 PM')).toBeVisible();
+  await expect(summary.getByText('48 Lake View Rd, Hall B')).toBeVisible();
+  await expect(summary.getByRole('listitem')).toHaveText(['Chicken dum biryani, 4 large trays', 'Paneer butter masala, 2 trays', 'Garlic naan, 150']);
+  await shot(manager, 'manager-order-summary');
+  await summary.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
   // Quick feedback with Undo.
   const toast = manager.getByRole('status').filter({ hasText: 'Marked completed: Anika Wedding' });
@@ -114,15 +117,16 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await toast.getByRole('button', { name: 'Undo' }).click();
   await expect(card).toBeVisible();
   await manager.getByRole('button', { name: /Anika Wedding/ }).click();
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Mark completed' }).click();
+  await summary.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
   await manager.getByRole('button', { name: /History/ }).click();
   await manager.getByRole('region', { name: 'History' }).getByRole('button', { name: /Anika Wedding/ }).click();
   // Delete, then "Keep it" goes back to the order.
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(summary.getByRole('button', { name: 'Reopen' })).toBeVisible();
+  await summary.getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Keep it' }).click();
-  await expect(manager.getByRole('dialog', { name: 'Edit order' }).getByLabel('Customer name')).toHaveValue('Anika Wedding');
-  await manager.getByRole('dialog', { name: 'Edit order' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(summary.getByText('Anika Wedding')).toBeVisible();
+  await summary.getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
   await expect(manager.getByText('Anika Wedding')).toHaveCount(0);
   expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Anika Wedding')).toBe(false);
@@ -130,14 +134,200 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await context.close();
 });
 
-test('kitchen PIN stays in memory only: a reload locks it again', async ({ browser }) => {
+test('kitchen stays unlocked on this tablet through a reload, until Lock or a new PIN', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
   const kitchen = await openScreen(context, '/kitchen');
   await typePin(kitchen, '1234');
   await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await shot(kitchen, 'kitchen-1024');
+  // The nightly reload (or a crash) keeps it unlocked.
+  await kitchen.reload();
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toHaveCount(0);
+  // Remembered on this device only, and never the PIN itself.
+  const kept = await kitchen.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('tabla-device:')));
+  expect(kept).toHaveLength(1);
+  expect(kept[0][1]).not.toContain('1234');
+  // Lock locks it, also after a reload.
+  await kitchen.getByRole('button', { name: 'Lock' }).click();
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
   await kitchen.reload();
   await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await typePin(kitchen, '1234');
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  // The manager changes the PIN: the tablet locks at once, and only the new PIN opens it.
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:singletons') || '{}');
+    t.settings = { ...(t.settings || { restaurantName: 'Tabla' }), kitchenPin: '4321' };
+    localStorage.setItem('tabla:singletons', JSON.stringify(t));
+  });
+  await kitchen.reload(); // a reload, or the live update, both show the PIN screen
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await typePin(kitchen, '1234');
+  await expect(kitchen.getByText("That PIN didn't work")).toBeVisible();
+  await typePin(kitchen, '4321');
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await context.close();
+});
+
+test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  // Count chimes, and watch the sound output, through a stand-in for the browser's sound output.
+  await context.addInitScript(() => {
+    const w = window as unknown as { chimeNotes: number; audioCtxs: AudioContext[]; AudioContext: unknown };
+    w.chimeNotes = 0;
+    w.audioCtxs = [];
+    const Real = window.AudioContext;
+    w.AudioContext = class extends Real {
+      constructor() {
+        super();
+        w.audioCtxs.push(this);
+      }
+      createOscillator() {
+        w.chimeNotes++;
+        return super.createOscillator();
+      }
+    };
+  });
+  const page = await context.newPage();
+  await page.clock.install();
+  await page.goto('/#/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed';
+    const now = Date.now();
+    t.soon = { id: 'soon', customerName: 'Anita Rao', phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + 30 * 60_000 };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  const banner = page.getByTestId('kitchen-reminder');
+  await expect(banner).toContainText('Anita Rao pickup at'); // locked, still shown
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await shot(page, 'kitchen-reminder-locked');
+  const notes = () => page.evaluate(() => (window as unknown as { chimeNotes: number }).chimeNotes);
+  const first = await notes();
+  expect(first).toBeGreaterThan(0); // rang once
+  // A tap anywhere wakes the sound.
+  await page.mouse.click(5, 760);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { audioCtxs: AudioContext[] }).audioCtxs.map((c) => c.state).join()))
+    .toBe('running'); // one sound output, and it is on
+  await page.clock.runFor(46_000);
+  expect(await notes()).toBe(first * 2); // rang again
+  await page.clock.runFor(45_000);
+  expect(await notes()).toBe(first * 3);
+  // Unlocking and locking again neither replays the chime nor restarts the 45 s.
+  await page.clock.runFor(20_000);
+  await typePin(page, '1234');
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(banner).toContainText('Anita Rao');
+  await page.getByRole('button', { name: 'Lock' }).click();
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  expect(await notes()).toBe(first * 3);
+  await page.clock.runFor(26_000); // 45 s after the last ring
+  expect(await notes()).toBe(first * 4);
+  // Got it works without the PIN, and the ringing stops.
+  await banner.getByRole('button', { name: 'Got it' }).click();
+  await expect(banner).toHaveCount(0);
+  await page.clock.runFor(100_000);
+  expect(await notes()).toBe(first * 4);
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on screen', async ({ browser }) => {
+  // A New York tablet shows the time zone warning strip, which pushes the page down.
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 }, timezoneId: 'America/New_York' });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    const now = Date.now();
+    for (const [i, name] of ['Anita Rao', 'Bharat Iyer', 'Chitra Nair', 'Deepak Shah', 'Esha Gupta'].entries())
+      t['r' + i] = { id: 'r' + i, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + (10 + i * 10) * 60_000 };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await expect(page.getByTestId('kitchen-reminder').getByRole('button', { name: 'Got it' })).toHaveCount(5);
+  const onScreen = async () => {
+    const vh = page.viewportSize()!.height;
+    for (const k of ['1', '0', 'Clear', 'Delete last digit']) {
+      const b = (await page.getByRole('button', { name: k, exact: true }).boundingBox())!;
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.height).toBeLessThanOrEqual(vh);
+    }
+    // Nothing sits on top of the keypad or the PIN dots.
+    expect(await page.evaluate(() => {
+      const hit = (el: Element) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!top && (el === top || el.contains(top)); };
+      // ...nor on the heads-up: it sits below the time zone strip.
+      return document.documentElement.classList.contains('t-tz-on') && [...document.querySelectorAll('.k-key, .k-dots'), document.querySelector('.k-remind-btn')!].every(hit);
+    })).toBe(true);
+  };
+  await onScreen();
+  await shot(page, 'kitchen-pin-5-reminders-1024');
+  await page.setViewportSize({ width: 800, height: 1280 });
+  await onScreen();
+  await shot(page, 'kitchen-pin-5-reminders-portrait');
+  // The keypad still works, and so does Got it.
+  await typePin(page, '1234');
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: shows "Tap anywhere to turn on sound" while the browser keeps sound off', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  // A stand-in sound output that stays off until a tap, like Chrome after a restart.
+  await context.addInitScript(() => {
+    class FakeAudio extends EventTarget {
+      state = 'suspended';
+      currentTime = 0;
+      destination = {};
+      resume() {
+        const during = window.event?.type; // only a real tap or key press turns it on
+        if ((during === 'pointerdown' || during === 'keydown') && this.state !== 'running') {
+          this.state = 'running';
+          this.dispatchEvent(new Event('statechange'));
+        }
+        return Promise.resolve();
+      }
+      createOscillator() { return { frequency: {}, connect: (g: unknown) => g, start() {}, stop() {} }; }
+      createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d: unknown) => d }; }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = FakeAudio;
+  });
+  const page = await openScreen(context, '/kitchen');
+  const note = page.getByText('Tap anywhere to turn on sound');
+  await expect(note).toBeVisible();
+  await shot(page, 'kitchen-sound-off-pin');
+  await typePin(page, '1234'); // the first tap turns sound on
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+  // After a restart it is unlocked, and the note shows on the board until a tap.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(note).toBeVisible();
+  await shot(page, 'kitchen-sound-off-board');
+  await page.mouse.click(500, 700);
+  await expect(note).toHaveCount(0);
+  await context.close();
+});
+
+test('kitchen: Show all orders goes back to open orders after 3 minutes with no touch', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  await page.clock.install();
+  await page.goto('/#/kitchen');
+  await typePin(page, '1234');
+  await page.getByRole('button', { name: 'Show all orders' }).click();
+  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
+  await page.clock.runFor(120_000);
+  await page.mouse.click(640, 700); // a touch restarts the 3 minutes
+  await page.clock.runFor(120_000);
+  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
+  await page.clock.runFor(61_000);
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await context.close();
 });
 
@@ -151,6 +341,7 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
 
   // Manager opens the edit sheet...
   await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
   const edit = manager.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
 
@@ -196,16 +387,15 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
   expect((await gotIt.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   await shot(page, 'kitchen-reminder');
 
-  // Not shown on the all orders view.
+  // Also shown on the all orders view.
   await page.getByRole('button', { name: 'Show all orders' }).click();
-  await expect(banner).toHaveCount(0);
+  await expect(banner).toContainText('Anita Rao');
   await page.getByRole('button', { name: '← Back to open orders' }).click();
 
   await gotIt.click();
   await expect(banner).toHaveCount(0);
   // Saved on the order: still gone after a reload (and on any other kitchen tablet).
   await page.reload();
-  await typePin(page, '1234');
   await expect(page.getByRole('article', { name: 'Order for Anita Rao' })).toBeVisible();
   await expect(banner).toHaveCount(0);
 
@@ -216,7 +406,6 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
     localStorage.setItem('tabla:orders', JSON.stringify(t));
   });
   await page.reload();
-  await typePin(page, '1234');
   await expect(banner).toContainText('Anita Rao');
   await context.close();
 });
@@ -370,5 +559,123 @@ test('catering list fits a phone with a long no-space customer name', async ({ b
   await expect(manager.getByText(/Supercali/)).toBeVisible();
   expect(await manager.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await shot(manager, 'manager-long-name');
+  await context.close();
+});
+
+test('order summary: big time, Call link, items; Edit opens the form', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const summary = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(summary.getByText('Today, 5:30 PM')).toBeVisible();
+  await expect(summary.getByRole('link', { name: /Call 555 123 4567/ })).toHaveAttribute('href', 'tel:5551234567');
+  await expect(summary.getByRole('listitem')).toHaveCount(4);
+  await expect(summary.getByText('Less spicy, add serving spoons')).toBeVisible();
+  await expect(summary.getByLabel('Customer name')).toHaveCount(0); // not the form
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-summary-priya');
+  await summary.getByRole('button', { name: 'Edit' }).click();
+  await expect(manager.getByRole('dialog', { name: 'Edit order' }).getByLabel('Customer name')).toHaveValue('Priya Sharma');
+  // Calendar taps open the same summary.
+  await manager.keyboard.press('Escape');
+  await manager.getByRole('button', { name: 'Calendar' }).click();
+  await manager.getByRole('dialog', { name: 'Calendar' }).getByRole('button', { name: /Priya Sharma/ }).click();
+  await expect(manager.getByRole('dialog', { name: 'Order details' })).toBeVisible();
+  await context.close();
+});
+
+test('closing a form with typed changes asks first; untouched forms close at once', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  // Untouched new order: Escape closes straight away.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await manager.keyboard.press('Escape');
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+
+  // Typed something: Cancel, Escape and a backdrop tap all ask.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await sheet.getByLabel('Customer name').fill('Half typed');
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  const ask = manager.getByRole('dialog', { name: 'Discard this order?' });
+  await expect(ask).toBeVisible();
+  await shot(manager, 'manager-discard-ask');
+  await ask.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await expect(sheet.getByRole('button', { name: 'Cancel' })).toBeFocused(); // focus back where it was
+  await sheet.getByLabel('Phone').focus();
+  await manager.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await manager.keyboard.press('Escape'); // Escape on the question = keep editing
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await expect(sheet.getByLabel('Phone')).toBeFocused();
+  await manager.mouse.click(195, 10); // the dimmed backdrop above the sheet
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Half typed')).toBe(false);
+
+  // A key typed right before Escape still counts.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await sheet.getByLabel('Customer name').focus();
+  await manager.keyboard.type('Q');
+  await manager.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+
+  // Editing an existing order asks "Discard your changes?".
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await edit.getByLabel('Notes (optional)').fill('Changed');
+  await edit.getByRole('button', { name: 'Cancel' }).click();
+  await manager.getByRole('dialog', { name: 'Discard your changes?' }).getByRole('button', { name: 'Discard' }).click();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect((await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Priya Sharma')!.notes).toBe('Less spicy, add serving spoons');
+  await context.close();
+});
+
+test('Mark completed in the edit form saves the typed changes too, and checks them first', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  // An invalid change: shown, and the status is left alone.
+  await edit.getByLabel('Customer name').fill('');
+  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  await expect(edit.getByText("Please enter the customer's name.")).toBeVisible();
+  const priya = async () => (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.phone === '555 123 4567')!;
+  expect((await priya()).status).toBe('open');
+  // Fixed: both the edits and the status are saved.
+  await edit.getByLabel('Customer name').fill('Priya S.');
+  await edit.getByLabel('Notes (optional)').fill('Extra raita');
+  await edit.getByRole('button', { name: 'Mark completed' }).click();
+  await expect(edit).toHaveCount(0);
+  expect(await priya()).toMatchObject({ customerName: 'Priya S.', notes: 'Extra raita', status: 'completed', completedAt: expect.any(Number) });
+  await expect(manager.getByRole('status').filter({ hasText: 'Marked completed' })).toBeVisible();
+  await context.close();
+});
+
+test('Save stays visible at the bottom of a long order form', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  const save = sheet.getByRole('button', { name: 'Save order' });
+  await manager.waitForTimeout(400);
+  const box = (await save.boundingBox())!;
+  const sheetBox = (await sheet.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(sheetBox.y + sheetBox.height);
+  expect(box.y).toBeGreaterThan(sheetBox.y + sheetBox.height - 120); // pinned to the bottom, not far down the form
+  await shot(manager, 'manager-form-sticky-save');
+  // A short screen (keyboard up): a focused field is scrolled clear of the Save bar.
+  await manager.setViewportSize({ width: 390, height: 500 });
+  const notes = sheet.getByLabel('Notes (optional)');
+  await notes.focus();
+  await manager.waitForTimeout(300);
+  const n = (await notes.boundingBox())!;
+  const bar = (await sheet.locator('.c-form-foot').boundingBox())!;
+  expect(n.y + n.height).toBeLessThanOrEqual(bar.y + 1);
   await context.close();
 });

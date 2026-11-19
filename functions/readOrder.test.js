@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildRequest, checkRequest, MODEL, readOrderPhoto } from './readOrder.js';
+import { buildRequest, checkRequest, MODEL, readError, readOrderPhoto } from './readOrder.js';
 
 const ok = { image: 'A'.repeat(200), mediaType: 'image/jpeg', today: '2026-11-18', weekday: 'Wednesday' };
 
@@ -35,6 +35,8 @@ test('buildRequest sends the photo, today and the form schema to the cheap model
   assert.equal(r.messages[0].content[0].source.data, ok.image);
   assert.match(r.messages[0].content[1].text, /Wednesday, 2026-11-18/);
   assert.ok(r.output_config.format);
+  assert.equal(r.output_config.effort, 'low');
+  assert.ok(r.max_tokens >= 8000); // room for thinking plus a long order
   assert.equal(r.temperature, undefined); // Haiku 5.5 refuses non-default sampling
 });
 
@@ -43,4 +45,22 @@ test('readOrderPhoto returns the parsed form, and fails when there is none', asy
   const client = (out) => ({ messages: { parse: async () => ({ parsed_output: out, stop_reason: 'end_turn' }) } });
   assert.deepEqual(await readOrderPhoto(client(parsed), ok), parsed);
   await assert.rejects(readOrderPhoto(client(null), ok), /No order/);
+  await readOrderPhoto(client(null), ok).catch((e) => assert.equal(readError(e), 'unreadable'));
+});
+
+test('readError tells a photo that cannot be read from a service that is down', () => {
+  const bad = (message, inner) => Object.assign(new Error(message), { status: 400, error: inner ? { error: { message: inner } } : undefined });
+  assert.equal(readError(bad('invalid image')), 'unreadable');
+  assert.equal(readError(bad('400 {"type":"error"}', 'Could not process image')), 'unreadable');
+  assert.equal(readError(bad('messages.0.content.0.image.source.base64: image exceeds 5 MB maximum')), 'unreadable');
+  // Setup mistakes are not the photo's fault: report them as a passing problem and log them.
+  assert.equal(readError(bad('model: claude-nope not found')), 'setup');
+  assert.equal(readError(bad('output_config.effort: unknown field')), 'setup');
+  assert.equal(readError(Object.assign(new Error('too big'), { status: 413 })), 'unreadable');
+  assert.equal(readError(new Error('Failed to parse structured output as JSON: Unexpected end')), 'unreadable');
+  assert.equal(readError(Object.assign(new Error('overloaded'), { status: 529 })), 'unavailable');
+  assert.equal(readError(Object.assign(new Error('server'), { status: 500 })), 'unavailable');
+  assert.equal(readError(Object.assign(new Error('rate'), { status: 429 })), 'unavailable');
+  assert.equal(readError(new Error('Connection error.')), 'unavailable');
+  assert.equal(readError(undefined), 'unavailable');
 });

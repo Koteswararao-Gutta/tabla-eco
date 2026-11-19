@@ -32,12 +32,14 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.Calendar;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Tabla screen app: shows one screen of the Tabla web app full screen, forever.
  * First launch asks which screen this device is. Press Back 5 times quickly to choose again.
  * Recovers by itself from internet drops and browser crashes, and reloads once a night at 4 AM
- * to pick up updates.
+ * to pick up updates. Watchdog brings it back to the front if something else is showing.
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
@@ -52,6 +54,8 @@ public class MainActivity extends Activity {
     };
     static final long RETRY_MS = 15_000;
     static final long CHECK_MS = 30 * 60_000;
+    /** Older web viewers can't run the Tabla web app. */
+    static final int MIN_CHROME = 93; // the web app uses Object.hasOwn (Chrome 93)
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -72,11 +76,13 @@ public class MainActivity extends Activity {
         if (screen == null) showChooser();
         else showScreen(screen);
         handler.postDelayed(nightly, CHECK_MS);
+        Watchdog.start(this);
     }
 
     // ---------- choosing the screen ----------
     private void showChooser() {
         destroyWeb();
+        Watchdog.quiet(this, true); // the owner may go into settings from here
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -103,6 +109,7 @@ public class MainActivity extends Activity {
             final String route = s[1];
             b.setOnClickListener(v -> {
                 prefs.edit().putString("screen", route).apply();
+                Watchdog.quiet(this, false);
                 showScreen(route);
             });
             list.addView(b);
@@ -119,6 +126,30 @@ public class MainActivity extends Activity {
             Button allow = button("Allow auto-start");
             allow.setOnClickListener(v -> openOverlaySettings());
             list.addView(allow);
+        }
+
+        Button settings = button("Open device settings");
+        settings.setOnClickListener(v -> openSettings());
+        LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) settings.getLayoutParams();
+        slp.topMargin = dp(24);
+        list.addView(settings);
+
+        String[] viewer = webViewer();
+        TextView version = new TextView(this);
+        version.setText("Web viewer: " + viewer[0]);
+        version.setTextSize(14);
+        version.setTextColor(Color.DKGRAY);
+        version.setPadding(0, dp(24), 0, 0);
+        list.addView(version);
+        int major = Integer.parseInt(viewer[1]);
+        if (major > 0 && major < MIN_CHROME) {
+            TextView old = new TextView(this);
+            old.setText("This web viewer is too old for Tabla. Update \"Android System WebView\" (or Chrome) "
+                + "from the app store, then restart the device.");
+            old.setTextSize(18);
+            old.setTextColor(Color.rgb(176, 0, 32));
+            old.setPadding(0, dp(8), 0, 0);
+            list.addView(old);
         }
 
         ScrollView scroll = new ScrollView(this);
@@ -150,6 +181,24 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    private void openSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** {"Chrome 120.0.6099.230", "120"}, or {"unknown", "0"}. */
+    private String[] webViewer() {
+        try {
+            Matcher m = Pattern.compile("Chrome/((\\d+)[\\d.]*)").matcher(WebSettings.getDefaultUserAgent(this));
+            if (m.find()) return new String[] {"Chrome " + m.group(1), m.group(2)};
+        } catch (Exception ignored) {
+            // No web viewer installed at all.
+        }
+        return new String[] {"unknown", "0"};
     }
 
     // ---------- showing the screen ----------
@@ -282,7 +331,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (web != null) {
+        Watchdog.inFront = true;
+        String screen = prefs.getString("screen", null);
+        if (web == null && screen != null && !Watchdog.isQuiet(this)) {
+            // Chooser left open (e.g. the owner went into settings) and the quiet time is over: back to work.
+            showScreen(screen);
+        } else if (web != null) {
             web.onResume();
             reloadIfStale(); // TV woke from standby after missing the 4 AM reload
         }
@@ -291,6 +345,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         // Keep playing: this app is the only thing on the screen.
+        Watchdog.inFront = false;
         super.onPause();
     }
 

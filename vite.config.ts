@@ -7,5 +7,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: { alias: { '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)) } },
   server: { port: 5173 },
+  // The list of every built file; the service worker reads it to keep all screens' code for offline start-up.
+  build: { manifest: 'asset-manifest.json' },
   test: { include: ['src/**/*.test.ts'] },
 } as never);

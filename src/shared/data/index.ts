@@ -8,6 +8,7 @@ import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } f
 export * from './types';
 export type { DataStore, WithId, Unsubscribe } from './store';
 export { newId } from './store';
+export { deviceValue, setDeviceValue } from './device';
 
 /** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
  *  which keeps everything in one browser (tests and the offline Chrome preview). */

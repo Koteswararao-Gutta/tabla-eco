@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CateringOrder } from '@shared/data';
-import { ackPatch, dueReminders, ringAt, type KitchenOrder } from './reminder';
+import { CHIME_PEAK, ackPatch, chime, dueReminders, ringAt, wakeAudio, type KitchenOrder } from './reminder';
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -64,5 +64,44 @@ describe('ringAt: only while the kitchen is staffed', () => {
     const o = order('x', at(18, 16));
     expect(dueReminders([o], at(18, 13, 45), staff)).toEqual([o]);
     expect(dueReminders([o], at(18, 17, 1), staff)).toEqual([]);
+  });
+});
+
+describe('chime', () => {
+  it('wakes the sound on a tap, reuses it, and plays clear notes that never clip', () => {
+    const made: FakeCtx[] = [];
+    class FakeCtx {
+      state = 'suspended';
+      currentTime = 0;
+      destination = {};
+      peaks: number[] = [];
+      resume = vi.fn(async () => {
+        this.state = 'running';
+      });
+      constructor() {
+        made.push(this);
+      }
+      createOscillator() {
+        return { type: '', frequency: { value: 0 }, connect: (g: unknown) => g, start() {}, stop() {} };
+      }
+      createGain = () => {
+        const g = {
+          gain: { setValueAtTime() {}, exponentialRampToValueAtTime: (v: number) => this.peaks.push(v) },
+          connect: (d: unknown) => d,
+        };
+        return g;
+      };
+    }
+    (globalThis as { window?: unknown }).window = { AudioContext: FakeCtx };
+    wakeAudio();
+    expect(made).toHaveLength(1);
+    expect(made[0].resume).toHaveBeenCalledTimes(1);
+    chime();
+    chime();
+    expect(made).toHaveLength(1); // one sound output for the page
+    expect(Math.max(...made[0].peaks)).toBe(CHIME_PEAK);
+    expect(CHIME_PEAK).toBeGreaterThan(0.4); // louder than before
+    expect(CHIME_PEAK).toBeLessThanOrEqual(1);
+    delete (globalThis as { window?: unknown }).window;
   });
 });

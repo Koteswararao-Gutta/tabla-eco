@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
 import { PARTNER, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
-import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlot, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
+import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
 import { deletePictureIfUnused, FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
 
 type S = WithId<Slot>;
@@ -133,9 +133,9 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
                   </button>
                 )}
               </div>
-              {!readOnly && (
+              {!readOnly && i < sorted.length - 1 && (
                 <div className="sc-insert">
-                  <button className="t-plus" aria-label={`Add a picture after picture ${i + 1}`} onClick={() => setOpen({ kind: 'add', after: i })}>
+                  <button className="t-plus sc-insert-plus" aria-label={`Add a picture between ${i + 1} and ${i + 2}`} onClick={() => setOpen({ kind: 'add', after: i })}>
                     +
                   </button>
                 </div>
@@ -144,6 +144,11 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           );
         })}
       </ol>
+      {!readOnly && (
+        <button className="t-btn block sc-add-end" onClick={() => setOpen({ kind: 'add', after: sorted.length - 1 })}>
+          <span aria-hidden>+</span> Add a picture
+        </button>
+      )}
       {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={open.after} onClose={close} />}
       {open?.kind === 'fill' && openSlot && <FillSheet tv={tv} sorted={sorted} slot={openSlot} replace={open.replace} onClose={close} />}
       {open?.kind === 'timing' && openSlot && <TimingSheet slot={openSlot} onClose={close} />}
@@ -334,11 +339,16 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
   const endsMs = ends ? fromLocalInput(ends) : null;
   const dirty = seconds.trim() !== String(slot.seconds) || transition !== (slot.transition ?? 'fade') || (endsMs ?? null) !== (slot.endsAt ?? null);
 
-  const move = (dir: -1 | 1) =>
+  /** Moves this picture to position `to` (0 = top), then restarts the loop once so every TV shows the new order. */
+  const move = (to: number) =>
     run(async () => {
-      for (const s of moveSlot(sorted, index, dir)) await store.updateDoc('slots', s.id, { order: s.order });
+      const changed = moveSlotTo(sorted, index, to);
+      if (!changed.length) return;
+      for (const s of changed) await store.updateDoc('slots', s.id, { order: s.order });
       await restartLoop(slot.id);
     });
+  const first = index <= 0;
+  const last = index >= sorted.length - 1;
   const save = () => {
     if (secs == null) return setError(SECONDS_ERROR);
     if (ends && endsMs == null) return setError('That end date is not a valid date.');
@@ -381,8 +391,10 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
       <div className="sc-menu">
         <button className="t-btn block" onClick={onReplace}>{own ? 'Replace picture' : `Use a different picture on ${name}`}</button>
         <div className="t-grid2">
-          <button className="t-btn" onClick={() => move(-1)} disabled={busy || index <= 0}>Move up</button>
-          <button className="t-btn" onClick={() => move(1)} disabled={busy || index >= sorted.length - 1}>Move down</button>
+          <button className="t-btn" onClick={() => move(index - 1)} disabled={busy || first}>Move up</button>
+          <button className="t-btn" onClick={() => move(index + 1)} disabled={busy || last}>Move down</button>
+          <button className="t-btn" onClick={() => move(0)} disabled={busy || first}>Move to top</button>
+          <button className="t-btn" onClick={() => move(sorted.length - 1)} disabled={busy || last}>Move to bottom</button>
         </div>
         {own && (
           <button className="t-btn block danger" onClick={() => setConfirm(true)}>Remove from {name}</button>

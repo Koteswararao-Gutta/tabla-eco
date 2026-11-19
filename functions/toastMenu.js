@@ -115,6 +115,10 @@ export async function readFromPage(fetchFn = fetch, url = TOAST_PAGE) {
   throw new Error(lastError);
 }
 
+/** How long the hidden Chrome waits for the page, then for the menu data in it. */
+export const CHROME_LOAD_MS = 60_000;
+export const CHROME_MENU_MS = 45_000;
+
 /** Way 2 (backup): open the page in a hidden Chrome, the same as a normal visitor, and read the menu from it. */
 export async function readWithChrome(url = TOAST_PAGE) {
   const [{ default: chromium }, { default: puppeteer }] = await Promise.all([
@@ -129,7 +133,9 @@ export async function readWithChrome(url = TOAST_PAGE) {
   try {
     const page = await browser.newPage();
     await page.setUserAgent(BROWSERS[0]);
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 });
+    // Worst case: page fetch (2 x 20 s) + Chrome start + 60 s + 45 s, inside the function's 300 s limit.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: CHROME_LOAD_MS });
+    await page.waitForFunction(() => Boolean(window.__OO_STATE__), { timeout: CHROME_MENU_MS }).catch(() => {});
     const state = await page.evaluate(() => window.__OO_STATE__ ?? null);
     const menu = menuFromState(state) ?? menuFromState(readPageState(await page.content()));
     if (!menu) throw new Error('Chrome opened the page but found no menu');
@@ -168,6 +174,28 @@ export async function readToastMenu(ways) {
  * `prev` is the last status (or null). Alerts once per outage, after ALERT_AFTER_MS, and once when it works again.
  */
 export function nextStatus(prev, result, now) {
+  const settled = settleKilled(prev);
+  const next = nextAfter(settled.status, result, now);
+  // A killed try just alerted and this one worked: the two cancel out.
+  if (settled.alert && next.alert) return { status: next.status, alert: null };
+  return { status: next.status, alert: settled.alert ?? next.alert };
+}
+
+/** The last try started (startedAt) but never saved how it went: it was stopped (time limit, memory). */
+export function wasKilled(prev) {
+  return typeof prev?.startedAt === 'number' && prev.startedAt > (prev.lastTryAt ?? 0);
+}
+
+export const KILLED_ERROR = 'The last try was stopped before it finished (time limit).';
+
+/** Counts a killed last try as a failed one, at the time it started. Leaves any other status as it is. */
+export function settleKilled(prev) {
+  if (!wasKilled(prev)) return { status: prev ?? null, alert: null };
+  const { status, alert } = nextAfter(prev, { ok: false, error: KILLED_ERROR }, prev.startedAt);
+  return { status: { ...status, startedAt: prev.startedAt }, alert };
+}
+
+function nextAfter(prev, result, now) {
   if (result.ok) {
     return {
       status: { lastTryAt: now, lastOkAt: now, source: result.source, lastError: null, failingSince: null, alerted: false },

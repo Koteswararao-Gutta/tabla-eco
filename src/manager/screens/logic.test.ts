@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '@shared/data/types';
-import { formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
+import { formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
 
 const s = (id: string, order: number, extra: Partial<Slot> = {}): Slot => ({ id, order, seconds: 10, transition: 'fade', pictures: { tv1: 'p' + id }, ...extra });
 
@@ -19,6 +19,12 @@ describe('slot order', () => {
     expect(moveSlot(list, 2, 1)).toEqual([]);
     const odd = sortSlots([s('a', 1), s('n', 1.5), s('b', 2)]);
     expect(moveSlot(odd, 2, -1).map((x) => [x.id, x.order])).toEqual([['n', 3]]);
+  });
+  it('moves to the top or the bottom in one go', () => {
+    expect(moveSlotTo(list, 2, 0).map((x) => [x.id, x.order])).toEqual([['c', 1], ['a', 2], ['b', 3]]);
+    expect(moveSlotTo(list, 0, 2).map((x) => [x.id, x.order])).toEqual([['b', 1], ['c', 2], ['a', 3]]);
+    expect(moveSlotTo(list, 0, 0)).toEqual([]);
+    expect(moveSlotTo(list, 1, 5)).toEqual([]);
   });
 });
 

@@ -14,25 +14,29 @@ import {
   collection,
   getDoc as fsGet,
   getDocFromServer,
+  getDocsFromServer,
+  runTransaction,
+  limit,
+  query,
   initializeFirestore,
   onSnapshot,
   persistentLocalCache,
   persistentMultipleTabManager,
   serverTimestamp,
   setDoc as fsSet,
+  waitForPendingWrites,
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
+import { keepListening, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
-const CLOCK_REFRESH_MS = 60 * 60 * 1000;
 
 export class FirebaseStore implements DataStore {
   readonly mode = 'firebase' as const;
@@ -63,8 +67,9 @@ export class FirebaseStore implements DataStore {
         if (!auth.currentUser) tryIn();
       });
     });
-    this.ready.then(() => this.syncClock());
-    setInterval(() => this.syncClock(), CLOCK_REFRESH_MS);
+    // Every 30 s until the first sync works, then hourly; again when the internet returns or the
+    // device's own clock is changed.
+    this.ready.then(() => scheduleClockSync(() => this.syncClock(), { events: typeof window === 'undefined' ? null : window }));
   }
 
   // ---------- shared clock ----------
@@ -72,20 +77,42 @@ export class FirebaseStore implements DataStore {
     return Date.now() + this.offset;
   }
 
-  /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
-  private async syncClock(): Promise<void> {
+  /** True when the offset was updated. Offline (or no answer within 10 s) keeps the last offset. */
+  private async syncClock(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    // Without internet the write below waits (queued in Firestore's offline copy) until the internet is
+    // back. While one is still waiting, no new one is queued, so at most one clock write piles up.
+    const attempt = this.clockAttempt();
+    if (!attempt) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<false>((r) => (timer = setTimeout(() => r(false), 10_000)));
     try {
+      return await Promise.race([attempt, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
+  private clockAttempt = singleFlight(async () => {
+    try {
+      // A clock write left waiting before a reload is still queued: wait for it rather than adding another.
+      if (clockWriteWaiting()) await waitForPendingWrites(this.db);
       const ref = doc(this.db, 'clocks', deviceId());
       const t0 = Date.now();
+      clockWriteWaiting(true);
       await fsSet(ref, { t: serverTimestamp() });
+      clockWriteWaiting(false);
       const snap = await getDocFromServer(ref);
       const t1 = Date.now();
       const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
-      if (server && t1 - t0 < 5000) this.offset = server - (t0 + t1) / 2;
+      if (!server || t1 - t0 >= 5000) return false;
+      this.offset = server - (t0 + t1) / 2;
+      return true;
     } catch {
-      // Offline: keep the last offset and try again at the next refresh.
+      return false;
     }
-  }
+  });
 
   // ---------- documents ----------
   private ref(col: string, id: string) {
@@ -107,20 +134,34 @@ export class FirebaseStore implements DataStore {
 
   watchDoc<C extends CollectionName>(col: C, id: string, cb: (doc: WithId<Collections[C]> | null) => void): Unsubscribe {
     return this.later(() =>
-      onSnapshot(
-        this.ref(col, id),
-        (s) => cb(s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null),
-        (e) => console.warn('watchDoc', col, id, e.message),
+      keepListening(
+        (ok, fail) =>
+          onSnapshot(
+            this.ref(col, id),
+            (s) => {
+              ok();
+              cb(s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null);
+            },
+            fail,
+          ),
+        `watchDoc ${col}/${id}`,
       ),
     );
   }
 
   watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void): Unsubscribe {
     return this.later(() =>
-      onSnapshot(
-        collection(this.db, col),
-        (q) => cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>)),
-        (e) => console.warn('watchCollection', col, e.message),
+      keepListening(
+        (ok, fail) =>
+          onSnapshot(
+            collection(this.db, col),
+            (q) => {
+              ok();
+              cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>));
+            },
+            fail,
+          ),
+        `watchCollection ${col}`,
       ),
     );
   }
@@ -129,6 +170,21 @@ export class FirebaseStore implements DataStore {
     await this.ready;
     const s = await fsGet(this.ref(col, id));
     return s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null;
+  }
+
+  async hasAnyDoc(col: CollectionName): Promise<boolean> {
+    await this.ready;
+    return !(await getDocsFromServer(query(collection(this.db, col), limit(1)))).empty;
+  }
+
+  async createIfMissing<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<boolean> {
+    await this.ready;
+    const ref = this.ref(col, id);
+    return runTransaction(this.db, async (tx) => {
+      if ((await tx.get(ref)).exists()) return false;
+      tx.set(ref, { ...clean(data as object), id });
+      return true;
+    });
   }
 
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
@@ -242,8 +298,10 @@ export class FirebaseStore implements DataStore {
     await this.ready;
     const d = new Date(this.now());
     const p = (n: number) => String(n).padStart(2, '0');
-    const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
     try {
+      // Loaded only when a photo or message is read, so the app itself opens faster.
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
       const res = await call({
         ...input,
         today: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
@@ -252,6 +310,9 @@ export class FirebaseStore implements DataStore {
       return res.data;
     } catch (e) {
       console.warn('readOrder', e);
+      // The server says plainly when this photo or message can't be read (trying again won't help).
+      const err = e as { code?: string; message?: string };
+      if (err?.code === 'functions/invalid-argument' && err.message) throw new Error(err.message);
       throw new Error(`Couldn't read the ${what} right now. Please try again, or type the order in.`);
     }
   }
@@ -287,6 +348,16 @@ async function scanSize(photo: Blob): Promise<Blob> {
   canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
   return new Promise<Blob>((r, j) => canvas.toBlob((b) => (b ? r(b) : j(new Error('encode'))), 'image/jpeg', 0.85));
+}
+
+/** Remembers across reloads that a clock write is still queued (sent once the internet is back). */
+function clockWriteWaiting(set?: boolean): boolean {
+  try {
+    if (set !== undefined) set ? localStorage.setItem('tabla-clock-write', '1') : localStorage.removeItem('tabla-clock-write');
+    return localStorage.getItem('tabla-clock-write') === '1';
+  } catch {
+    return false;
+  }
 }
 
 /** A stable id for this device, used only for its clock document. */

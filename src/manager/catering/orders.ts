@@ -197,9 +197,13 @@ export function formFromOrder(o: Order): OrderForm {
   };
 }
 
+/** Longest customer name (the name box allows this many; a scan or paste could fill more). */
+export const NAME_MAX = 200;
+
 export function validate(f: OrderForm): FormErrors {
   const e: FormErrors = {};
   if (!f.customerName.trim()) e.customerName = "Please enter the customer's name.";
+  else if (f.customerName.trim().length > NAME_MAX) e.customerName = `Please shorten the name to ${NAME_MAX} letters or fewer.`;
   const digits = f.phone.replace(/\D/g, '');
   if (!f.phone.trim()) e.phone = 'Please enter a phone number.';
   else if (digits.length < 7) e.phone = 'This phone number looks too short.';
@@ -257,4 +261,12 @@ export function formFromScan(s: ScannedOrder, base: OrderForm): { form: OrderFor
   if (!date) unsure.add('date');
   if (s.type !== 'pickup' && s.type !== 'delivery') unsure.add('type');
   return { form, unsure: FORM_KEYS.filter((k) => unsure.has(k)) };
+}
+
+/** A tel: link for a typed phone number ("555 123-4567" -> "tel:5551234567"). An extension
+ *  ("ext 2", "x2", "#2", "extension 2") is left off, so the call reaches the main number. */
+export function telHref(phone: string): string {
+  const main = phone.split(/ext|x|#/i)[0]; // "extension" starts with "ext"
+  const plus = main.trim().startsWith('+') ? '+' : '';
+  return 'tel:' + plus + main.replace(/\D/g, '');
 }

@@ -10,8 +10,8 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { checkRequest, readOrderPhoto } from './readOrder.js';
-import { alertFor, deadTokens, onRing, planReminder, TIME_ZONE } from './reminders.js';
+import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
+import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
 import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome, withTimeout } from './toastMenu.js';
 
 initializeApp();
@@ -28,7 +28,10 @@ export const readOrder = onCall(
       const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value(), maxRetries: 2 });
       return await readOrderPhoto(client, req.data);
     } catch (e) {
-      logger.error('readOrder failed', e);
+      const kind = readError(e);
+      if (kind === 'setup') logger.error(`readOrder: the request was refused, check the model and settings: ${e?.message ?? e}`, e);
+      else logger.error('readOrder failed', e);
+      if (kind === 'unreadable') throw new HttpsError('invalid-argument', req.data.text !== undefined ? UNREADABLE_TEXT : UNREADABLE);
       throw new HttpsError('unavailable', 'Could not read the order right now.');
     }
   },
@@ -51,10 +54,9 @@ async function scheduleReminder(orderId, order) {
 
 /** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings). */
 export const orderSaved = onDocumentWritten({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
-  const after = event.data?.after?.data();
-  const before = event.data?.before?.data();
-  if (!after || after.status !== 'open') return;
-  if (before && before.status === after.status && before.dueAt === after.dueAt) return; // nothing that moves the alarm
+  const after = event.data?.after?.data() ?? null;
+  const before = event.data?.before?.data() ?? null;
+  if (!shouldSchedule(before, after)) return; // nothing that moves the alarm (e.g. only remindedFor changed)
   await scheduleReminder(event.params.orderId, after);
 });
 
@@ -72,18 +74,9 @@ export const orderReminder = onTaskDispatched(
     if (what === 'later') return scheduleReminder(orderId, order);
     if (what === 'skip') return;
 
-    const docs = (await db.collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
-    const tokens = docs.map((d) => d.get('token'));
-    if (!tokens.length) return logger.info('orderReminder: no devices have alerts on');
-    const alert = alertFor(order, now);
-    const res = await getMessaging().sendEachForMulticast({
-      tokens,
-      data: { ...alert, tag: `order-${orderId}` },
-      webpush: { headers: { Urgency: 'high', TTL: '3600' } },
-    });
-    const dead = deadTokens(tokens, res.responses);
-    await Promise.all(docs.filter((d) => dead.includes(d.get('token'))).map((d) => d.ref.delete().catch(() => {})));
-    logger.info(`orderReminder ${orderId}: sent ${res.successCount}, failed ${res.failureCount}, removed ${dead.length}`);
+    const sent = await sendToAllDevices(alertFor(order, now), `order-${orderId}`, 'high');
+    // Remember it was sent for this time, so a retry or a move away and back doesn't ring again.
+    if (sent > 0) await snap.ref.update({ remindedFor: dueAt });
   },
 );
 
@@ -140,14 +133,29 @@ export const syncToastMenuNow = onCall(
   },
 );
 
-/** Sends one alert to every phone that turned alerts on. */
-async function sendToAllDevices(alert, tag) {
+/** Sends one alert to every phone that turned alerts on, 500 at a time, and forgets phones that are gone. Returns how many got it. */
+async function sendToAllDevices(alert, tag, urgency = 'normal') {
   const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
-  if (!docs.length) return;
-  const res = await getMessaging().sendEachForMulticast({
-    tokens: docs.map((d) => d.get('token')),
-    data: { ...alert, tag },
-    webpush: { headers: { Urgency: 'normal', TTL: '3600' } },
-  });
-  logger.info(`${tag} alert: sent ${res.successCount}, failed ${res.failureCount}`);
+  if (!docs.length) {
+    logger.info(`${tag} alert: no devices have alerts on`);
+    return 0;
+  }
+  let sent = 0;
+  let failed = 0;
+  let removed = 0;
+  for (const batch of chunks(docs)) {
+    const tokens = batch.map((d) => d.get('token'));
+    const res = await getMessaging().sendEachForMulticast({
+      tokens,
+      data: { ...alert, tag },
+      webpush: { headers: { Urgency: urgency, TTL: '3600' } },
+    });
+    sent += res.successCount;
+    failed += res.failureCount;
+    const dead = deadTokens(tokens, res.responses);
+    removed += dead.length;
+    await Promise.all(batch.filter((d) => dead.includes(d.get('token'))).map((d) => d.ref.delete().catch(() => {})));
+  }
+  logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
+  return sent;
 }

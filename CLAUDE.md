@@ -4,7 +4,7 @@ Small internal system for Tabla, an Indian restaurant: 5 TVs, a kitchen tablet a
 
 Plans: system plan https://claude.ai/artifact/LxM1Y7otkLEgTrYQpzoZTa · build plan https://claude.ai/artifact/Dx3DdyjXJTSJvGXeCBHQRj
 
-## Stage 1: everything runs in Chrome
+## Screens (one web app, live on GitHub Pages; TVs and tablet run it inside the Android app in `android/`)
 
 One web app (Vite + React + TypeScript), hash routes:
 
@@ -20,7 +20,7 @@ Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**
 
 ## Rules
 
-- **Data only through `@shared/data`** (`store`, `useCollection`, `useDoc`, `usePictureUrl`, `useNow`, `useHeartbeat`). Never touch localStorage, IndexedDB or a backend directly. Stage 1 runs on `LocalStore` (one browser; windows sync via the storage event); Firebase replaces it later behind the same `DataStore` interface, so screens must not depend on local-only behaviour.
+- **Data only through `@shared/data`** (`store`, `useCollection`, `useDoc`, `usePictureUrl`, `useNow`, `useHeartbeat`). Never touch localStorage, IndexedDB or a backend directly (per-device values: `deviceValue` / `setDeviceValue`). The live app runs on `FirebaseStore` (Firestore + anonymous sign-in); tests and `VITE_STORE=local` previews run on `LocalStore` (one browser; windows sync via the storage event). Screens must not depend on local-only behaviour. Sample data is only ever written to an empty database; never write code that deletes or overwrites existing data.
 - **Time:** use `store.now()` / `useNow()` for anything synced, never `Date.now()`.
 - **Menu loop sync:** use `loopPosition(slots, now, loop)` and `pictureFor` from `@shared/clock/loop`, with `loop = useSingleton('loop')`. Seconds and transition live on the `Slot`, shared by all menu TVs. After any change to slots, the manager calls `restartLoop(slotId)` so every TV shows the change at once.
 - **Picture fallback:** in a `special` or `catering` slot, a TV with no picture shows its partner's (one picture fills the pair). In a `menu` slot it never borrows; a menu picture added to TV 1 stays on TV 1.
@@ -31,6 +31,11 @@ Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**
 - **Screens must survive:** reloads, the internet dropping, missing pictures, empty data. TVs never show a browser error or a blank white page.
 - **Keep it simple.** No features beyond the plan. Big touch targets (48 px+). Plain words in the UI.
 - Each area exports a default component from its `index.tsx`. Tests for an area go in `e2e/<area>.spec.ts` (e.g. `e2e/tv-menu.spec.ts`) and unit tests next to the code as `*.test.ts`.
+
+## Server and devices
+
+- Cloud Functions in `functions/` (AI order reading, 1-hour phone alerts, Toast menu sync) and `firestore.rules` deploy automatically from main after the Tests workflow passes (`.github/workflows/functions.yml`); the site and `tabla.apk` publish the same way (`pages.yml`).
+- Device setup for the owner: `docs/device-setup.md`.
 
 ## Commands
 

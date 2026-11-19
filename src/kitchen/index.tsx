@@ -1,37 +1,131 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ScreenSurface } from '@shared/ui';
-import { store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
+import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
-import { PIN_LENGTH, expectedPin, press } from './pin';
-import { ackKey, ackPatch, chime, dueReminders } from './reminder';
+import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
+import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
+/** "Show all orders" goes back to the open orders after this long with no touch. */
+export const ALL_ORDERS_IDLE_MS = 3 * 60_000;
+/** Remembered on this tablet only (not synced): a fingerprint of the PIN it was unlocked with. */
+const UNLOCK_KEY = 'kitchenUnlock';
 
 export default function Kitchen() {
   useHeartbeat('kitchen');
-  // In memory only: a reload locks the tablet again.
-  const [unlocked, setUnlocked] = useState(false);
+  const pin = expectedPin(useSingleton('settings'));
+  // Stays unlocked through reloads and restarts, until someone taps Lock or the manager changes the PIN.
+  const [saved, setSaved] = useState(() => deviceValue(UNLOCK_KEY));
+  const unlocked = isUnlocked(saved, pin);
+  const remember = (value: string | null) => {
+    setDeviceValue(UNLOCK_KEY, value);
+    setSaved(value);
+  };
+
+  // Browsers keep sound muted until the screen is touched: any tap wakes it for the chime.
+  useEffect(() => {
+    window.addEventListener('pointerdown', wakeAudio, true);
+    window.addEventListener('keydown', wakeAudio, true);
+    return () => {
+      window.removeEventListener('pointerdown', wakeAudio, true);
+      window.removeEventListener('keydown', wakeAudio, true);
+    };
+  }, []);
+
+  const orders = useCollection('orders');
+  const now = useNow(15_000);
+  // The heads-up runs on every kitchen view, locked or not. Its chime lives here, so locking or
+  // unlocking never replays it or restarts the 45 s repeat.
+  const reminders = useHeadsUp(orders, now);
+  const banner = <HeadsUp reminders={reminders} now={now} />;
+  const soundNote = useSoundOn() ? null : (
+    <span className="k-sound" role="status">
+      Tap anywhere to turn on sound
+    </span>
+  );
+
   return (
     // ScreenSurface keeps the screen awake; .k-root turns it into a light page.
     <ScreenSurface testId="kitchen">
-      <div className="k-root">{unlocked ? <Board /> : <PinScreen onUnlock={() => setUnlocked(true)} />}</div>
+      <div className="k-root">
+        {pin === undefined ? null : unlocked ? (
+          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} />
+        ) : (
+          <div className={'k-lock' + (reminders.length ? ' has-remind' : '')}>
+            {reminders.length > 0 && <div className="k-remind-over">{banner}</div>}
+            <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
+          </div>
+        )}
+      </div>
     </ScreenSurface>
+  );
+}
+
+// ---------- 1-hour heads-up ----------
+
+/** Orders whose 1-hour heads-up is due, with a chime when a new one appears and again every 45 s
+ *  until "Got it". Rings only while the kitchen is staffed (staff schedule hours); waits for those to load. */
+function useHeadsUp(orders: Order[] | null, now: number): KitchenOrder[] {
+  const staff = useSingleton('staffConfig');
+  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
+  const remindIds = reminders.map(ackKey).join(',');
+  const chimed = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = reminders.filter((o) => !chimed.current.has(ackKey(o)));
+    fresh.forEach((o) => chimed.current.add(ackKey(o)));
+    if (fresh.length) chime();
+    if (!remindIds) return;
+    const t = setInterval(chime, CHIME_REPEAT_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remindIds]);
+  return reminders;
+}
+
+/** False while the browser keeps sound off (until someone taps the screen). */
+function useSoundOn(): boolean {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    const check = () => setOn(soundIsOn());
+    const off = onSoundChange(check);
+    check();
+    return off;
+  }, []);
+  return on;
+}
+
+/** One banner row per due heads-up. "Got it" needs no PIN. */
+function HeadsUp({ reminders, now }: { reminders: KitchenOrder[]; now: number }) {
+  // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet. No PIN needed.
+  const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
+  if (reminders.length === 0) return null;
+  return (
+    <div className="k-remind" role="alert" data-testid="kitchen-reminder">
+      {reminders.map((o) => (
+        <div key={o.id} className="k-remind-row">
+          <span className="k-remind-text">
+            <b>{o.customerName}</b> {o.type === 'delivery' ? 'delivery' : 'pickup'} at {timeLabel(o.dueAt)}, {countdown(o.dueAt, now).text}
+          </span>
+          <button className="t-btn k-remind-btn" onClick={() => ack(o)}>
+            Got it
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
 // ---------- PIN ----------
 
-function PinScreen({ onUnlock }: { onUnlock: () => void }) {
-  const pin = expectedPin(useSingleton('settings'));
+function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUnlock: () => void }) {
   const [entry, setEntry] = useState('');
   const [wrong, setWrong] = useState(0); // bumps to restart the shake
 
   const key = useCallback(
     (k: string) => {
-      if (pin === undefined) return;
       const next = press(entry, k);
       if (next.length < PIN_LENGTH) return setEntry(next);
       if (next === pin) return onUnlock();
@@ -70,13 +164,13 @@ function PinScreen({ onUnlock }: { onUnlock: () => void }) {
             key={k}
             className={'k-key' + (k.length > 1 ? ' k-key-fn' : '') + (k === 'back' ? ' k-key-back' : '')}
             onClick={() => key(k)}
-            disabled={pin === undefined}
             aria-label={k === 'back' ? 'Delete last digit' : k === 'clear' ? 'Clear' : k}
           >
             {k === 'back' ? '⌫' : k === 'clear' ? 'Clear' : k}
           </button>
         ))}
       </div>
+      {note}
     </div>
   );
 }
@@ -98,9 +192,7 @@ function useOnline(): boolean {
   return online;
 }
 
-function Board() {
-  const orders = useCollection('orders');
-  const now = useNow(15_000);
+function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
   const online = useOnline();
   const [showAll, setShowAll] = useState(false);
   const board = useRef<HTMLDivElement>(null);
@@ -108,6 +200,21 @@ function Board() {
   useEffect(() => {
     const root = board.current?.closest('.k-root');
     if (root) root.scrollTop = 0;
+  }, [showAll]);
+  // Left on "Show all orders"? After 3 minutes with no touch, back to the open orders.
+  useEffect(() => {
+    if (!showAll) return;
+    let t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+    const touched = () => {
+      clearTimeout(t);
+      t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'scroll'];
+    events.forEach((e) => window.addEventListener(e, touched, true));
+    return () => {
+      clearTimeout(t);
+      events.forEach((e) => window.removeEventListener(e, touched, true));
+    };
   }, [showAll]);
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -135,21 +242,6 @@ function Board() {
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
-  // 1-hour heads-up: a banner per order, with a chime when a new one appears. Only on the open orders view.
-  // Rings only while the kitchen is staffed (staff schedule hours). Waits for those hours to load.
-  const staff = useSingleton('staffConfig');
-  const reminders = staff === undefined || showAll ? [] : dueReminders(orders ?? [], now, staff);
-  const remindIds = reminders.map(ackKey).join(',');
-  const chimed = useRef(new Set<string>());
-  useEffect(() => {
-    const fresh = reminders.filter((o) => !chimed.current.has(ackKey(o)));
-    fresh.forEach((o) => chimed.current.add(ackKey(o)));
-    if (fresh.length) chime();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remindIds]);
-  // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet.
-  const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
-
   return (
     <div className="k-board" ref={board}>
       <header className="k-bar">
@@ -161,6 +253,7 @@ function Board() {
               Offline: showing the last saved orders
             </span>
           )}
+          {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
         {showAll ? (
@@ -172,21 +265,11 @@ function Board() {
             Show all orders
           </button>
         )}
+        <button className="t-btn k-bar-btn" onClick={onLock}>
+          Lock
+        </button>
       </header>
-      {reminders.length > 0 && (
-        <div className="k-remind" role="alert" data-testid="kitchen-reminder">
-          {reminders.map((o) => (
-            <div key={o.id} className="k-remind-row">
-              <span className="k-remind-text">
-                <b>{o.customerName}</b> {o.type === 'delivery' ? 'delivery' : 'pickup'} at {timeLabel(o.dueAt)}, {countdown(o.dueAt, now).text}
-              </span>
-              <button className="t-btn k-remind-btn" onClick={() => ack(o)}>
-                Got it
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {banner}
 
       {!orders ? null : showAll ? (
         <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />

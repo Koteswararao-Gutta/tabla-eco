@@ -78,25 +78,65 @@ export function ringAt(dueAt: number, staff?: unknown): number {
 /** One key per order and due time (so the chime rings again when the time changes). */
 export const ackKey = (o: { id: string; dueAt: number }) => o.id + ':' + o.dueAt;
 
-/** A short two-note chime, made in the browser (no sound file needed). */
-export function chime(): void {
+/** While a heads-up is showing and nobody has tapped "Got it", the chime rings again this often. */
+export const CHIME_REPEAT_MS = 45_000;
+
+// One sound output for the page. Browsers keep it muted until someone touches the screen,
+// so the kitchen wakes it on the first tap (PIN digits, Got it, anywhere) with wakeAudio().
+let audio: AudioContext | null = null;
+
+function audioContext(): AudioContext | null {
   try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    [880, 660].forEach((f, i) => {
+    if (!audio) {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audio = new Ctx();
+    }
+    if (audio.state === 'suspended') audio.resume().catch(() => {});
+    return audio;
+  } catch {
+    return null;
+  }
+}
+
+/** Call on a user tap: lets the chime play from then on. */
+export function wakeAudio(): void {
+  audioContext();
+}
+
+/** Sound is on: the browser lets the chime play. Also true when there is no sound output at all
+ *  (nothing a tap could fix). */
+export const soundIsOn = (): boolean => !audio || audio.state === 'running';
+
+/** Calls `cb` whenever sound turns on or off. Starts the sound output (it may stay off until a tap). */
+export function onSoundChange(cb: () => void): () => void {
+  const ctx = audioContext();
+  if (!ctx) return () => {};
+  ctx.addEventListener('statechange', cb);
+  return () => ctx.removeEventListener('statechange', cb);
+}
+
+/** Peak loudness of each note (1 is the maximum). The notes never overlap, so it never clips. */
+export const CHIME_PEAK = 0.8;
+
+/** A clear four-note chime (high, low, high, low), made in the browser (no sound file needed). */
+export function chime(): void {
+  const ctx = audioContext();
+  if (!ctx) return; // No sound available: the banner still shows.
+  try {
+    [880, 660, 880, 660].forEach((f, i) => {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
+      o.type = 'triangle'; // fuller than a plain sine, so it carries over kitchen noise
       o.frequency.value = f;
-      const t = ctx.currentTime + i * 0.35;
+      const t = ctx.currentTime + 0.05 + i * 0.5;
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.4, t + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      g.gain.exponentialRampToValueAtTime(CHIME_PEAK, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
       o.connect(g).connect(ctx.destination);
       o.start(t);
-      o.stop(t + 0.65);
+      o.stop(t + 0.47);
     });
-    setTimeout(() => ctx.close(), 1500);
   } catch {
-    // No sound available: the banner still shows.
+    // ignore: the banner still shows
   }
 }

@@ -1,9 +1,9 @@
-// Manager > Catering: open orders by day, history, and a form sheet to add or edit an order.
+// Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
-import { Field, PageHeader, Segmented, Sheet } from '@shared/ui';
+import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, orderFields, sameDayOrders, timeLabel, validate,
+  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, telHref, timeLabel, validate,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -12,10 +12,36 @@ import './catering.css';
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
 
-const setOrderStatus = (id: string, status: CateringOrder['status']) => {
+const SAVE_FAILED = 'Could not save. Please try again.';
+const DELETE_FAILED = 'Could not delete. Please try again.';
+
+const statusPatch = (status: CateringOrder['status']) => {
   const now = store.now();
-  return store.updateDoc('orders', id, { status, completedAt: status === 'completed' ? now : null, updatedAt: now });
+  return { status, completedAt: status === 'completed' ? now : null, updatedAt: now };
 };
+const setOrderStatus = (id: string, status: CateringOrder['status']) => store.updateDoc('orders', id, statusPatch(status));
+
+/** Runs one save at a time. On failure the button comes back and a plain message shows (as in Screens). */
+function useSaver() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const running = useRef(false);
+  const run = async (fn: () => Promise<void>, failText = SAVE_FAILED) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+    } catch {
+      setError(failText);
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  };
+  return { busy, error, setError, run };
+}
 
 export default function Catering() {
   const orders = useCollection('orders');
@@ -38,12 +64,14 @@ export default function Catering() {
     const id = done?.id;
     clearTimeout(doneTimer.current);
     setDone(null);
-    if (id && orders?.some((o) => o.id === id)) await setOrderStatus(id, 'open');
+    if (id && orders?.some((o) => o.id === id)) await setOrderStatus(id, 'open').catch(() => {});
   };
   // Delete -> "Keep it" goes back to the order.
+  const remove = useSaver();
   const keepIt = () => {
     if (deleting) setEditing(deleting.id);
     setDeleting(null);
+    remove.setError('');
   };
 
   const groups = orders ? groupOpen(orders, now) : null;
@@ -124,6 +152,7 @@ export default function Catering() {
           key={editing!}
           order={editOrder}
           day={newDay}
+          now={now}
           onClose={() => setEditing(null)}
           onCompleted={markedCompleted}
           onDelete={(o) => {
@@ -139,14 +168,22 @@ export default function Catering() {
             <p className="c-confirm">
               {deleting.customerName} · {dayLabel(deleting.dueAt, now)}, {timeLabel(deleting.dueAt)}. This can't be undone.
             </p>
+            {remove.error && (
+              <p className="c-err" role="alert">
+                {remove.error}
+              </p>
+            )}
             <button
               className="t-btn block c-danger-solid"
-              onClick={async () => {
-                await store.deleteDoc('orders', deleting.id);
-                setDeleting(null);
-              }}
+              disabled={remove.busy}
+              onClick={() =>
+                remove.run(async () => {
+                  await store.deleteDoc('orders', deleting.id);
+                  setDeleting(null);
+                }, DELETE_FAILED)
+              }
             >
-              Delete order
+              {remove.busy ? 'Deleting…' : 'Delete order'}
             </button>
             <button className="t-btn block ghost" onClick={keepIt}>
               Keep it
@@ -245,8 +282,105 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-function OrderSheet(props: { order: Order | null; day?: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void }) {
+type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void };
+
+/** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
+ *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
+function OrderSheet(props: SheetProps) {
+  const { order } = props;
+  const [editing, setEditing] = useState(!order);
+  // Set by the form while it renders, and read by the Sheet at the moment of closing, so a key typed
+  // just before Escape always counts.
+  const dirty = useRef(false);
+  const title = !editing ? 'Order details' : order ? 'Edit order' : 'New order';
+  const confirm = () => (editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
+  return (
+    <Sheet open title={title} onClose={props.onClose} confirmClose={confirm}>
+      {!editing && order ? <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} /> : <OrderFormView {...props} dirty={dirty} />}
+    </Sheet>
+  );
+}
+
+function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
+  const { busy, error, run } = useSaver();
+  const items = itemLines(o.items);
+  const open = o.status === 'open';
+  const setStatus = (status: CateringOrder['status']) =>
+    run(async () => {
+      await setOrderStatus(o.id, status);
+      if (status === 'completed') onCompleted(o);
+      onClose();
+    });
+  return (
+    <div className="t-stack c-summary" data-testid="order-summary">
+      <div className="c-sum-top">
+        <span className="c-sum-when">
+          {dayLabel(o.dueAt, now)}, {timeLabel(o.dueAt)}
+        </span>
+        {open ? (
+          <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+        ) : (
+          <span className="t-badge good">✓ Completed</span>
+        )}
+      </div>
+      <div className="c-sum-name">{o.customerName}</div>
+      {o.phone && (
+        <a className="t-btn block c-call" href={telHref(o.phone)}>
+          📞 Call {o.phone}
+        </a>
+      )}
+      <dl className="c-sum-facts">
+        <div>
+          <dt>{o.type === 'delivery' ? 'Delivery to' : 'Pickup'}</dt>
+          <dd>{o.type === 'delivery' ? o.address || 'No address yet' : 'At the restaurant'}</dd>
+        </div>
+        {!!o.people && (
+          <div>
+            <dt>People</dt>
+            <dd>{o.people}</dd>
+          </div>
+        )}
+      </dl>
+      <div>
+        <h3 className="c-sum-h">Items</h3>
+        <ul className="c-sum-items">
+          {items.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      </div>
+      {o.notes?.trim() && (
+        <div>
+          <h3 className="c-sum-h">Notes</h3>
+          <p className="c-sum-notes">{o.notes}</p>
+        </div>
+      )}
+      {error && (
+        <p className="c-err" role="alert">
+          {error}
+        </p>
+      )}
+      <button type="button" className={'t-btn block ' + (open ? 'primary' : '')} disabled={busy} onClick={() => setStatus(open ? 'completed' : 'open')}>
+        {open ? '✓ Mark completed' : 'Reopen'}
+      </button>
+      <div className="t-grid2">
+        <button type="button" className="t-btn" onClick={onEdit}>
+          Edit
+        </button>
+        <button type="button" className="t-btn danger" onClick={() => onDelete(o)}>
+          Delete
+        </button>
+      </div>
+      <button type="button" className="t-btn ghost block" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
   const { order, onClose, onCompleted, onDelete } = props;
+  const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
   // After a save with errors, bring the first marked field into view and put the cursor in it.
@@ -257,15 +391,19 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
     first.scrollIntoView({ block: 'center', behavior: 'smooth' });
     first.focus({ preventScroll: true });
   }, [attempt]);
-  const [f, setF] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now(), props.day)));
+  const [start] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now(), props.day)));
+  const [f, setF] = useState<OrderForm>(start);
   const allOrders = useCollection('orders');
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useSaver();
   const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; from?: 'photo' | 'message'; message?: string }>({ state: 'idle' });
   const [pasting, setPasting] = useState(false);
   const [pasted, setPasted] = useState('');
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
+
+  const changed = JSON.stringify(f) !== JSON.stringify(start);
+  props.dirty.current = changed || scan.state === 'done' || pasted.trim() !== '';
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
@@ -315,30 +453,43 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
     }
   };
 
-  const save = async () => {
+  /** Checks the form; false (and the errors shown, first one focused) when something needs fixing. */
+  const check = () => {
     const e = validate(f);
     setTried(true);
     setErrors(e);
-    if (Object.keys(e).length) return setAttempt((n) => n + 1);
-    setBusy(true);
-    const now = store.now();
-    const fields = orderFields(f);
-    if (order) {
-      // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
-      // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
-      await store.updateDoc('orders', order.id, { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: now });
-    } else {
-      await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
+    if (Object.keys(e).length) {
+      setAttempt((n) => n + 1);
+      return false;
     }
-    setBusy(false);
-    onClose();
+    return true;
+  };
+  // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
+  // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
+  const editFields = () => {
+    const fields = orderFields(f);
+    return { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: store.now() };
   };
 
-  const setStatus = async (status: CateringOrder['status']) => {
+  const save = () => {
+    if (!check()) return;
+    run(async () => {
+      const now = store.now();
+      if (order) await store.updateDoc('orders', order.id, editFields());
+      else await store.addDoc('orders', { ...orderFields(f), status: 'open', createdAt: now, updatedAt: now });
+      onClose();
+    });
+  };
+
+  // Mark completed / Reopen keeps what was typed: changed fields are checked and saved with the new status.
+  const setStatus = (status: CateringOrder['status']) => {
     if (!order) return;
-    await setOrderStatus(order.id, status);
-    if (status === 'completed') onCompleted(order);
-    onClose();
+    if (changed && !check()) return;
+    run(async () => {
+      await store.updateDoc('orders', order.id, changed ? { ...editFields(), ...statusPatch(status) } : statusPatch(status));
+      if (status === 'completed') onCompleted(order);
+      onClose();
+    });
   };
 
   const err = (k: keyof OrderForm) =>
@@ -350,155 +501,161 @@ function OrderSheet(props: { order: Order | null; day?: number; onClose: () => v
   const count = Object.keys(errors).length;
 
   return (
-    <Sheet open title={order ? 'Edit order' : 'New order'} onClose={onClose}>
-      <form
-        ref={form}
-        className="t-stack c-form"
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault();
-          save();
-        }}
-      >
-        {!order && (
-          <div className="c-scan">
-            <div className="c-scan-row">
-              <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="c-file"
-                  disabled={scan.state === 'reading'}
-                  aria-label="Scan paper order"
-                  onChange={(e) => {
-                    scanPhoto(e.target.files?.[0]);
-                    e.target.value = '';
-                  }}
-                />
-                {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : '📷 Scan paper'}
-              </label>
-              <button
-                type="button"
-                className={'t-btn block c-scan-btn' + (pasting ? ' on' : '')}
+    <form
+      ref={form}
+      className="t-stack c-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+    >
+      {!order && (
+        <div className="c-scan">
+          <div className="c-scan-row">
+            <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
+              <input
+                type="file"
+                accept="image/*"
+                className="c-file"
                 disabled={scan.state === 'reading'}
-                aria-expanded={pasting}
-                onClick={() => (pasting ? setPasting(false) : openPaste())}
-              >
-                {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : '📋 Paste message'}
-              </button>
-            </div>
-            {pasting && (
-              <div className="c-paste">
-                <textarea
-                  className="t-input c-paste-box"
-                  aria-label="Customer's message"
-                  placeholder="Press and hold here, then tap Paste"
-                  rows={5}
-                  maxLength={8000}
-                  value={pasted}
-                  autoFocus
-                  onChange={(e) => setPasted(e.target.value)}
-                  onPaste={(e) => {
-                    const text = e.clipboardData.getData('text').slice(0, 8000);
-                    if (pasted.trim() || text.trim().length < 5) return; // adding to typed text: let them tap Fill the form
-                    e.preventDefault();
-                    setPasted(text);
-                    readPasted(text);
-                  }}
-                />
-                <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={() => readPasted()}>
-                  {scan.state === 'reading' && scan.from === 'message' ? 'Reading the message…' : 'Fill the form'}
-                </button>
-              </div>
-            )}
-            {scan.state === 'done' && (
-              <p className="c-scan-note" role="status">
-                Filled in from the {scan.from === 'message' ? 'message' : 'photo'}. Please check every field, then tap Save order.
-              </p>
-            )}
-            {scan.state === 'failed' && (
-              <p className="c-err" role="alert">
-                {scan.message}
-              </p>
-            )}
-          </div>
-        )}
-        <Field label="Customer name">
-          <input className="t-input" value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
-          {err('customerName')}
-        </Field>
-        <Field label="Phone">
-          <input className="t-input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
-          {err('phone')}
-        </Field>
-        <div className="t-grid2">
-          <Field label="Date">
-            <input className="t-input" type="date" value={f.date} onChange={(e) => set('date', e.target.value)} aria-invalid={!!errors.date} />
-            {err('date')}
-          </Field>
-          <Field label="Time">
-            <input className="t-input" type="time" value={f.time} onChange={(e) => set('time', e.target.value)} aria-invalid={!!errors.time} />
-            {err('time')}
-          </Field>
-        </div>
-        <SameDay orders={allOrders ?? []} date={f.date} time={f.time} skipId={order?.id} />
-        <div className="t-field">
-          <span>Pickup or delivery</span>
-          <Segmented
-            label="Pickup or delivery"
-            value={f.type}
-            onChange={(v) => set('type', v)}
-            options={[
-              { value: 'pickup', label: 'Pickup' },
-              { value: 'delivery', label: 'Delivery' },
-            ]}
-          />
-          {err('type')}
-        </div>
-        {f.type === 'delivery' && (
-          <Field label="Delivery address">
-            <input className="t-input" value={f.address} onChange={(e) => set('address', e.target.value)} aria-invalid={!!errors.address} autoComplete="off" />
-            {err('address')}
-          </Field>
-        )}
-        <Field label="Number of people (optional)">
-          <input className="t-input c-people" inputMode="numeric" value={f.people} onChange={(e) => set('people', e.target.value)} aria-invalid={!!errors.people} />
-          {err('people')}
-        </Field>
-        <Field label="Order items (one per line)">
-          <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'e.g. Chicken biryani, 2 large trays'} />
-          {err('items')}
-        </Field>
-        <Field label="Notes (optional)">
-          <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
-          {err('notes')}
-        </Field>
-
-        {count > 0 && <p className="c-err c-err-summary">Please fix the {count === 1 ? 'field' : `${count} fields`} marked above.</p>}
-        <button className="t-btn primary block" type="submit" disabled={busy}>
-          {order ? 'Save changes' : 'Save order'}
-        </button>
-        {order && (
-          <div className="t-grid2">
-            {order.status === 'open' ? (
-              <button type="button" className="t-btn" onClick={() => setStatus('completed')}>
-                Mark completed
-              </button>
-            ) : (
-              <button type="button" className="t-btn" onClick={() => setStatus('open')}>
-                Reopen
-              </button>
-            )}
-            <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
-              Delete
+                aria-label="Scan paper order"
+                onChange={(e) => {
+                  scanPhoto(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+              {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : '📷 Scan paper'}
+            </label>
+            <button
+              type="button"
+              className={'t-btn block c-scan-btn' + (pasting ? ' on' : '')}
+              disabled={scan.state === 'reading'}
+              aria-expanded={pasting}
+              onClick={() => (pasting ? setPasting(false) : openPaste())}
+            >
+              {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : '📋 Paste message'}
             </button>
           </div>
+          {pasting && (
+            <div className="c-paste">
+              <textarea
+                className="t-input c-paste-box"
+                aria-label="Customer's message"
+                placeholder="Press and hold here, then tap Paste"
+                rows={5}
+                maxLength={8000}
+                value={pasted}
+                autoFocus
+                onChange={(e) => setPasted(e.target.value)}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData('text').slice(0, 8000);
+                  if (pasted.trim() || text.trim().length < 5) return; // adding to typed text: let them tap Fill the form
+                  e.preventDefault();
+                  setPasted(text);
+                  readPasted(text);
+                }}
+              />
+              <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={() => readPasted()}>
+                {scan.state === 'reading' && scan.from === 'message' ? 'Reading the message…' : 'Fill the form'}
+              </button>
+            </div>
+          )}
+          {scan.state === 'done' && (
+            <p className="c-scan-note" role="status">
+              Filled in from the {scan.from === 'message' ? 'message' : 'photo'}. Please check every field, then tap Save order.
+            </p>
+          )}
+          {scan.state === 'failed' && (
+            <p className="c-err" role="alert">
+              {scan.message}
+            </p>
+          )}
+        </div>
+      )}
+      <Field label="Customer name">
+        <input className="t-input" maxLength={NAME_MAX} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
+        {err('customerName')}
+      </Field>
+      <Field label="Phone">
+        <input className="t-input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
+        {err('phone')}
+      </Field>
+      <div className="t-grid2">
+        <Field label="Date">
+          <input className="t-input" type="date" value={f.date} onChange={(e) => set('date', e.target.value)} aria-invalid={!!errors.date} />
+          {err('date')}
+        </Field>
+        <Field label="Time">
+          <input className="t-input" type="time" value={f.time} onChange={(e) => set('time', e.target.value)} aria-invalid={!!errors.time} />
+          {err('time')}
+        </Field>
+      </div>
+      <SameDay orders={allOrders ?? []} date={f.date} time={f.time} skipId={order?.id} />
+      <div className="t-field">
+        <span>Pickup or delivery</span>
+        <Segmented
+          label="Pickup or delivery"
+          value={f.type}
+          onChange={(v) => set('type', v)}
+          options={[
+            { value: 'pickup', label: 'Pickup' },
+            { value: 'delivery', label: 'Delivery' },
+          ]}
+        />
+        {err('type')}
+      </div>
+      {f.type === 'delivery' && (
+        <Field label="Delivery address">
+          <input className="t-input" value={f.address} onChange={(e) => set('address', e.target.value)} aria-invalid={!!errors.address} autoComplete="off" />
+          {err('address')}
+        </Field>
+      )}
+      <Field label="Number of people (optional)">
+        <input className="t-input c-people" inputMode="numeric" value={f.people} onChange={(e) => set('people', e.target.value)} aria-invalid={!!errors.people} />
+        {err('people')}
+      </Field>
+      <Field label="Order items (one per line)">
+        <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'e.g. Chicken biryani, 2 large trays'} />
+        {err('items')}
+      </Field>
+      <Field label="Notes (optional)">
+        <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
+        {err('notes')}
+      </Field>
+
+      {order && (
+        <div className="t-grid2">
+          {order.status === 'open' ? (
+            <button type="button" className="t-btn" disabled={busy} onClick={() => setStatus('completed')}>
+              Mark completed
+            </button>
+          ) : (
+            <button type="button" className="t-btn" disabled={busy} onClick={() => setStatus('open')}>
+              Reopen
+            </button>
+          )}
+          <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
+            Delete
+          </button>
+        </div>
+      )}
+      {/* Save stays in view at the bottom of the sheet while the form scrolls. */}
+      <div className="c-form-foot">
+        {count > 0 && <p className="c-err c-err-summary">Please fix the {count === 1 ? 'field' : `${count} fields`} marked above.</p>}
+        {error && (
+          <p className="c-err c-err-summary" role="alert">
+            {error}
+          </p>
         )}
-        <button type="button" className="t-btn ghost block" onClick={onClose}>
-          Cancel
+        <button className="t-btn primary block" type="submit" disabled={busy}>
+          {busy ? 'Saving…' : order ? 'Save changes' : 'Save order'}
         </button>
-      </form>
-    </Sheet>
+      </div>
+      <button type="button" className="t-btn ghost block" onClick={requestClose}>
+        Cancel
+      </button>
+    </form>
   );
 }
 

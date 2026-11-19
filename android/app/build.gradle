@@ -1,5 +1,18 @@
 plugins { id 'com.android.application' }
 
+// Every Tabla APK must be signed with the SAME key, or Android refuses to install an update over the
+// old app. Order: the TABLA_KEYSTORE_* environment variables (if someone ever sets them up), else the
+// keystore committed in android/keystore/, else the debug key (only if that file is missing).
+//
+// Trade-off, on purpose: the committed keystore and its password below are NOT secret. The repo is
+// private and the app is only sideloaded onto the restaurant's own TVs and tablet, so a stable key that
+// CI can use with no setup matters more than hiding the key. Anyone with the repo could sign an APK that
+// installs over Tabla, so keep the repo private.
+def env = { String name -> def v = System.getenv(name); v ? v : null }
+def envKeystore = env('TABLA_KEYSTORE_FILE')
+def committedKeystore = rootProject.file('keystore/tabla-release.jks')
+def keystoreFile = envKeystore ? file(envKeystore) : (committedKeystore.exists() ? committedKeystore : null)
+
 android {
     namespace 'com.tabla.tv'
     compileSdk 34
@@ -7,14 +20,24 @@ android {
         applicationId 'com.tabla.tv'
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        // CI passes its run number, so each published APK counts as newer than the one installed.
+        versionCode((env('TABLA_VERSION_CODE') ?: '1') as int)
+        versionName env('TABLA_VERSION_NAME') ?: '1.0'
+    }
+    signingConfigs {
+        if (keystoreFile != null) {
+            tabla {
+                storeFile keystoreFile
+                storePassword envKeystore ? env('TABLA_KEYSTORE_PASSWORD') : 'tabla-sideload'
+                keyAlias envKeystore ? (env('TABLA_KEY_ALIAS') ?: 'tabla') : 'tabla'
+                keyPassword envKeystore ? (env('TABLA_KEY_PASSWORD') ?: env('TABLA_KEYSTORE_PASSWORD')) : 'tabla-sideload'
+            }
+        }
     }
     buildTypes {
         release {
             minifyEnabled false
-            // Sideloaded onto the restaurant's own TVs, so the debug key is enough to install it.
-            signingConfig signingConfigs.debug
+            signingConfig keystoreFile != null ? signingConfigs.tabla : signingConfigs.debug
         }
     }
     compileOptions {
