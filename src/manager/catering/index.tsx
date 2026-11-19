@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, telHref, timeLabel, validate,
+  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -292,12 +292,43 @@ function OrderSheet(props: SheetProps) {
   // Set by the form while it renders, and read by the Sheet at the moment of closing, so a key typed
   // just before Escape always counts.
   const dirty = useRef(false);
-  const title = !editing ? 'Order details' : order ? 'Edit order' : 'New order';
-  const confirm = () => (editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
+  // A new order, once saved: offer to send it to the front staff WhatsApp group.
+  const [saved, setSaved] = useState<string | null>(null);
+  const title = saved ? 'Order saved' : !editing ? 'Order details' : order ? 'Edit order' : 'New order';
+  const confirm = () => (!saved && editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
   return (
     <Sheet open title={title} onClose={props.onClose} confirmClose={confirm}>
-      {!editing && order ? <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} /> : <OrderFormView {...props} dirty={dirty} />}
+      {saved ? (
+        <SavedView text={saved} onClose={props.onClose} />
+      ) : !editing && order ? (
+        <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} />
+      ) : (
+        <OrderFormView {...props} dirty={dirty} onSaved={setSaved} />
+      )}
     </Sheet>
+  );
+}
+
+/** Opens WhatsApp with the order typed in; the person picks the front staff group and sends. */
+function ShareLink({ text, primary }: { text: string; primary?: boolean }) {
+  return (
+    <a className={'t-btn block c-share' + (primary ? ' primary' : '')} href={whatsappHref(text)} target="_blank" rel="noopener noreferrer">
+      Share to WhatsApp
+    </a>
+  );
+}
+
+/** After a new order is saved. */
+function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div className="t-stack c-saved" data-testid="order-saved">
+      <p className="c-scan-note">✓ Saved. Send it to the front staff group so they can get the sides ready.</p>
+      <pre className="c-share-preview" aria-label="Message">{text}</pre>
+      <ShareLink text={text} primary />
+      <button type="button" className="t-btn ghost block" onClick={onClose}>
+        Done
+      </button>
+    </div>
   );
 }
 
@@ -363,6 +394,7 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
       <button type="button" className={'t-btn block ' + (open ? 'primary' : '')} disabled={busy} onClick={() => setStatus(open ? 'completed' : 'open')}>
         {open ? '✓ Mark completed' : 'Reopen'}
       </button>
+      {open && <ShareLink text={shareText(o)} />}
       <div className="t-grid2">
         <button type="button" className="t-btn" onClick={onEdit}>
           Edit
@@ -378,7 +410,7 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
   );
 }
 
-function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
+function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSaved: (shareText: string) => void }) {
   const { order, onClose, onCompleted, onDelete } = props;
   const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
@@ -475,9 +507,13 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
     if (!check()) return;
     run(async () => {
       const now = store.now();
-      if (order) await store.updateDoc('orders', order.id, editFields());
-      else await store.addDoc('orders', { ...orderFields(f), status: 'open', createdAt: now, updatedAt: now });
-      onClose();
+      if (order) {
+        await store.updateDoc('orders', order.id, editFields());
+        return onClose();
+      }
+      const fields = orderFields(f);
+      await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
+      props.onSaved(shareText(fields, 'New catering order'));
     });
   };
 

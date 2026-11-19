@@ -114,3 +114,7 @@
 .c-sum-notes { margin: 0; white-space: pre-wrap; }
 /* A field the keyboard scrolls to stays clear of the Save bar pinned below it. */
 .c-form .t-input, .c-form .t-textarea, .c-form .t-seg button { scroll-margin-bottom: 96px; }
+
+/* Share to WhatsApp */
+.c-share { text-decoration: none; }
+.c-share-preview { margin: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; font-size: 0.92rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }

@@ -63,6 +63,21 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await sheet.getByLabel('Delivery address').fill('48 Lake View Rd, Hall B');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet).toHaveCount(0);
+  // Saved: offer to share it with the front staff WhatsApp group.
+  const savedSheet = manager.getByRole('dialog', { name: 'Order saved' });
+  const message = savedSheet.getByLabel('Message');
+  await expect(message).toContainText('*New catering order*\nAnika Wedding');
+  await expect(message).toContainText('Delivery: 48 Lake View Rd, Hall B\n120 people\n\n*Items*\n• Chicken dum biryani, 4 large trays');
+  await expect(message).not.toContainText('555'); // no customer phone for the staff group
+  const share = savedSheet.getByRole('link', { name: 'Share to WhatsApp' });
+  const href = (await share.getAttribute('href'))!;
+  expect(href.startsWith('https://wa.me/?text=')).toBe(true);
+  expect(decodeURIComponent(href.slice('https://wa.me/?text='.length))).toBe(await message.textContent());
+  await expect(share).toHaveAttribute('target', '_blank');
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-order-saved-share');
+  await savedSheet.getByRole('button', { name: 'Done' }).click();
+  await expect(savedSheet).toHaveCount(0);
   await expect(manager.getByRole('region', { name: 'Tomorrow' }).getByText('Anika Wedding')).toBeVisible();
 
   const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Anika Wedding')!;
@@ -108,6 +123,9 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(summary.getByText('48 Lake View Rd, Hall B')).toBeVisible();
   await expect(summary.getByRole('listitem')).toHaveText(['Chicken dum biryani, 4 large trays', 'Paneer butter masala, 2 trays', 'Garlic naan, 150']);
   await shot(manager, 'manager-order-summary');
+  // An open order can be shared again from its summary.
+  const again = decodeURIComponent((await summary.getByRole('link', { name: 'Share to WhatsApp' }).getAttribute('href'))!);
+  expect(again).toContain('*Catering order*\nAnika Wedding');
   await summary.getByRole('button', { name: 'Mark completed' }).click();
   await expect(card).toHaveCount(0);
   // Quick feedback with Undo.
@@ -458,6 +476,7 @@ test('scan paper order fills the new order form for checking, then saves', async
   await expect(sheet.getByText('Please check this')).toHaveCount(0);
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet).toHaveCount(0);
+  await manager.getByRole('dialog', { name: 'Order saved' }).getByRole('button', { name: 'Done' }).click();
   const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Meera Iyer')!;
   expect(saved).toMatchObject({ phone: '555 404 1213', people: 40, notes: 'Less spicy', status: 'open' });
   await context.close();
@@ -486,6 +505,7 @@ test('paste a customer message fills the new order form, then saves', async ({ b
   await shot(manager, 'manager-paste-filled');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet).toHaveCount(0);
+  await manager.getByRole('dialog', { name: 'Order saved' }).getByRole('button', { name: 'Done' }).click();
   const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Meera Iyer')!;
   expect(saved).toMatchObject({ people: 40, notes: 'Less spicy', status: 'open' });
   await context.close();
@@ -570,6 +590,7 @@ test('order summary: big time, Call link, items; Edit opens the form', async ({ 
   await expect(summary.getByText('Today, 5:30 PM')).toBeVisible();
   await expect(summary.getByRole('link', { name: /Call 555 123 4567/ })).toHaveAttribute('href', 'tel:5551234567');
   await expect(summary.getByRole('listitem')).toHaveCount(4);
+  await expect(summary.getByRole('link', { name: 'Share to WhatsApp' })).toHaveAttribute('href', /^https:\/\/wa\.me\/\?text=/);
   await expect(summary.getByText('Less spicy, add serving spoons')).toBeVisible();
   await expect(summary.getByLabel('Customer name')).toHaveCount(0); // not the form
   await manager.waitForTimeout(400);

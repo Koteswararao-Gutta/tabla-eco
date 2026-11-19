@@ -270,3 +270,21 @@ export function telHref(phone: string): string {
   const plus = main.trim().startsWith('+') ? '+' : '';
   return 'tel:' + plus + main.replace(/\D/g, '');
 }
+
+// ---------- share to WhatsApp ----------
+
+/** The order as a WhatsApp message for the front staff group, so they can get sides ready.
+ *  The date is written out ("Fri, Nov 20"), since the message is read later. The customer's
+ *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
+export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'>, heading = 'Catering order'): string {
+  const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const lines = [`*${heading}*`, `${o.customerName}`, `${date}, ${timeLabel(o.dueAt)}`];
+  lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${o.address.trim()}` : ''}` : 'Pickup');
+  if (o.people) lines.push(`${o.people} people`);
+  lines.push('', '*Items*', ...itemLines(o.items).map((l) => `• ${l}`));
+  if (o.notes?.trim()) lines.push('', `*Notes:* ${o.notes.trim()}`);
+  return lines.join('\n');
+}
+
+/** Opens WhatsApp with the message typed in; the person picks the group and taps send. */
+export const whatsappHref = (text: string) => 'https://wa.me/?text=' + encodeURIComponent(text);

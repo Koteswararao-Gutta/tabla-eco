@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, telHref, validate, NAME_MAX } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -186,5 +186,26 @@ describe('validate: name length', () => {
     const f = { ...emptyForm(at(18, 12), undefined), customerName: 'A'.repeat(NAME_MAX + 1) };
     expect(validate(f).customerName).toBe(`Please shorten the name to ${NAME_MAX} letters or fewer.`);
     expect(validate({ ...f, customerName: 'A'.repeat(NAME_MAX) }).customerName).toBeUndefined();
+  });
+});
+
+describe('shareText / whatsappHref', () => {
+  const due = new Date(2026, 10, 20, 17, 30).getTime(); // Fri, Nov 20, 5:30 PM
+  const base = { customerName: 'Anika Wedding', dueAt: due, items: 'Chicken biryani, 4 trays\n\n  Garlic naan, 150 ', people: 120 };
+
+  it('writes a delivery order with every part', () => {
+    const text = shareText({ ...base, type: 'delivery', address: '48 Lake View Rd', notes: 'Set up by 1 PM' }, 'New catering order');
+    expect(text).toBe(
+      '*New catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nDelivery: 48 Lake View Rd\n120 people\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Set up by 1 PM',
+    );
+  });
+
+  it('leaves out what is empty', () => {
+    const text = shareText({ ...base, type: 'pickup', people: null, notes: '  ' });
+    expect(text).toBe('*Catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nPickup\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150');
+  });
+
+  it('makes a wa.me link with the message encoded', () => {
+    expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
   });
 });
