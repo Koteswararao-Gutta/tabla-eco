@@ -29,7 +29,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { fitPicture } from './local';
-import type { DataStore, Unsubscribe, WithId } from './store';
+import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
 import { keepListening, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
@@ -292,6 +292,12 @@ export class FirebaseStore implements DataStore {
     if (text.trim().length < 5) throw new Error('Please paste the customer’s message first.');
     if (text.length > 8000) throw new Error('That message is too long. Please paste only the order part.');
     return this.readOrder({ text }, 'message');
+  }
+
+  async reportToastMenu(report: ToastMenuReport): Promise<void> {
+    await this.ready;
+    const { getFunctions, httpsCallable } = await import('firebase/functions');
+    await httpsCallable(getFunctions(this.app), 'reportToastMenu', { timeout: 30_000 })(report);
   }
 
   private async readOrder(input: object, what: 'photo' | 'message'): Promise<ScannedOrder> {

@@ -186,6 +186,9 @@ export class LocalStore implements DataStore {
     return this.sampleScan();
   }
 
+  /** No server here: the Toast menu is only saved on the live app. */
+  async reportToastMenu(): Promise<void> {}
+
   /** No server here: the same fixed sample, so the paste flow can be tried and tested. */
   async readOrderText(text: string): Promise<ScannedOrder> {
     if (text.trim().length < 5) throw new Error('Please paste the customer’s message first.');
