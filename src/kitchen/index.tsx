@@ -7,6 +7,8 @@ import { EditHistory, EditOrderSheet } from '../manager/catering';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
+import { useBrowserFullscreen } from './fullscreen';
+import { KitchenNotice } from './notice';
 import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
 import { Alarm } from './Alarm';
 import './kitchen.css';
@@ -22,7 +24,8 @@ const UNLOCK_KEY = 'kitchenUnlock';
 
 export default function Kitchen() {
   useHeartbeat('kitchen');
-  useToastBridge();
+  const toastError = useToastBridge();
+  useBrowserFullscreen();
   const pin = expectedPin(useSingleton('settings'));
   // Stays unlocked through reloads and restarts, until someone taps Lock or the manager changes the PIN.
   const [saved, setSaved] = useState(() => deviceValue(UNLOCK_KEY));
@@ -68,6 +71,7 @@ export default function Kitchen() {
             <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
           </div>
         )}
+        <KitchenNotice ordersLoaded={orders !== null} toastError={toastError} />
         <Alarm reminders={reminders} now={now} on={alarmOn} />
       </div>
     </ScreenSurface>
@@ -168,23 +172,7 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 
 // ---------- orders ----------
 
-function useOnline(): boolean {
-  const [online, setOnline] = useState(() => navigator.onLine);
-  useEffect(() => {
-    const up = () => setOnline(true);
-    const down = () => setOnline(false);
-    window.addEventListener('online', up);
-    window.addEventListener('offline', down);
-    return () => {
-      window.removeEventListener('online', up);
-      window.removeEventListener('offline', down);
-    };
-  }, []);
-  return online;
-}
-
 function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
-  const online = useOnline();
   const [showAll, setShowAll] = useState(false);
   const board = useRef<HTMLDivElement>(null);
   // Each view opens at its top, not at the other view's scroll position.
@@ -252,11 +240,6 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           <Logo className="k-logo" />
           <h1>{showAll ? 'All orders' : 'Open orders'}</h1>
           {!showAll && orders && <span className="k-count">{open.length}</span>}
-          {!online && (
-            <span className="t-badge bad k-offline" role="status">
-              Offline: showing the last saved orders
-            </span>
-          )}
           {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>

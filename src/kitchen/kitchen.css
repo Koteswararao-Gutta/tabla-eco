@@ -28,7 +28,6 @@
 .k-bar h1 { margin: 0; font-size: 1.8rem; font-weight: 650; }
 .k-logo { height: 48px; }
 .k-count { min-width: 40px; height: 40px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.2rem; }
-.k-offline { font-size: 1.05rem; padding: 8px 16px; border: 1px solid var(--bad); }
 .k-clock { font-size: 1.4rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .k-bar-btn { min-height: 56px; padding: 0 24px; font-size: 1.05rem; }
 
@@ -130,3 +129,7 @@
   0% { background: var(--bad); color: var(--bg); }
   50% { background: var(--bg); color: var(--bad); }
 }
+
+/* small red notice at the top while something is wrong (no internet, orders not loading, Toast reader) */
+.k-notice { position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); left: 0; right: 0; z-index: 40; display: flex; justify-content: center; padding: 0 12px; pointer-events: none; }
+.k-notice span { max-width: 640px; padding: 6px 14px; border-radius: 999px; background: var(--bad); color: var(--accent-ink); font-size: 0.85rem; font-weight: 600; line-height: 1.3; text-align: center; box-shadow: var(--shadow); }

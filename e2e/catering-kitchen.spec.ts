@@ -1027,3 +1027,23 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await expect(mCard).not.toContainText('aid');
   await context.close();
 });
+
+test('kitchen: small red notice at the top while offline, gone when the internet is back', async ({ browser }) => {
+  const context = await newContext(browser, { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByRole('button', { name: '1', exact: true })).toBeVisible();
+  const notice = page.getByTestId('kitchen-notice');
+  await expect(notice).toHaveCount(0);
+  await context.setOffline(true);
+  await expect(notice).toContainText('Offline: showing the last saved orders');
+  const box = await notice.boundingBox();
+  expect(box && box.y < 40).toBe(true); // at the top of the screen
+  await shot(page, 'kitchen-offline-pin');
+  await typePin(page, '1234');
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(notice).toBeVisible(); // still there after unlocking
+  await shot(page, 'kitchen-offline-board');
+  await context.setOffline(false);
+  await expect(notice).toHaveCount(0);
+  await context.close();
+});
