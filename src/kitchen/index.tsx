@@ -1,6 +1,6 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Logo, ScreenSurface } from '@shared/ui';
+import { Logo, ScreenSurface, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
 import { EditHistory, EditOrderSheet } from '../manager/catering';
@@ -13,6 +13,8 @@ import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
+/** Two taps on an order card this close together complete it; one tap opens its options. */
+export const DOUBLE_TAP_MS = 350;
 /** "Show all orders" goes back to the open orders after this long with no touch. */
 export const ALL_ORDERS_IDLE_MS = 3 * 60_000;
 /** Remembered on this tablet only (not synced): a fingerprint of the PIN it was unlocked with. */
@@ -230,6 +232,9 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   const [editing, setEditing] = useState<string | null>(null);
   const editOrder = editing ? orders?.find((o) => o.id === editing) ?? null : null;
   const [tagsFor, setTagsFor] = useState<Order | null>(null);
+  // One tap on a card: its options (complete, edit, print tags). Read live, so it closes if the order goes.
+  const [optionsFor, setOptionsFor] = useState<string | null>(null);
+  const optionsOrder = optionsFor ? orders?.find((o) => o.id === optionsFor && o.status === 'open') ?? null : null;
 
   const undoComplete = async () => {
     const o = undo && orders?.find((x) => x.id === undo.id);
@@ -281,11 +286,30 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       ) : (
         <div className="k-grid">
           {open.map((o) => (
-            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} onEdit={() => setEditing(o.id)} onTags={() => setTagsFor(o)} />
+            <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor(o.id)} onDoubleTap={() => complete(o)} />
           ))}
         </div>
       )}
 
+      {optionsOrder && (
+        <OrderOptions
+          order={optionsOrder}
+          now={now}
+          onClose={() => setOptionsFor(null)}
+          onComplete={() => {
+            setOptionsFor(null);
+            complete(optionsOrder);
+          }}
+          onEdit={() => {
+            setOptionsFor(null);
+            setEditing(optionsOrder.id);
+          }}
+          onTags={() => {
+            setOptionsFor(null);
+            setTagsFor(optionsOrder);
+          }}
+        />
+      )}
       {tagsFor && <TagsSheet order={tagsFor} now={now} onClose={() => setTagsFor(null)} />}
       {editOrder && <EditOrderSheet key={editOrder.id} order={editOrder} now={now} by="kitchen" onClose={() => setEditing(null)} onCompleted={showUndo} />}
 
@@ -303,13 +327,47 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   );
 }
 
-function OrderCard({ order: o, now, onComplete, onEdit, onTags }: { order: Order; now: number; onComplete: () => void; onEdit: () => void; onTags: () => void }) {
+/** One tap opens the order's options; a double tap marks it completed (Undo shows after). */
+function useTaps(onTap: () => void, onDoubleTap: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const taps = useRef({ onTap, onDoubleTap });
+  taps.current = { onTap, onDoubleTap };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, a')) return; // "Changed by…" has its own tap
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      taps.current.onDoubleTap();
+      return;
+    }
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      taps.current.onTap();
+    }, DOUBLE_TAP_MS);
+  };
+}
+
+function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: number; onTap: () => void; onDoubleTap: () => void }) {
   const cd = countdown(o.dueAt, now);
   const day = dayLabel(o.dueAt, now);
   const last = lastEdit(o);
   const [showChanges, setShowChanges] = useState(false);
+  const tap = useTaps(onTap, onDoubleTap);
   return (
-    <article className={'k-card' + (isSoon(o, now) ? ' soon' : '')} data-testid="kitchen-order" aria-label={`Order for ${o.customerName}`}>
+    <article
+      className={'k-card k-tappable' + (isSoon(o, now) ? ' soon' : '')}
+      data-testid="kitchen-order"
+      aria-label={`Order for ${o.customerName}`}
+      tabIndex={0}
+      onClick={tap}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onTap();
+        }
+      }}
+    >
       <div className="k-card-top">
         <div>
           <div className="k-due">{timeLabel(o.dueAt)}</div>
@@ -345,18 +403,31 @@ function OrderCard({ order: o, now, onComplete, onEdit, onTags }: { order: Order
       )}
       {last && showChanges && <EditHistory history={o.history} now={now} />}
 
-      <div className="k-actions">
-        <button className="t-btn k-edit" onClick={onEdit}>
-          Edit
-        </button>
-        <button className="t-btn k-edit" onClick={onTags}>
-          Print tags
-        </button>
-        <button className="t-btn primary k-done" onClick={onComplete}>
-          Mark completed
-        </button>
-      </div>
+      <p className="k-tap-hint">Tap for options · Double-tap to complete</p>
     </article>
+  );
+}
+
+function OrderOptions(props: { order: Order; now: number; onClose: () => void; onComplete: () => void; onEdit: () => void; onTags: () => void }) {
+  const o = props.order;
+  return (
+    <Sheet open title={o.customerName} onClose={props.onClose}>
+      <p className="k-opt-when">
+        {dayLabel(o.dueAt, props.now)}, {timeLabel(o.dueAt)} · {o.type === 'delivery' ? 'Delivery' : 'Pickup'}
+      </p>
+      <button type="button" className="t-btn primary block k-opt" onClick={props.onComplete}>
+        ✓ Mark completed
+      </button>
+      <button type="button" className="t-btn block k-opt" onClick={props.onEdit}>
+        Edit order
+      </button>
+      <button type="button" className="t-btn block k-opt" onClick={props.onTags}>
+        🏷️ Print name tags
+      </button>
+      <button type="button" className="t-btn ghost block k-opt" onClick={props.onClose}>
+        Close
+      </button>
+    </Sheet>
   );
 }
 
