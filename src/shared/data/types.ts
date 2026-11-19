@@ -73,6 +73,19 @@ export interface CateringOrder {
   completedAt?: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Every saved edit, oldest first (the last 50 are kept). */
+  history?: OrderEdit[];
+}
+
+/** Which device saved an edit: the kitchen tablet or the manager phone app. */
+export type EditedBy = 'kitchen' | 'manager';
+
+/** One saved edit of a catering order: who, when, and what changed in plain words. */
+export interface OrderEdit {
+  at: number;
+  by: EditedBy;
+  /** e.g. "Time: 5:00 PM → 6:00 PM", "Items: 20 samosas → 25 samosas" */
+  changes: string[];
 }
 
 /** What "Scan paper order" read from a photo. Empty strings mean "not on the paper". */

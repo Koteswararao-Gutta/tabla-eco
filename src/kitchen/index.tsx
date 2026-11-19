@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ScreenSurface } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
+import { EditHistory, EditOrderSheet } from '../manager/catering';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
 import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
@@ -228,12 +229,20 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
     return store.updateDoc('orders', o.id, { status, completedAt: status === 'completed' ? t : null, updatedAt: t });
   };
 
-  const complete = async (o: Order) => {
-    await setStatus(o, 'completed');
+  const showUndo = (o: Order) => {
     clearTimeout(timer.current);
     setUndo({ id: o.id, name: o.customerName });
     timer.current = setTimeout(() => setUndo(null), UNDO_MS);
   };
+  const complete = async (o: Order) => {
+    await setStatus(o, 'completed');
+    showUndo(o);
+  };
+
+  // "Edit" on a card: the order is read from the live list, so a change made elsewhere shows at once;
+  // if it is deleted elsewhere, the sheet closes.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editOrder = editing ? orders?.find((o) => o.id === editing) ?? null : null;
 
   const undoComplete = async () => {
     const o = undo && orders?.find((x) => x.id === undo.id);
@@ -284,10 +293,12 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       ) : (
         <div className="k-grid">
           {open.map((o) => (
-            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} />
+            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} onEdit={() => setEditing(o.id)} />
           ))}
         </div>
       )}
+
+      {editOrder && <EditOrderSheet key={editOrder.id} order={editOrder} now={now} by="kitchen" onClose={() => setEditing(null)} onCompleted={showUndo} />}
 
       {undo && (
         <div className="k-undo" role="status">
@@ -303,9 +314,11 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   );
 }
 
-function OrderCard({ order: o, now, onComplete }: { order: Order; now: number; onComplete: () => void }) {
+function OrderCard({ order: o, now, onComplete, onEdit }: { order: Order; now: number; onComplete: () => void; onEdit: () => void }) {
   const cd = countdown(o.dueAt, now);
   const day = dayLabel(o.dueAt, now);
+  const last = lastEdit(o);
+  const [showChanges, setShowChanges] = useState(false);
   return (
     <article className={'k-card' + (isSoon(o, now) ? ' soon' : '')} data-testid="kitchen-order" aria-label={`Order for ${o.customerName}`}>
       <div className="k-card-top">
@@ -334,9 +347,23 @@ function OrderCard({ order: o, now, onComplete }: { order: Order; now: number; o
 
       {o.notes && <p className="k-notes">{o.notes}</p>}
 
-      <button className="t-btn primary block k-done" onClick={onComplete}>
-        Mark completed
-      </button>
+      {last && (
+        <button className="k-changed" aria-expanded={showChanges} onClick={() => setShowChanges(!showChanges)}>
+          ✎ Changed by {EDITED_BY_LABEL[last.by] ?? 'someone'}, {dayLabel(last.at, now) === 'Today' ? '' : `${dayLabel(last.at, now)} `}
+          {timeLabel(last.at)}
+          <span className="k-changed-more">{showChanges ? 'Hide' : 'See changes'}</span>
+        </button>
+      )}
+      {last && showChanges && <EditHistory history={o.history} now={now} />}
+
+      <div className="k-actions">
+        <button className="t-btn k-edit" onClick={onEdit}>
+          Edit
+        </button>
+        <button className="t-btn primary k-done" onClick={onComplete}>
+          Mark completed
+        </button>
+      </div>
     </article>
   );
 }

@@ -32,7 +32,8 @@ service cloud.firestore {
         && (!('items' in d) || (d.items is string && d.items.size() <= 20000))
         && (!('type' in d) || d.type in ['pickup', 'delivery'])
         && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number)
-        && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number);
+        && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number)
+        && (!('history' in d) || (d.history is list && d.history.size() <= 50));
     }
     function orderHasMain(d) { return d.keys().hasAll(['customerName', 'dueAt', 'status', 'items']); }
     match /orders/{id} {

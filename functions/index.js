@@ -9,6 +9,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
+import { editAlertFor, kitchenEdit } from './edits.js';
 import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
 import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
@@ -51,12 +52,23 @@ async function scheduleReminder(orderId, order) {
   }
 }
 
-/** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings). */
+/** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings),
+ *  and when the kitchen edited it, tell the phones what changed. */
 export const orderSaved = onDocumentWritten({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
   const after = event.data?.after?.data() ?? null;
   const before = event.data?.before?.data() ?? null;
+  const { orderId } = event.params;
+  const edit = kitchenEdit(before, after);
+  // Retries can repeat this; the tag makes a repeat replace the same alert on the phone.
+  if (edit) {
+    try {
+      await sendToAllDevices(editAlertFor(after, edit), `edit-${orderId}-${edit.at}`);
+    } catch (e) {
+      logger.error('kitchen edit alert failed', e); // never stops the 1-hour reminder below
+    }
+  }
   if (!shouldSchedule(before, after)) return; // nothing that moves the alarm (e.g. only remindedFor changed)
-  await scheduleReminder(event.params.orderId, after);
+  await scheduleReminder(orderId, after);
 });
 
 /** The alarm: re-reads the order and sends the alert to every device that turned alerts on. */

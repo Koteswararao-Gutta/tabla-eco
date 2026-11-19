@@ -1,6 +1,6 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
-import type { CateringOrder, ScannedOrder } from '@shared/data';
+import type { CateringOrder, EditedBy, OrderEdit, ScannedOrder } from '@shared/data';
 
 type Order = CateringOrder;
 
@@ -288,3 +288,62 @@ export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'ad
 
 /** Opens WhatsApp with the message typed in; the person picks the group and taps send. */
 export const whatsappHref = (text: string) => 'https://wa.me/?text=' + encodeURIComponent(text);
+
+// ---------- edit history ----------
+
+/** How each device shows in the history. */
+export const EDITED_BY_LABEL: Record<EditedBy, string> = { kitchen: 'Kitchen', manager: 'Manager' };
+/** The order keeps only its latest edits, so the document stays small. */
+export const HISTORY_MAX = 50;
+const SHOWN_MAX = 80;
+const shown = (v: string) => {
+  const t = v.replace(/\s+/g, ' ').trim();
+  if (!t) return '(none)';
+  return t.length > SHOWN_MAX ? `${t.slice(0, SHOWN_MAX - 1)}…` : t;
+};
+const fullDate = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const typeWord = (t: Order['type']) => (t === 'delivery' ? 'Delivery' : 'Pickup');
+
+/** Lines in `a` that are not in `b`, counting repeats. */
+function missing(a: string[], b: string[]): string[] {
+  const left = [...b];
+  return a.filter((l) => {
+    const i = left.indexOf(l);
+    if (i < 0) return true;
+    left.splice(i, 1);
+    return false;
+  });
+}
+
+type EditFields = Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items'> & Partial<Pick<Order, 'address' | 'notes' | 'people'>>;
+
+/** What an edit changes, in plain words, e.g. ["Time: 5:00 PM → 6:00 PM", "Items: 20 samosas → 25 samosas"]. Empty when nothing changed. */
+export function describeChanges(before: EditFields, after: EditFields): string[] {
+  const out: string[] = [];
+  if (before.customerName.trim() !== after.customerName.trim()) out.push(`Name: ${shown(before.customerName)} → ${shown(after.customerName)}`);
+  if (before.phone.trim() !== after.phone.trim()) out.push(`Phone: ${shown(before.phone)} → ${shown(after.phone)}`);
+  if (dayStart(before.dueAt) !== dayStart(after.dueAt)) out.push(`Date: ${fullDate(before.dueAt)} → ${fullDate(after.dueAt)}`);
+  if (timeLabel(before.dueAt) !== timeLabel(after.dueAt)) out.push(`Time: ${timeLabel(before.dueAt)} → ${timeLabel(after.dueAt)}`);
+  if (before.type !== after.type) out.push(`${typeWord(before.type)} → ${typeWord(after.type)}`);
+  if (after.type === 'delivery' && (before.address ?? '').trim() !== (after.address ?? '').trim()) out.push(`Address: ${shown(before.address ?? '')} → ${shown(after.address ?? '')}`);
+  if ((before.people || null) !== (after.people || null)) out.push(`People: ${before.people || '(none)'} → ${after.people || '(none)'}`);
+  // Items: a changed line reads "old → new"; extra lines read as added or removed.
+  const was = itemLines(before.items);
+  const now = itemLines(after.items);
+  const removed = missing(was, now);
+  const added = missing(now, was);
+  const paired = Math.min(removed.length, added.length);
+  for (let i = 0; i < paired; i++) out.push(`Items: ${shown(removed[i])} → ${shown(added[i])}`);
+  for (const l of added.slice(paired)) out.push(`Item added: ${shown(l)}`);
+  for (const l of removed.slice(paired)) out.push(`Item removed: ${shown(l)}`);
+  if ((before.notes ?? '').trim() !== (after.notes ?? '').trim()) out.push(`Notes: ${shown(before.notes ?? '')} → ${shown(after.notes ?? '')}`);
+  return out;
+}
+
+/** The order's history with one more edit at the end, keeping the latest HISTORY_MAX. */
+export function withEdit(history: OrderEdit[] | undefined, edit: OrderEdit): OrderEdit[] {
+  return [...(Array.isArray(history) ? history : []), edit].slice(-HISTORY_MAX);
+}
+
+/** The latest edit, or null. */
+export const lastEdit = (o: Pick<Order, 'history'>): OrderEdit | null => (Array.isArray(o.history) && o.history.length ? o.history[o.history.length - 1] : null);
