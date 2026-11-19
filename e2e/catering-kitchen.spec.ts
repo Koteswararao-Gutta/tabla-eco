@@ -173,20 +173,20 @@ test('kitchen stays unlocked on this tablet through a reload, until Lock or a ne
 
 test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
-  // Count chimes and sound wake-ups with a stand-in for the browser's sound output.
+  // Count chimes, and watch the sound output, through a stand-in for the browser's sound output.
   await context.addInitScript(() => {
-    const w = window as unknown as { chimeNotes: number; audioResumes: number; AudioContext: unknown };
+    const w = window as unknown as { chimeNotes: number; audioCtxs: AudioContext[]; AudioContext: unknown };
     w.chimeNotes = 0;
-    w.audioResumes = 0;
+    w.audioCtxs = [];
     const Real = window.AudioContext;
     w.AudioContext = class extends Real {
+      constructor() {
+        super();
+        w.audioCtxs.push(this);
+      }
       createOscillator() {
         w.chimeNotes++;
         return super.createOscillator();
-      }
-      resume() {
-        w.audioResumes++;
-        return super.resume();
       }
     };
   });
@@ -211,17 +211,106 @@ test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it'
   expect(first).toBeGreaterThan(0); // rang once
   // A tap anywhere wakes the sound.
   await page.mouse.click(5, 760);
-  expect(await page.evaluate(() => (window as unknown as { audioResumes: number }).audioResumes)).toBeGreaterThan(0);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { audioCtxs: AudioContext[] }).audioCtxs.map((c) => c.state).join()))
+    .toBe('running'); // one sound output, and it is on
   await page.clock.runFor(46_000);
   expect(await notes()).toBe(first * 2); // rang again
   await page.clock.runFor(45_000);
   expect(await notes()).toBe(first * 3);
+  // Unlocking and locking again neither replays the chime nor restarts the 45 s.
+  await page.clock.runFor(20_000);
+  await typePin(page, '1234');
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(banner).toContainText('Anita Rao');
+  await page.getByRole('button', { name: 'Lock' }).click();
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  expect(await notes()).toBe(first * 3);
+  await page.clock.runFor(26_000); // 45 s after the last ring
+  expect(await notes()).toBe(first * 4);
   // Got it works without the PIN, and the ringing stops.
   await banner.getByRole('button', { name: 'Got it' }).click();
   await expect(banner).toHaveCount(0);
   await page.clock.runFor(100_000);
-  expect(await notes()).toBe(first * 3);
+  expect(await notes()).toBe(first * 4);
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on screen', async ({ browser }) => {
+  // A New York tablet shows the time zone warning strip, which pushes the page down.
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 }, timezoneId: 'America/New_York' });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    const now = Date.now();
+    for (const [i, name] of ['Anita Rao', 'Bharat Iyer', 'Chitra Nair', 'Deepak Shah', 'Esha Gupta'].entries())
+      t['r' + i] = { id: 'r' + i, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + (10 + i * 10) * 60_000 };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await expect(page.getByTestId('kitchen-reminder').getByRole('button', { name: 'Got it' })).toHaveCount(5);
+  const onScreen = async () => {
+    const vh = page.viewportSize()!.height;
+    for (const k of ['1', '0', 'Clear', 'Delete last digit']) {
+      const b = (await page.getByRole('button', { name: k, exact: true }).boundingBox())!;
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.height).toBeLessThanOrEqual(vh);
+    }
+    // Nothing sits on top of the keypad or the PIN dots.
+    expect(await page.evaluate(() => {
+      const hit = (el: Element) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!top && (el === top || el.contains(top)); };
+      // ...nor on the heads-up: it sits below the time zone strip.
+      return document.documentElement.classList.contains('t-tz-on') && [...document.querySelectorAll('.k-key, .k-dots'), document.querySelector('.k-remind-btn')!].every(hit);
+    })).toBe(true);
+  };
+  await onScreen();
+  await shot(page, 'kitchen-pin-5-reminders-1024');
+  await page.setViewportSize({ width: 800, height: 1280 });
+  await onScreen();
+  await shot(page, 'kitchen-pin-5-reminders-portrait');
+  // The keypad still works, and so does Got it.
+  await typePin(page, '1234');
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: shows "Tap anywhere to turn on sound" while the browser keeps sound off', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  // A stand-in sound output that stays off until a tap, like Chrome after a restart.
+  await context.addInitScript(() => {
+    class FakeAudio extends EventTarget {
+      state = 'suspended';
+      currentTime = 0;
+      destination = {};
+      resume() {
+        const during = window.event?.type; // only a real tap or key press turns it on
+        if ((during === 'pointerdown' || during === 'keydown') && this.state !== 'running') {
+          this.state = 'running';
+          this.dispatchEvent(new Event('statechange'));
+        }
+        return Promise.resolve();
+      }
+      createOscillator() { return { frequency: {}, connect: (g: unknown) => g, start() {}, stop() {} }; }
+      createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d: unknown) => d }; }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = FakeAudio;
+  });
+  const page = await openScreen(context, '/kitchen');
+  const note = page.getByText('Tap anywhere to turn on sound');
+  await expect(note).toBeVisible();
+  await shot(page, 'kitchen-sound-off-pin');
+  await typePin(page, '1234'); // the first tap turns sound on
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+  // After a restart it is unlocked, and the note shows on the board until a tap.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(note).toBeVisible();
+  await shot(page, 'kitchen-sound-off-board');
+  await page.mouse.click(500, 700);
+  await expect(note).toHaveCount(0);
   await context.close();
 });
 

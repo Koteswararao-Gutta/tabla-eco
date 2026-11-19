@@ -4,7 +4,7 @@ import { ScreenSurface } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
-import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, wakeAudio } from './reminder';
+import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -37,20 +37,27 @@ export default function Kitchen() {
 
   const orders = useCollection('orders');
   const now = useNow(15_000);
-  // The heads-up runs on every kitchen view, locked or not.
-  const banner = <HeadsUp orders={orders} now={now} />;
+  // The heads-up runs on every kitchen view, locked or not. Its chime lives here, so locking or
+  // unlocking never replays it or restarts the 45 s repeat.
+  const reminders = useHeadsUp(orders, now);
+  const banner = <HeadsUp reminders={reminders} now={now} />;
+  const soundNote = useSoundOn() ? null : (
+    <span className="k-sound" role="status">
+      Tap anywhere to turn on sound
+    </span>
+  );
 
   return (
     // ScreenSurface keeps the screen awake; .k-root turns it into a light page.
     <ScreenSurface testId="kitchen">
       <div className="k-root">
         {pin === undefined ? null : unlocked ? (
-          <Board orders={orders} now={now} banner={banner} onLock={() => remember(null)} />
+          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} />
         ) : (
-          <>
-            <div className="k-remind-over">{banner}</div>
-            <PinScreen pin={pin} onUnlock={() => remember(pinFingerprint(pin))} />
-          </>
+          <div className={'k-lock' + (reminders.length ? ' has-remind' : '')}>
+            {reminders.length > 0 && <div className="k-remind-over">{banner}</div>}
+            <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
+          </div>
         )}
       </div>
     </ScreenSurface>
@@ -59,9 +66,9 @@ export default function Kitchen() {
 
 // ---------- 1-hour heads-up ----------
 
-/** Banner per order whose heads-up is due, with a chime when a new one appears and again every 45 s
+/** Orders whose 1-hour heads-up is due, with a chime when a new one appears and again every 45 s
  *  until "Got it". Rings only while the kitchen is staffed (staff schedule hours); waits for those to load. */
-function HeadsUp({ orders, now }: { orders: Order[] | null; now: number }) {
+function useHeadsUp(orders: Order[] | null, now: number): KitchenOrder[] {
   const staff = useSingleton('staffConfig');
   const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
   const remindIds = reminders.map(ackKey).join(',');
@@ -75,6 +82,23 @@ function HeadsUp({ orders, now }: { orders: Order[] | null; now: number }) {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remindIds]);
+  return reminders;
+}
+
+/** False while the browser keeps sound off (until someone taps the screen). */
+function useSoundOn(): boolean {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    const check = () => setOn(soundIsOn());
+    const off = onSoundChange(check);
+    check();
+    return off;
+  }, []);
+  return on;
+}
+
+/** One banner row per due heads-up. "Got it" needs no PIN. */
+function HeadsUp({ reminders, now }: { reminders: KitchenOrder[]; now: number }) {
   // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet. No PIN needed.
   const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
   if (reminders.length === 0) return null;
@@ -96,7 +120,7 @@ function HeadsUp({ orders, now }: { orders: Order[] | null; now: number }) {
 
 // ---------- PIN ----------
 
-function PinScreen({ pin, onUnlock }: { pin: string; onUnlock: () => void }) {
+function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUnlock: () => void }) {
   const [entry, setEntry] = useState('');
   const [wrong, setWrong] = useState(0); // bumps to restart the shake
 
@@ -146,6 +170,7 @@ function PinScreen({ pin, onUnlock }: { pin: string; onUnlock: () => void }) {
           </button>
         ))}
       </div>
+      {note}
     </div>
   );
 }
@@ -167,7 +192,7 @@ function useOnline(): boolean {
   return online;
 }
 
-function Board({ orders, now, banner, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; onLock: () => void }) {
+function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
   const online = useOnline();
   const [showAll, setShowAll] = useState(false);
   const board = useRef<HTMLDivElement>(null);
@@ -228,6 +253,7 @@ function Board({ orders, now, banner, onLock }: { orders: Order[] | null; now: n
               Offline: showing the last saved orders
             </span>
           )}
+          {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
         {showAll ? (
