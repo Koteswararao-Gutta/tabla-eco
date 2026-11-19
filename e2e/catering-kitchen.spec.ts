@@ -302,6 +302,19 @@ test('paste a customer message fills the new order form, then saves', async ({ b
   await context.close();
 });
 
+test('one tap on Paste message reads what was copied and fills the form', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.evaluate(() => navigator.clipboard.writeText('Hi, Meera here. 2 trays veg biryani and 50 gulab jamun tomorrow 6:30pm pickup'));
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await sheet.getByRole('button', { name: '📋 Paste message' }).click();
+  await expect(sheet.getByText('Filled in from the message.')).toBeVisible();
+  await expect(sheet.getByLabel("Customer's message")).toHaveCount(0); // no box, no extra tap
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await context.close();
+});
+
 test('calendar shows the month, and a new order from it warns about a nearby order', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
