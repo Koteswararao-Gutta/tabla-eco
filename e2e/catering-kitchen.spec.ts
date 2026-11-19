@@ -911,3 +911,103 @@ test('kitchen: Print tags on an order card uses the tablet app bridge, 2 sheets 
   await kitchen.pdf({ path: `${SHOTS}/tags.pdf`, format: 'Letter', printBackground: true, preferCSSPageSize: true });
   await context.close();
 });
+
+test('order amount: manager only, kept apart from the order, never on the kitchen tablet', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  const kitchen = await openScreen(context, '/kitchen');
+  await kitchen.setViewportSize({ width: 1280, height: 800 });
+  await typePin(kitchen, '1234');
+  await expect(kitchen.getByTestId('kitchen-order')).toHaveCount(2);
+
+  // New order with an amount. A bad amount is caught first.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  const tomorrow = await manager.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  await sheet.getByLabel('Customer name').fill('Mehta Party');
+  await sheet.getByLabel('Phone').fill('555 444 1212');
+  await sheet.getByLabel('Date').fill(tomorrow);
+  await sheet.getByLabel('Time').fill('12:30');
+  await sheet.getByLabel('Order items (one per line)').fill('Veg biryani, 2 trays\nSamosa, 40');
+  const amount = sheet.getByLabel('Amount $ (optional, manager only)');
+  await amount.fill('two hundred');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(sheet.getByText('Please enter an amount like 200')).toBeVisible();
+  await expect(amount).toBeFocused();
+  await amount.fill('$1,250.50');
+  await amount.scrollIntoViewIfNeeded();
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-new-order-amount');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  const saved = manager.getByRole('dialog', { name: 'Order saved' });
+  await expect(saved.getByLabel('Message')).toContainText('Mehta Party');
+  await expect(saved.getByLabel('Message')).not.toContainText('$'); // not in the WhatsApp message
+  await expect(saved.getByLabel('Message')).not.toContainText('1,250');
+  await saved.getByRole('button', { name: 'Done' }).click();
+
+  // Stored in orderAmounts, not on the order.
+  const orders = await readCollection<CateringOrder>(manager, 'orders');
+  const o = orders.find((x) => x.customerName === 'Mehta Party')!;
+  expect(o).not.toHaveProperty('amount');
+  for (const x of orders) expect(JSON.stringify(x)).not.toContain('1250');
+  const amounts = await readCollection<{ id: string; amount: number | null }>(manager, 'orderAmounts');
+  expect(amounts.find((a) => a.id === o.id)?.amount).toBe(1250.5);
+
+  // Manager list card and details show it.
+  const mCard = manager.getByRole('button', { name: /Mehta Party/ });
+  await expect(mCard).toContainText('$1,250.50');
+  await mCard.click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(details.getByTestId('order-amount')).toHaveText(/Amount\s*\$1,250\.50/);
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-order-amount-details');
+
+  // Kitchen: card, options, edit form and all orders never show it.
+  const kCard = kitchen.getByRole('article', { name: 'Order for Mehta Party' });
+  await expect(kCard).toBeVisible();
+  await expect(kitchen.locator('body')).not.toContainText('1,250');
+  await expect(kitchen.locator('body')).not.toContainText('Amount');
+  await kitchenOption(kitchen, 'Mehta Party', 'Edit order');
+  const kEdit = kitchen.getByRole('dialog', { name: 'Edit order' });
+  await expect(kEdit.getByLabel('Customer name')).toHaveValue('Mehta Party');
+  await expect(kEdit.getByTestId('amount-input')).toHaveCount(0);
+  await expect(kEdit).not.toContainText('Amount');
+  // A kitchen edit keeps the amount.
+  await kEdit.getByLabel('Order items (one per line)').fill('Veg biryani, 3 trays\nSamosa, 40');
+  await kEdit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(kEdit).toHaveCount(0);
+  await expect(kitchen.locator('body')).not.toContainText('1,250');
+  const afterKitchen = await readCollection<{ id: string; amount: number | null }>(manager, 'orderAmounts');
+  expect(afterKitchen.find((a) => a.id === o.id)?.amount).toBe(1250.5);
+  await expect(details.getByTestId('order-amount')).toContainText('$1,250.50');
+  await expect(details.getByTestId('edit-history')).toContainText('Veg biryani, 3 trays');
+  await expect(details.getByTestId('edit-history')).not.toContainText('$');
+
+  // Manager changes the amount: no history entry (the kitchen sees the history), and the tablet still shows nothing.
+  await details.getByRole('button', { name: 'Edit' }).click();
+  const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
+  await expect(mEdit.getByLabel('Amount $ (optional, manager only)')).toHaveValue('1250.50');
+  await mEdit.getByLabel('Amount $ (optional, manager only)').fill('200');
+  await mEdit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(mEdit).toHaveCount(0);
+  await expect(mCard).toContainText('$200');
+  const after = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.id === o.id)!;
+  expect(after.history).toHaveLength(1);
+  await kitchen.getByRole('button', { name: /Show all orders/ }).click();
+  await expect(kitchen.getByText('Mehta Party').first()).toBeVisible();
+  await expect(kitchen.locator('body')).not.toContainText('$200');
+
+  // Clearing it removes it from the card.
+  await mCard.click();
+  await details.getByRole('button', { name: 'Edit' }).click();
+  await mEdit.getByLabel('Amount $ (optional, manager only)').fill('');
+  await mEdit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(mEdit).toHaveCount(0);
+  await expect(mCard).not.toContainText('$');
+  await context.close();
+});

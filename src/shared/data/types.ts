@@ -77,6 +77,17 @@ export interface CateringOrder {
   history?: OrderEdit[];
 }
 
+/**
+ * What the customer pays for a catering order, for the manager app only. Kept in its own collection
+ * (orderAmounts/{order id}), not on the order, so the kitchen tablet never loads it: the kitchen reads
+ * and edits `orders` only, and its edits can't change or drop the amount.
+ */
+export interface OrderAmount {
+  /** US dollars, e.g. 200 or 1250.5. null when cleared. */
+  amount: number | null;
+  updatedAt: number;
+}
+
 /** Which device saved an edit: the kitchen tablet or the manager phone app. */
 export type EditedBy = 'kitchen' | 'manager';
 
@@ -158,6 +169,8 @@ export interface Collections {
   slots: Slot;
   pictures: Picture;
   orders: CateringOrder;
+  /** Manager only: the amount per order (doc id = order id). Never read it from the kitchen. */
+  orderAmounts: OrderAmount;
   /** Single documents: use useSingleton / saveSingleton rather than this collection directly. */
   singletons: Singletons[SingletonId];
   staffWeeks: StaffWeek;

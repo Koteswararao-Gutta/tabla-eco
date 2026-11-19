@@ -245,3 +245,41 @@ describe('edit history', () => {
     expect(lastEdit({})).toBeNull();
   });
 });
+
+import { amountError, amountInput, amountLabel, parseAmount } from './orders';
+
+describe('order amount (manager only)', () => {
+  it('reads what was typed', () => {
+    expect(parseAmount('')).toBeNull();
+    expect(parseAmount('  ')).toBeNull();
+    expect(parseAmount('200')).toBe(200);
+    expect(parseAmount('$200')).toBe(200);
+    expect(parseAmount('1,250.50')).toBe(1250.5);
+    expect(parseAmount('$ 99.9')).toBe(99.9);
+    expect(parseAmount('.5')).toBe(0.5);
+    expect(parseAmount('0')).toBe(0);
+  });
+  it('rejects text that is not an amount', () => {
+    for (const bad of ['abc', '20 dollars', '-5', '1.234', '2e3', '1.2.3', '2000000']) expect(Number.isNaN(parseAmount(bad))).toBe(true);
+    expect(amountError('abc')).toMatch(/amount like 200/);
+    expect(amountError('')).toBe('');
+    expect(amountError('200')).toBe('');
+  });
+  it('shows it as dollars', () => {
+    expect(amountLabel(200)).toBe('$200');
+    expect(amountLabel(1250.5)).toBe('$1,250.50');
+    expect(amountLabel(null)).toBe('');
+    expect(amountLabel(undefined)).toBe('');
+    expect(amountInput(200)).toBe('200');
+    expect(amountInput(200.5)).toBe('200.50');
+    expect(amountInput(null)).toBe('');
+  });
+  it('never reaches the kitchen, the WhatsApp message or the change history', () => {
+    // The amount isn't an order field: an order with an amount stored elsewhere shares and diffs the same.
+    const o = order(NOW, { items: 'Rice' });
+    const withExtra = { ...o, amount: 200 } as CateringOrder;
+    expect(shareText(withExtra)).not.toMatch(/\$|200/);
+    expect(describeChanges(o, withExtra)).toEqual([]);
+    expect(Object.keys(orderFields(formFromOrder(withExtra)))).not.toContain('amount');
+  });
+});

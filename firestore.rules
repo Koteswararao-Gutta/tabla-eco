@@ -42,6 +42,17 @@ service cloud.firestore {
       allow update: if signedIn() && small() && orderTypes(request.resource.data);
       allow delete: if signedIn();
     }
+    // What a catering order costs, by order id. Shown only in the manager app: the kitchen screen never
+    // loads this collection. (With anonymous sign-in the rules can't tell the two apps apart, so this keeps
+    // it off the kitchen tablet rather than locking it.)
+    match /orderAmounts/{id} {
+      allow read, delete: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['amount', 'updatedAt'])
+        && (request.resource.data.amount == null
+            || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
+        && request.resource.data.updatedAt is number;
+    }
     match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /clocks/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
