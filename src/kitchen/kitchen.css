@@ -93,3 +93,6 @@
 .k-remind-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 1.3rem; }
 .k-remind-text { min-width: 0; overflow-wrap: anywhere; }
 .k-remind-btn.t-btn { flex: none; min-height: 56px; padding: 0 28px; font-size: 1.1rem; color: var(--ink); background: var(--bg); border-color: var(--bg); }
+/* Heads-up over the PIN screen: works without the PIN. */
+.k-remind-over { position: fixed; top: 16px; left: 24px; right: 24px; z-index: 6; }
+.k-remind-over .k-remind { margin: 0; box-shadow: var(--shadow); }
