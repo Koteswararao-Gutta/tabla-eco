@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  amountError, amountInput, amountLabel, dayLabel, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
+  amountError, amountInput, amountLabel, payLabel, dayLabel, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -11,6 +11,9 @@ import { TagsSheet } from './TagsSheet';
 import './catering.css';
 
 type Order = WithId<CateringOrder>;
+/** Manager only: what the order costs and whether it is paid (from orderAmounts, never the order). */
+type Pay = { amount: number | null; paid: boolean };
+const NO_PAY: Pay = { amount: null, paid: false };
 const UNDO_MS = 6000;
 
 const SAVE_FAILED = 'Could not save. Please try again.';
@@ -48,7 +51,11 @@ export default function Catering() {
   const orders = useCollection('orders');
   // Manager only: what each order costs (orderAmounts/{order id}). The kitchen never loads this.
   const amounts = useCollection('orderAmounts');
-  const amountOf = (id: string): number | null | undefined => (amounts ? amounts.find((a) => a.id === id)?.amount ?? null : undefined);
+  const payOf = (id: string): Pay | undefined => {
+    if (!amounts) return undefined;
+    const a = amounts.find((x) => x.id === id);
+    return { amount: a?.amount ?? null, paid: a?.paid === true };
+  };
   const now = useNow(30_000);
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
@@ -123,17 +130,17 @@ export default function Catering() {
               Tap “+ New order” to add one.
             </div>
           )}
-          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} amountOf={amountOf} showDate onOpen={openOrder} late />
-          <Group title="Today" orders={groups.today} now={now} amountOf={amountOf} onOpen={openOrder} />
-          <Group title="Tomorrow" orders={groups.tomorrow} now={now} amountOf={amountOf} onOpen={openOrder} />
-          <Group title="Later" orders={groups.later} now={now} amountOf={amountOf} showDate onOpen={openOrder} />
+          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} payOf={payOf} showDate onOpen={openOrder} late />
+          <Group title="Today" orders={groups.today} now={now} payOf={payOf} onOpen={openOrder} />
+          <Group title="Tomorrow" orders={groups.tomorrow} now={now} payOf={payOf} onOpen={openOrder} />
+          <Group title="Later" orders={groups.later} now={now} payOf={payOf} showDate onOpen={openOrder} />
 
           {past.length > 0 && (
             <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
               {showHistory ? 'Hide history' : `History (${past.length})`}
             </button>
           )}
-          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} amountOf={amountOf} showDate onOpen={openOrder} />}
+          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} payOf={payOf} showDate onOpen={openOrder} />}
         </div>
       )}
 
@@ -158,7 +165,7 @@ export default function Catering() {
         <OrderSheet
           key={editing!}
           order={editOrder}
-          amount={editOrder ? amountOf(editOrder.id) : null}
+          pay={editOrder ? payOf(editOrder.id) : NO_PAY}
           day={newDay}
           now={now}
           onClose={() => setEditing(null)}
@@ -270,14 +277,14 @@ function AlertsCard() {
   );
 }
 
-function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; amountOf: (id: string) => number | null | undefined; onOpen: (o: Order) => void }) {
+function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; payOf: (id: string) => Pay | undefined; onOpen: (o: Order) => void }) {
   if (props.orders.length === 0) return null;
   return (
     <section className="c-group" aria-label={props.title}>
       <h2 className={'c-group-title' + (props.late ? ' late' : '')}>{props.title}</h2>
       <div className="t-stack">
         {props.orders.map((o) => (
-          <OrderCard key={o.id} order={o} amount={props.amountOf(o.id)} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
+          <OrderCard key={o.id} order={o} pay={props.payOf(o.id)} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
         ))}
       </div>
     </section>
@@ -285,9 +292,9 @@ function Group(props: { title: string; orders: Order[]; now: number; showDate?: 
 }
 
 /** Manager list card. The kitchen has its own cards (src/kitchen), which never show the amount. */
-function OrderCard({ order: o, amount, now, showDate, onClick }: { order: Order; amount?: number | null; now: number; showDate?: boolean; onClick: () => void }) {
+function OrderCard({ order: o, pay, now, showDate, onClick }: { order: Order; pay?: Pay; now: number; showDate?: boolean; onClick: () => void }) {
   const n = itemLines(o.items).length;
-  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, amountLabel(amount) || null].filter(Boolean);
+  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, payLabel(pay) || null].filter(Boolean);
   return (
     <button className={'c-card' + (o.status === 'completed' ? ' done' : '')} onClick={onClick} data-testid="order-card">
       <span className="c-card-top">
@@ -308,8 +315,8 @@ function OrderCard({ order: o, amount, now, showDate, onClick }: { order: Order;
 }
 
 /** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager).
- *  `amount` (manager only): the order's saved amount, undefined while loading. The amount box shows only when `by` is Manager. */
-type SheetProps = { order: Order | null; amount?: number | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
+ *  `pay` (manager only): the order's saved amount and paid, undefined while loading. Those boxes show only when `by` is Manager. */
+type SheetProps = { order: Order | null; pay?: Pay; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -359,7 +366,7 @@ function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
   );
 }
 
-function OrderSummary({ order: o, amount, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
+function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
   const { busy, error, run } = useSaver();
   const items = itemLines(o.items);
   const open = o.status === 'open';
@@ -398,10 +405,12 @@ function OrderSummary({ order: o, amount, now, onClose, onCompleted, onDelete, o
             <dd>{o.people}</dd>
           </div>
         )}
-        {amount != null && (
+        {pay && (pay.amount != null || pay.paid) && (
           <div data-testid="order-amount">
             <dt>Amount</dt>
-            <dd>{amountLabel(amount)}</dd>
+            <dd>
+              {amountLabel(pay.amount) || 'Not set'} <span className={'t-badge' + (pay.paid ? ' good' : '')}>{pay.paid ? '✓ Paid' : 'Not paid'}</span>
+            </dd>
           </div>
         )}
       </dl>
@@ -512,16 +521,19 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
   // The saved amount can arrive after the form opens: take it then, unless something was typed already.
-  const [amountStart, setAmountStart] = useState<string | undefined>(() => (props.amount === undefined && order ? undefined : amountInput(props.amount)));
-  const [amount, setAmount] = useState(amountStart ?? '');
+  const loaded = (p: Pay | undefined) => (p === undefined && order ? undefined : { amount: amountInput(p?.amount), paid: p?.paid === true });
+  const [payStart, setPayStart] = useState(() => loaded(props.pay));
+  const [amount, setAmount] = useState(payStart?.amount ?? '');
+  const [paid, setPaid] = useState(payStart?.paid ?? false);
   const [amountErr, setAmountErr] = useState('');
   useEffect(() => {
-    if (amountStart !== undefined || props.amount === undefined) return;
-    const a = amountInput(props.amount);
-    setAmountStart(a);
-    setAmount((typed) => (typed ? typed : a));
-  }, [props.amount, amountStart]);
-  const amountChanged = showAmount && amountStart !== undefined && parseAmount(amount) !== parseAmount(amountStart);
+    if (payStart !== undefined || props.pay === undefined) return;
+    const p = loaded(props.pay)!;
+    setPayStart(p);
+    setAmount((typed) => (typed ? typed : p.amount));
+    setPaid(p.paid);
+  }, [props.pay, payStart]);
+  const amountChanged = showAmount && payStart !== undefined && (parseAmount(amount) !== parseAmount(payStart.amount) || paid !== payStart.paid);
   const typeAmount = (v: string) => {
     setAmount(v);
     if (tried) setAmountErr(amountError(v));
@@ -529,7 +541,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   /** Saves the amount for this order id (manager only), when it changed. */
   const saveAmount = async (id: string) => {
     if (!amountChanged) return;
-    await store.setDoc('orderAmounts', id, { amount: parseAmount(amount), updatedAt: store.now() });
+    await store.setDoc('orderAmounts', id, { amount: parseAmount(amount), paid, updatedAt: store.now() });
   };
 
   const changed = JSON.stringify(f) !== JSON.stringify(start);
@@ -773,7 +785,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
             inputMode="decimal"
             placeholder="e.g. 200"
             value={amount}
-            disabled={amountStart === undefined}
+            disabled={payStart === undefined}
             onChange={(e) => typeAmount(e.target.value)}
             aria-invalid={!!amountErr}
             autoComplete="off"
@@ -781,6 +793,20 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
           />
           {amountErr ? <small className="c-err" role="alert">{amountErr}</small> : <small className="c-hint">Not shown on the kitchen tablet.</small>}
         </Field>
+      )}
+      {showAmount && (
+        <div className="t-field">
+          <span>Payment</span>
+          <Segmented
+            label="Payment"
+            value={paid ? 'paid' : 'unpaid'}
+            onChange={(v) => payStart !== undefined && setPaid(v === 'paid')}
+            options={[
+              { value: 'unpaid', label: 'Not paid' },
+              { value: 'paid', label: 'Paid' },
+            ]}
+          />
+        </div>
       )}
 
       {order && (

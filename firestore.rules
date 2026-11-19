@@ -48,7 +48,8 @@ service cloud.firestore {
     match /orderAmounts/{id} {
       allow read, delete: if signedIn();
       allow create, update: if signedIn()
-        && request.resource.data.keys().hasOnly(['amount', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['amount', 'paid', 'updatedAt'])
+        && (!('paid' in request.resource.data) || request.resource.data.paid is bool)
         && (request.resource.data.amount == null
             || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
         && request.resource.data.updatedAt is number;

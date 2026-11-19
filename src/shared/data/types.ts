@@ -85,6 +85,8 @@ export interface CateringOrder {
 export interface OrderAmount {
   /** US dollars, e.g. 200 or 1250.5. null when cleared. */
   amount: number | null;
+  /** Whether the customer has paid. Missing on amounts saved before this was added: treat as not paid. */
+  paid?: boolean;
   updatedAt: number;
 }
 

@@ -283,3 +283,14 @@ describe('order amount (manager only)', () => {
     expect(Object.keys(orderFields(formFromOrder(withExtra)))).not.toContain('amount');
   });
 });
+
+import { payLabel } from './orders';
+describe('paid (manager only)', () => {
+  it('labels the card', () => {
+    expect(payLabel({ amount: 200, paid: true })).toBe('$200 · Paid');
+    expect(payLabel({ amount: 200, paid: false })).toBe('$200 · Not paid');
+    expect(payLabel({ amount: null, paid: true })).toBe('Paid');
+    expect(payLabel({ amount: null, paid: false })).toBe('');
+    expect(payLabel(undefined)).toBe('');
+  });
+});
