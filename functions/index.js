@@ -7,12 +7,11 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
-import { MENU_LINK, nextStatus, readFromPage, readToastMenu, readWithChrome, withTimeout } from './toastMenu.js';
+import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
 
 initializeApp();
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
@@ -83,55 +82,37 @@ export const orderReminder = onTaskDispatched(
 // ---------- Toast menu ----------
 
 /**
- * Reads the menu from Tabla's Toast ordering page and saves it to toastMenu/current (only when something
- * changed). Backup: a hidden Chrome. If both fail, the last good menu stays and, after two failed runs in a
- * row, the phones get one alert. Marks the status doc before starting, so a run that crashes still shows up.
+ * Kitchen tablet: once an hour its app reads Tabla's Toast ordering page (Toast blocks cloud servers, so the
+ * tablet does it over the restaurant's internet) and sends { menus } or { error } here. Saves the menu to
+ * toastMenu/current only when something changed, keeps toastMenu/status, and alerts the phones once if it keeps failing.
  */
-async function runToastSync() {
+export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, maxInstances: 2 }, async (req) => {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  if (JSON.stringify(req.data ?? null).length > 3_000_000) throw new HttpsError('invalid-argument', 'Menu report too big.');
   const db = getFirestore();
   const currentRef = db.doc('toastMenu/current');
   const statusRef = db.doc('toastMenu/status');
   const now = Date.now();
-  const prev = (await statusRef.get()).data() ?? null;
-  await statusRef.set({ ...(prev ?? {}), lastTryAt: now, running: true });
+  const source = 'kitchen tablet';
+  const { menu, error } = readReport(req.data);
   let result;
-  try {
-    const { menu, source } = await readToastMenu([
-      ['page', () => readFromPage()],
-      ['chrome', () => withTimeout(readWithChrome(), 150_000, 'Chrome took too long')],
-    ]);
+  if (menu) {
     const saved = await currentRef.get();
     if (saved.get('hash') !== menu.hash) {
       await currentRef.set({ ...menu, changedAt: now, source });
-      logger.info(`syncToastMenu: menu changed (${menu.itemCount} items, ${menu.soldOutCount} sold out) via ${source}`);
+      logger.info(`reportToastMenu: menu changed (${menu.itemCount} items, ${menu.soldOutCount} sold out)`);
     }
     result = { ok: true, source, itemCount: menu.itemCount, soldOutCount: menu.soldOutCount };
-  } catch (e) {
-    logger.warn('syncToastMenu: could not read the Toast menu', e?.message ?? e);
-    result = { ok: false, error: String(e?.message ?? e) };
+  } else {
+    logger.warn('reportToastMenu: the tablet could not read the Toast menu', error);
+    result = { ok: false, error };
   }
+  const prev = (await statusRef.get()).data() ?? null;
   const { status, alert } = nextStatus(prev, result, now);
-  await statusRef.set({ ...status, running: false });
+  await statusRef.set(status);
   if (alert) await sendToAllDevices({ ...alert, link: MENU_LINK }, 'toast-menu');
   return result;
-}
-
-/** Every hour, on the hour (Phoenix time). */
-export const syncToastMenu = onSchedule(
-  { schedule: '0 * * * *', timeZone: TIME_ZONE, memory: '2GiB', timeoutSeconds: 300, maxInstances: 1, retryCount: 0 },
-  async () => {
-    await runToastSync();
-  },
-);
-
-/** Runs the same sync right away and says what happened (for checking it works, without waiting an hour). */
-export const syncToastMenuNow = onCall(
-  { memory: '2GiB', timeoutSeconds: 300, maxInstances: 1 },
-  async (req) => {
-    if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
-    return runToastSync();
-  },
-);
+});
 
 /** Sends one alert to every phone that turned alerts on, 500 at a time, and forgets phones that are gone. Returns how many got it. */
 async function sendToAllDevices(alert, tag, urgency = 'normal') {

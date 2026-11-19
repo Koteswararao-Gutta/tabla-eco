@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu, settleKilled, wasKilled, withTimeout } from './toastMenu.js';
+import { ALERT_AFTER_MS, menuFromState, nextStatus, readReport, settleKilled, wasKilled } from './toastMenu.js';
 
-// Shaped like Tabla's real ordering page (checked 2026-11-18): the menu sits in window.__OO_STATE__.
+// Shaped like the menu data on Tabla's real ordering page (checked 2026-11-18, window.__OO_STATE__).
 const state = {
   ROOT_QUERY: { __typename: 'Query' },
   'Menu:bc69': {
@@ -25,14 +25,6 @@ const state = {
     ],
   },
 };
-const page = (s) =>
-  `<html><script>window.__APOLLO_STATE__ = {"a":{"b":"}"}};\n    window.__OO_STATE__ = ${JSON.stringify(s)};\n    window.__FLAGS_STATE__ = {};</script></html>`;
-
-test('readPageState finds the menu data even with braces and quotes inside text', () => {
-  assert.deepEqual(readPageState(page(state)), state);
-  assert.equal(readPageState('<html>no data</html>'), null);
-  assert.equal(readPageState('window.__OO_STATE__ = {"cut off'), null);
-});
 
 test('menuFromState gives groups with name, price, sold out and picture', () => {
   const menu = menuFromState(state);
@@ -59,29 +51,6 @@ test('the hash changes when a price or sold-out mark changes, and only then', ()
   const soldOut = structuredClone(state);
   soldOut['Menu:bc69'].groups[0].items[0].outOfStock = true;
   assert.notEqual(menuFromState(soldOut).hash, a);
-});
-
-test('readFromPage tries a phone browser when the first try is refused', async () => {
-  const seen = [];
-  const fakeFetch = async (_url, { headers }) => {
-    seen.push(headers['User-Agent']);
-    return seen.length === 1 ? { ok: false, status: 403 } : { ok: true, text: async () => page(state) };
-  };
-  const menu = await readFromPage(fakeFetch, 'https://example.test');
-  assert.equal(menu.itemCount, 3);
-  assert.equal(seen.length, 2);
-  assert.match(seen[1], /iPhone/);
-  await assert.rejects(readFromPage(async () => ({ ok: true, text: async () => '<html></html>' }), 'x'), /no menu/);
-});
-
-test('readToastMenu falls back to the next way and reports every reason', async () => {
-  const menu = menuFromState(state);
-  const ok = await readToastMenu([['page', async () => { throw new Error('page answered 403'); }], ['chrome', async () => menu]]);
-  assert.equal(ok.source, 'chrome');
-  await assert.rejects(
-    readToastMenu([['page', async () => { throw new Error('a'); }], ['chrome', async () => { throw new Error('b'); }]]),
-    /page: a; chrome: b/,
-  );
 });
 
 test('nextStatus alerts once after failing for an hour, and once when it works again', () => {
@@ -130,7 +99,13 @@ test('a run killed before it saved counts as a failed try, so repeated kills sti
   assert.deepEqual(settleKilled(null), { status: null, alert: null });
 });
 
-test('withTimeout gives up on a slow step but passes a fast one through', async () => {
-  assert.equal(await withTimeout(Promise.resolve(5), 50, 'slow'), 5);
-  await assert.rejects(withTimeout(new Promise(() => {}), 20, 'Chrome took too long'), /took too long/);
+
+test('readReport turns the tablet report into a menu, or a plain reason', () => {
+  const ok = readReport({ menus: [state['Menu:bc69']] });
+  assert.equal(ok.menu.itemCount, 3);
+  assert.equal(ok.menu.hash, menuFromState(state).hash);
+  assert.deepEqual(readReport({ error: 'page answered 403' }), { error: 'page answered 403' });
+  assert.match(readReport({ menus: [{ groups: [] }] }).error, /no menu items/);
+  assert.match(readReport({}).error, /no menu/);
+  assert.match(readReport(null).error, /no menu/);
 });

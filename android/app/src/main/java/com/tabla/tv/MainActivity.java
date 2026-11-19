@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
  * First launch asks which screen this device is. Press Back 5 times quickly to choose again.
  * Recovers by itself from internet drops and browser crashes, and reloads once a night at 4 AM
  * to pick up updates. Watchdog brings it back to the front if something else is showing.
+ * On the kitchen tablet it also reads the Toast menu once an hour (see ToastReader).
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private WebView web;
+    private ToastReader toast;
     private boolean loadFailed;
     private int backPresses;
     private long firstBackAt;
@@ -241,6 +243,18 @@ public class MainActivity extends Activity {
         setContentView(web);
         hideBars();
         web.loadUrl(SITE + route);
+        if ("kitchen".equals(route)) {
+            toast = new ToastReader(this, report -> deliverToast(report, 1));
+            toast.start();
+        }
+    }
+
+    /** Hands the Toast menu report to the kitchen page, which sends it to the server. Retries if the page isn't ready. */
+    private void deliverToast(String report, int attempt) {
+        if (web == null) return;
+        web.evaluateJavascript("window.tablaToastMenu ? window.tablaToastMenu(" + report + ") : false", ok -> {
+            if (!"true".equals(ok) && attempt < 3) handler.postDelayed(() -> deliverToast(report, attempt + 1), 60_000);
+        });
     }
 
     private void failed() {
@@ -291,6 +305,10 @@ public class MainActivity extends Activity {
 
     private void destroyWeb() {
         handler.removeCallbacks(retry);
+        if (toast != null) {
+            toast.stop();
+            toast = null;
+        }
         if (web != null) {
             web.destroy();
             web = null;

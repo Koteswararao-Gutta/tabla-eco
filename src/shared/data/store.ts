@@ -54,11 +54,18 @@ export interface DataStore {
   /** Same as readOrderPhoto, for a customer's text message or email pasted into the New order sheet. */
   readOrderText(text: string): Promise<ScannedOrder>;
 
+  /** Kitchen tablet app: sends the menu it read from Tabla's Toast ordering page (or why it couldn't) to the
+   *  server, which saves it to toastMenu/current. Throws when it can't reach the server. LocalStore does nothing. */
+  reportToastMenu(report: ToastMenuReport): Promise<void>;
+
   /** Whether this device gets the 1-hour catering alerts. When on, also refreshes the device's alert address. */
   alertState(): Promise<AlertState>;
   /** Asks the person for permission (must be called from a tap) and registers this device for alerts. */
   turnOnAlerts(): Promise<AlertState>;
 }
+
+/** What the kitchen tablet app read from Toast: the page's menu data as is, or why it couldn't. */
+export type ToastMenuReport = { menus: unknown[] } | { error: string };
 
 /** Removes undefined top-level values (Firestore rejects them). */
 export function clean<T extends object>(o: T): T {

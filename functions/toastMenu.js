@@ -1,5 +1,5 @@
-// Toast menu: reads the menu (items, prices, sold out) from Tabla's public Toast online ordering page.
-// The page has the whole menu built in as data (window.__OO_STATE__), so no Toast API plan is needed.
+// Toast menu: the kitchen tablet's app opens Tabla's public Toast online ordering page once an hour
+// (Toast blocks cloud servers) and sends the menu data built into it (window.__OO_STATE__) here.
 // Kept free of Firebase so it can be tested on its own.
 import { createHash } from 'node:crypto';
 
@@ -11,39 +11,6 @@ export const MENU_LINK = 'https://koteswararao-gutta.github.io/tabla-eco/#/manag
 
 /** Tell the kitchen/manager phones after the menu has failed to update for this long. */
 export const ALERT_AFTER_MS = 60 * 60_000; // two failed hourly runs in a row
-
-const BROWSERS = [
-  // Desktop Chrome first, then a phone (Toast serves the same data to both).
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1',
-];
-
-/** Pulls the JSON assigned to `window.<name> = {...}` out of the page's HTML, or null if it isn't there. */
-export function readPageState(html, name = '__OO_STATE__') {
-  const at = html.indexOf(`window.${name}`);
-  if (at < 0) return null;
-  const start = html.indexOf('{', at);
-  if (start < 0) return null;
-  // Walk to the matching closing brace, skipping braces inside strings.
-  let depth = 0;
-  let inString = false;
-  for (let i = start; i < html.length; i++) {
-    const c = html[i];
-    if (inString) {
-      if (c === '\\') i++;
-      else if (c === '"') inString = false;
-    } else if (c === '"') inString = true;
-    else if (c === '{') depth++;
-    else if (c === '}' && --depth === 0) {
-      try {
-        return JSON.parse(html.slice(start, i + 1));
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
-}
 
 const text = (v) => (typeof v === 'string' ? v.trim() : '');
 const money = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
@@ -92,81 +59,19 @@ export function menuFromState(state) {
   };
 }
 
-/** Way 1: load the page like a browser and read the menu built into it. */
-export async function readFromPage(fetchFn = fetch, url = TOAST_PAGE) {
-  let lastError = 'no menu found';
-  for (const ua of BROWSERS) {
-    try {
-      const res = await fetchFn(url, {
-        headers: { 'User-Agent': ua, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) {
-        lastError = `page answered ${res.status}`;
-        continue;
-      }
-      const menu = menuFromState(readPageState(await res.text()));
-      if (menu) return menu;
-      lastError = 'page loaded but had no menu in it';
-    } catch (e) {
-      lastError = `could not load the page (${e?.message ?? e})`;
-    }
-  }
-  throw new Error(lastError);
-}
+/** Most menus one report may carry (Toast pages normally have one). */
+export const MAX_MENUS = 10;
 
-/** How long the hidden Chrome waits for the page, then for the menu data in it. */
-export const CHROME_LOAD_MS = 60_000;
-export const CHROME_MENU_MS = 45_000;
-
-/** Way 2 (backup): open the page in a hidden Chrome, the same as a normal visitor, and read the menu from it. */
-export async function readWithChrome(url = TOAST_PAGE) {
-  const [{ default: chromium }, { default: puppeteer }] = await Promise.all([
-    import('@sparticuz/chromium'),
-    import('puppeteer-core'),
-  ]);
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: true,
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(BROWSERS[0]);
-    // Worst case: page fetch (2 x 20 s) + Chrome start + 60 s + 45 s, inside the function's 300 s limit.
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: CHROME_LOAD_MS });
-    await page.waitForFunction(() => Boolean(window.__OO_STATE__), { timeout: CHROME_MENU_MS }).catch(() => {});
-    const state = await page.evaluate(() => window.__OO_STATE__ ?? null);
-    const menu = menuFromState(state) ?? menuFromState(readPageState(await page.content()));
-    if (!menu) throw new Error('Chrome opened the page but found no menu');
-    return menu;
-  } finally {
-    await browser.close().catch(() => {});
-  }
-}
-
-/** Rejects with `message` if `promise` takes longer than `ms`. */
-export function withTimeout(promise, ms, message) {
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(message)), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
-
-/** Tries each way in turn. Returns { menu, source } or throws with every way's reason. */
-export async function readToastMenu(ways) {
-  const reasons = [];
-  for (const [source, read] of ways) {
-    try {
-      return { menu: await read(), source };
-    } catch (e) {
-      reasons.push(`${source}: ${e?.message ?? e}`);
-    }
-  }
-  throw new Error(reasons.join('; '));
+/**
+ * The kitchen tablet's report: { menus: [Toast Menu objects from the page] } or { error: '...' }.
+ * Returns { menu } (our plain menu), or { error } with a plain reason.
+ */
+export function readReport(data) {
+  if (data && typeof data.error === 'string') return { error: data.error.slice(0, 300) || 'unknown error' };
+  const menus = Array.isArray(data?.menus) ? data.menus.slice(0, MAX_MENUS) : null;
+  if (!menus) return { error: 'the report had no menu in it' };
+  const menu = menuFromState(Object.fromEntries(menus.map((m, i) => [`Menu:${i}`, m])));
+  return menu ? { menu } : { error: 'the Toast page had no menu items' };
 }
 
 /**
