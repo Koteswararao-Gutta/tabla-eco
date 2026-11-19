@@ -27,9 +27,10 @@ Any TV screen (TV 1 to TV 5) can run on any of the TV devices; you pick it when 
 2. **Install:** open Downloader, type the download address above, install, Open.
 3. **Choose the screen** (TV 1 to TV 5). The bottom of this page shows "Web viewer: Chrome N". If it shows a red "too old" warning, update **Android System WebView** in the Play Store and restart.
 4. **Auto-start:** on the same page press "Allow auto-start" and turn on "Display over other apps" for Tabla (or Settings > Apps > Special app access > Display over other apps). If the box has no such setting, use a computer with adb (as for Fire TV below): `adb connect <box-ip>:5555`, then `adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow`.
-5. **Tabla as the home app (optional, best):** if pressing Home shows "Choose a home app", pick Tabla > Always. Most Google TV boxes don't ask; then, from a computer with adb: `adb shell cmd package set-home-activity com.tabla.tv/.MainActivity`. To undo it, uninstall Tabla.
-6. **Never sleep:** Settings > System > Energy (or Power & energy) > "Turn off display" / "When inactive": Never. Settings > System > Ambient mode (screensaver): Off.
-7. **On the Vizio:** Settings > System > Power Mode: Quick Start. Turn off Sleep Timer, Auto Power Off and any Eco / energy-saving mode. Keep CEC on (System > CEC) so the Vizio remote turns both on together.
+5. **Automatic updates:** on the same page press "Allow automatic updates" and turn it on for Tabla (Settings > Apps > Special app access > Install unknown apps > Tabla). The button is gone once it is allowed.
+6. **Tabla as the home app (optional, best):** if pressing Home shows "Choose a home app", pick Tabla > Always. Most Google TV boxes don't ask; then, from a computer with adb: `adb shell cmd package set-home-activity com.tabla.tv/.MainActivity`. To undo it, uninstall Tabla.
+7. **Never sleep:** Settings > System > Energy (or Power & energy) > "Turn off display" / "When inactive": Never. Settings > System > Ambient mode (screensaver): Off.
+8. **On the Vizio:** Settings > System > Power Mode: Quick Start. Turn off Sleep Timer, Auto Power Off and any Eco / energy-saving mode. Keep CEC on (System > CEC) so the Vizio remote turns both on together.
 
 ## Fire TV Stick
 
@@ -46,6 +47,7 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
    adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow
    ```
    Accept the "Allow USB debugging?" prompt on the TV the first time.
+   **Automatic updates:** Settings > My Fire TV > Developer options > Install unknown apps > **Tabla**: ON.
 5. **Never sleep:** Settings > Display & Sounds (or Display & Audio) > Screensaver: Start time **Never**, Sleep **Never**. Turn off any "Energy saver" / auto power-off. Settings > Display & Sounds > Power Controls / HDMI CEC Device Control: ON.
 6. **On the TV itself:** turn off its own sleep timer, auto power-off and eco mode.
 
@@ -54,7 +56,7 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 ## Android tablet (kitchen)
 
 1. Settings > Apps > (your browser or Files app) > Install unknown apps: Allow. Open the download address above in Chrome and install.
-2. Open Tabla, choose **Kitchen tablet**, press "Allow auto-start" and allow it.
+2. Open Tabla, choose **Kitchen tablet**, press "Allow auto-start" and allow it, then "Allow automatic updates" and allow it.
 3. **Tabla as home:** Settings > Apps > Default apps > Home app > Tabla.
 4. Settings > Apps > Tabla > Battery: **Unrestricted** (not optimised). Display > Screen timeout: the longest. Security > Screen lock: **None** (so it comes back after a power cut).
 5. **Sound:** the 1-hour reminder uses the **media** volume: turn media volume up. Keep **Do Not Disturb off** (if it must be on, allow media sounds). Leave the tablet plugged in.
@@ -69,7 +71,8 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 
 - **Menus, pictures, music, orders:** change them in the Manager app; the screens show them right away.
 - **The web app:** updates by itself. Each screen reloads once a night after 4 AM (or as soon as it is on again).
-- **The screen app (`tabla.apk`)** rarely changes. To update: download it again the same way and install; it installs over the old one and keeps the chosen screen. If Android says the app "conflicts" with an installed one (only for an early test copy), uninstall Tabla first, then install and choose the screen again.
+- **The screen app (`tabla.apk`):** updates itself. A few times a day it checks for a newer version and installs it; the screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?": press **Install** with the remote (if nobody does, it asks again the next day). The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
+- Copies installed before automatic updates existed (versions below 1.1000) must be updated by hand once: download and install again the same way. If Android says the app "conflicts" with an installed one (only for an early test copy), uninstall Tabla first, then install and choose the screen again.
 
 ## 24-hour test before opening day
 
