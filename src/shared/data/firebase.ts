@@ -23,13 +23,14 @@ import {
   persistentMultipleTabManager,
   serverTimestamp,
   setDoc as fsSet,
+  waitForPendingWrites,
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import { keepListening, scheduleClockSync } from './resync';
+import { keepListening, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
@@ -75,30 +76,42 @@ export class FirebaseStore implements DataStore {
     return Date.now() + this.offset;
   }
 
-  /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
   /** True when the offset was updated. Offline (or no answer within 10 s) keeps the last offset. */
   private async syncClock(): Promise<boolean> {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    // Without internet the write below waits (queued in Firestore's offline copy) until the internet is
+    // back. While one is still waiting, no new one is queued, so at most one clock write piles up.
+    const attempt = this.clockAttempt();
+    if (!attempt) return false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // An offline write waits for the server forever, so give up after a while.
     const timeout = new Promise<false>((r) => (timer = setTimeout(() => r(false), 10_000)));
-    const attempt = (async () => {
-      const ref = doc(this.db, 'clocks', deviceId());
-      const t0 = Date.now();
-      await fsSet(ref, { t: serverTimestamp() });
-      const snap = await getDocFromServer(ref);
-      const t1 = Date.now();
-      const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
-      if (!server || t1 - t0 >= 5000) return false;
-      this.offset = server - (t0 + t1) / 2;
-      return true;
-    })().catch(() => false);
     try {
       return await Promise.race([attempt, timeout]);
     } finally {
       clearTimeout(timer);
     }
   }
+
+  /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
+  private clockAttempt = singleFlight(async () => {
+    try {
+      // A clock write left waiting before a reload is still queued: wait for it rather than adding another.
+      if (clockWriteWaiting()) await waitForPendingWrites(this.db);
+      const ref = doc(this.db, 'clocks', deviceId());
+      const t0 = Date.now();
+      clockWriteWaiting(true);
+      await fsSet(ref, { t: serverTimestamp() });
+      clockWriteWaiting(false);
+      const snap = await getDocFromServer(ref);
+      const t1 = Date.now();
+      const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
+      if (!server || t1 - t0 >= 5000) return false;
+      this.offset = server - (t0 + t1) / 2;
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
   // ---------- documents ----------
   private ref(col: string, id: string) {
@@ -324,6 +337,16 @@ async function scanSize(photo: Blob): Promise<Blob> {
   canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
   return new Promise<Blob>((r, j) => canvas.toBlob((b) => (b ? r(b) : j(new Error('encode'))), 'image/jpeg', 0.85));
+}
+
+/** Remembers across reloads that a clock write is still queued (sent once the internet is back). */
+function clockWriteWaiting(set?: boolean): boolean {
+  try {
+    if (set !== undefined) set ? localStorage.setItem('tabla-clock-write', '1') : localStorage.removeItem('tabla-clock-write');
+    return localStorage.getItem('tabla-clock-write') === '1';
+  } catch {
+    return false;
+  }
 }
 
 /** A stable id for this device, used only for its clock document. */
