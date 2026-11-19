@@ -2,11 +2,21 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { seedIfEmpty } from '@shared/seed/seed';
+import { ErrorBoundary, TimeZoneNote } from '@shared/ui';
+
+// Test-only: `?crash` makes the app throw while drawing, to check the crash screen (local builds only).
+const crashTest = import.meta.env.VITE_STORE === 'local' && new URLSearchParams(location.search).has('crash');
+function Crash(): never {
+  throw new Error('Test crash');
+}
 
 seedIfEmpty().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        {crashTest ? <Crash /> : <App />}
+        <TimeZoneNote />
+      </ErrorBoundary>
     </StrictMode>,
   );
 });

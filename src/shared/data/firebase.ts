@@ -29,12 +29,12 @@ import {
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
+import { keepListening, scheduleClockSync } from './resync';
 import { vapidKey } from './firebaseConfig';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
-const CLOCK_REFRESH_MS = 60 * 60 * 1000;
 
 export class FirebaseStore implements DataStore {
   readonly mode = 'firebase' as const;
@@ -65,8 +65,9 @@ export class FirebaseStore implements DataStore {
         if (!auth.currentUser) tryIn();
       });
     });
-    this.ready.then(() => this.syncClock());
-    setInterval(() => this.syncClock(), CLOCK_REFRESH_MS);
+    // Every 30 s until the first sync works, then hourly; again when the internet returns or the
+    // device's own clock is changed.
+    this.ready.then(() => scheduleClockSync(() => this.syncClock(), { events: typeof window === 'undefined' ? null : window }));
   }
 
   // ---------- shared clock ----------
@@ -75,17 +76,27 @@ export class FirebaseStore implements DataStore {
   }
 
   /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
-  private async syncClock(): Promise<void> {
-    try {
+  /** True when the offset was updated. Offline (or no answer within 10 s) keeps the last offset. */
+  private async syncClock(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // An offline write waits for the server forever, so give up after a while.
+    const timeout = new Promise<false>((r) => (timer = setTimeout(() => r(false), 10_000)));
+    const attempt = (async () => {
       const ref = doc(this.db, 'clocks', deviceId());
       const t0 = Date.now();
       await fsSet(ref, { t: serverTimestamp() });
       const snap = await getDocFromServer(ref);
       const t1 = Date.now();
       const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
-      if (server && t1 - t0 < 5000) this.offset = server - (t0 + t1) / 2;
-    } catch {
-      // Offline: keep the last offset and try again at the next refresh.
+      if (!server || t1 - t0 >= 5000) return false;
+      this.offset = server - (t0 + t1) / 2;
+      return true;
+    })().catch(() => false);
+    try {
+      return await Promise.race([attempt, timeout]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -109,20 +120,34 @@ export class FirebaseStore implements DataStore {
 
   watchDoc<C extends CollectionName>(col: C, id: string, cb: (doc: WithId<Collections[C]> | null) => void): Unsubscribe {
     return this.later(() =>
-      onSnapshot(
-        this.ref(col, id),
-        (s) => cb(s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null),
-        (e) => console.warn('watchDoc', col, id, e.message),
+      keepListening(
+        (ok, fail) =>
+          onSnapshot(
+            this.ref(col, id),
+            (s) => {
+              ok();
+              cb(s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null);
+            },
+            fail,
+          ),
+        `watchDoc ${col}/${id}`,
       ),
     );
   }
 
   watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void): Unsubscribe {
     return this.later(() =>
-      onSnapshot(
-        collection(this.db, col),
-        (q) => cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>)),
-        (e) => console.warn('watchCollection', col, e.message),
+      keepListening(
+        (ok, fail) =>
+          onSnapshot(
+            collection(this.db, col),
+            (q) => {
+              ok();
+              cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>));
+            },
+            fail,
+          ),
+        `watchCollection ${col}`,
       ),
     );
   }

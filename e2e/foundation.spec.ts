@@ -31,3 +31,37 @@ test('a change in one window reaches another window', async ({ context }) => {
   });
   await expect.poll(() => b.evaluate(() => (window as unknown as { __seen: string[] }).__seen)).toContain('tabla:orders');
 });
+
+test('a crash shows a calm screen instead of a white page', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.goto('/?crash#/tv/1');
+  await expect(page.getByTestId('crash')).toHaveText('Restarting…');
+  await expect(page.locator('.t-crash-tv')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+  expect(errors.join('\n')).toContain('Test crash');
+
+  await page.goto('/?crash#/manager/catering');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reload' })).toBeVisible();
+});
+
+test('no time zone warning on Arizona time', async ({ context }) => {
+  const page = await openScreen(context, '/manager/catering');
+  await expect(page.getByRole('heading').first()).toBeVisible();
+  await expect(page.getByTestId('tz-note')).toHaveCount(0);
+});
+
+test.describe('device on another time zone', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('every screen warns, TVs with a small corner note', async ({ context }) => {
+    const phone = await openScreen(context, '/manager/catering');
+    await expect(phone.getByTestId('tz-note')).toHaveText(/time zone isn't Arizona/);
+    await expect(phone.getByTestId('tz-note')).toHaveClass('t-tz');
+    const kitchen = await openScreen(context, '/kitchen');
+    await expect(kitchen.getByTestId('tz-note')).toBeVisible();
+    const tv = await openScreen(context, '/tv/1');
+    await expect(tv.getByTestId('tz-note')).toHaveClass('t-tz-tv');
+  });
+});

@@ -3,6 +3,9 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { NavLink } from 'react-router-dom';
 import './theme.css';
 
+export { ErrorBoundary } from './ErrorBoundary';
+export { TimeZoneNote } from './TimeZoneNote';
+
 export function PageHeader({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
   return (
     <>
