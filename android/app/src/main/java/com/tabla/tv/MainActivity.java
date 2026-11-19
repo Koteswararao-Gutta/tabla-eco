@@ -20,6 +20,8 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -82,6 +84,16 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
             | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 28) {
+            // Use the whole glass, even beside a camera notch, so no black strip shows where the bar was.
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        // Someone swiped the bars into view: hide them again after a moment (some tablets keep them otherwise).
+        getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(flags -> {
+            if ((flags & View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) rehideSoon();
+        });
         String screen = prefs.getString("screen", null);
         if (screen == null) showChooser();
         else showScreen(screen);
@@ -428,11 +440,31 @@ public class MainActivity extends Activity {
         if (hasFocus && web != null) hideBars();
     }
 
+    /** Full screen: no status bar and no navigation bar. A swipe from the edge shows them for a moment only. */
     private void hideBars() {
-        getWindow().getDecorView().setSystemUiVisibility(
+        if (web == null) return; // the screen chooser keeps the bars, so the owner can reach settings
+        handler.removeCallbacks(rehide);
+        View decor = getWindow().getDecorView();
+        decor.setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Android 11+ tablets ignore the old flags above in some cases; this is the current way.
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController c = decor.getWindowInsetsController();
+            if (c != null) {
+                c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        }
+    }
+
+    private final Runnable rehide = this::hideBars;
+
+    private void rehideSoon() {
+        handler.removeCallbacks(rehide);
+        handler.postDelayed(rehide, 2500);
     }
 
     @Override
@@ -448,6 +480,7 @@ public class MainActivity extends Activity {
             // Chooser left open (e.g. the owner went into settings) and the quiet time is over: back to work.
             showScreen(screen);
         } else if (web != null) {
+            hideBars(); // back from another app, the lock screen or standby
             web.onResume();
             reloadIfStale(); // TV woke from standby after missing the 4 AM reload
         }
