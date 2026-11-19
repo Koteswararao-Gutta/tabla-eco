@@ -130,14 +130,111 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await context.close();
 });
 
-test('kitchen PIN stays in memory only: a reload locks it again', async ({ browser }) => {
+test('kitchen stays unlocked on this tablet through a reload, until Lock or a new PIN', async ({ browser }) => {
   const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
   const kitchen = await openScreen(context, '/kitchen');
   await typePin(kitchen, '1234');
   await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await shot(kitchen, 'kitchen-1024');
+  // The nightly reload (or a crash) keeps it unlocked.
+  await kitchen.reload();
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toHaveCount(0);
+  // Remembered on this device only, and never the PIN itself.
+  const kept = await kitchen.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('tabla-device:')));
+  expect(kept).toHaveLength(1);
+  expect(kept[0][1]).not.toContain('1234');
+  // Lock locks it, also after a reload.
+  await kitchen.getByRole('button', { name: 'Lock' }).click();
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
   await kitchen.reload();
   await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await typePin(kitchen, '1234');
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  // The manager changes the PIN: the tablet locks at once, and only the new PIN opens it.
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:singletons') || '{}');
+    t.settings = { ...(t.settings || { restaurantName: 'Tabla' }), kitchenPin: '4321' };
+    localStorage.setItem('tabla:singletons', JSON.stringify(t));
+  });
+  await kitchen.reload(); // a reload, or the live update, both show the PIN screen
+  await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await typePin(kitchen, '1234');
+  await expect(kitchen.getByText("That PIN didn't work")).toBeVisible();
+  await typePin(kitchen, '4321');
+  await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await context.close();
+});
+
+test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  // Count chimes and sound wake-ups with a stand-in for the browser's sound output.
+  await context.addInitScript(() => {
+    const w = window as unknown as { chimeNotes: number; audioResumes: number; AudioContext: unknown };
+    w.chimeNotes = 0;
+    w.audioResumes = 0;
+    const Real = window.AudioContext;
+    w.AudioContext = class extends Real {
+      createOscillator() {
+        w.chimeNotes++;
+        return super.createOscillator();
+      }
+      resume() {
+        w.audioResumes++;
+        return super.resume();
+      }
+    };
+  });
+  const page = await context.newPage();
+  await page.clock.install();
+  await page.goto('/#/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed';
+    const now = Date.now();
+    t.soon = { id: 'soon', customerName: 'Anita Rao', phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + 30 * 60_000 };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  const banner = page.getByTestId('kitchen-reminder');
+  await expect(banner).toContainText('Anita Rao pickup at'); // locked, still shown
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await shot(page, 'kitchen-reminder-locked');
+  const notes = () => page.evaluate(() => (window as unknown as { chimeNotes: number }).chimeNotes);
+  const first = await notes();
+  expect(first).toBeGreaterThan(0); // rang once
+  // A tap anywhere wakes the sound.
+  await page.mouse.click(5, 760);
+  expect(await page.evaluate(() => (window as unknown as { audioResumes: number }).audioResumes)).toBeGreaterThan(0);
+  await page.clock.runFor(46_000);
+  expect(await notes()).toBe(first * 2); // rang again
+  await page.clock.runFor(45_000);
+  expect(await notes()).toBe(first * 3);
+  // Got it works without the PIN, and the ringing stops.
+  await banner.getByRole('button', { name: 'Got it' }).click();
+  await expect(banner).toHaveCount(0);
+  await page.clock.runFor(100_000);
+  expect(await notes()).toBe(first * 3);
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: Show all orders goes back to open orders after 3 minutes with no touch', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  await page.clock.install();
+  await page.goto('/#/kitchen');
+  await typePin(page, '1234');
+  await page.getByRole('button', { name: 'Show all orders' }).click();
+  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
+  await page.clock.runFor(120_000);
+  await page.mouse.click(640, 700); // a touch restarts the 3 minutes
+  await page.clock.runFor(120_000);
+  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
+  await page.clock.runFor(61_000);
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await context.close();
 });
 
@@ -196,16 +293,15 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
   expect((await gotIt.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   await shot(page, 'kitchen-reminder');
 
-  // Not shown on the all orders view.
+  // Also shown on the all orders view.
   await page.getByRole('button', { name: 'Show all orders' }).click();
-  await expect(banner).toHaveCount(0);
+  await expect(banner).toContainText('Anita Rao');
   await page.getByRole('button', { name: '← Back to open orders' }).click();
 
   await gotIt.click();
   await expect(banner).toHaveCount(0);
   // Saved on the order: still gone after a reload (and on any other kitchen tablet).
   await page.reload();
-  await typePin(page, '1234');
   await expect(page.getByRole('article', { name: 'Order for Anita Rao' })).toBeVisible();
   await expect(banner).toHaveCount(0);
 
@@ -216,7 +312,6 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
     localStorage.setItem('tabla:orders', JSON.stringify(t));
   });
   await page.reload();
-  await typePin(page, '1234');
   await expect(banner).toContainText('Anita Rao');
   await context.close();
 });

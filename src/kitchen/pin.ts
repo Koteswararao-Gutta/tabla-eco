@@ -20,3 +20,18 @@ export function press(entry: string, key: Key): string {
   if (/^\d$/.test(key) && entry.length < PIN_LENGTH) return entry + key;
   return entry;
 }
+
+/** A short fingerprint of the PIN, kept with "unlocked" on this tablet (not the PIN itself).
+ *  When the manager changes the PIN, the fingerprint no longer matches and the tablet locks. */
+export function pinFingerprint(pin: string): string {
+  let h = 0x811c9dc5; // FNV-1a
+  for (const c of 'tabla-kitchen:' + pin) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/** Unlocked on this tablet: the saved fingerprint matches the current PIN. */
+export const isUnlocked = (saved: string | null, pin: string | undefined): boolean =>
+  !!saved && pin !== undefined && saved === pinFingerprint(pin);
