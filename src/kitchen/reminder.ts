@@ -103,6 +103,18 @@ export function wakeAudio(): void {
   audioContext();
 }
 
+/** Sound is on: the browser lets the chime play. Also true when there is no sound output at all
+ *  (nothing a tap could fix). */
+export const soundIsOn = (): boolean => !audio || audio.state === 'running';
+
+/** Calls `cb` whenever sound turns on or off. Starts the sound output (it may stay off until a tap). */
+export function onSoundChange(cb: () => void): () => void {
+  const ctx = audioContext();
+  if (!ctx) return () => {};
+  ctx.addEventListener('statechange', cb);
+  return () => ctx.removeEventListener('statechange', cb);
+}
+
 /** Peak loudness of each note (1 is the maximum). The notes never overlap, so it never clips. */
 export const CHIME_PEAK = 0.8;
 
