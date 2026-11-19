@@ -135,6 +135,13 @@ export interface LoopAnchor {
   firstSlotId?: string | null;
 }
 
+/** The Toast online menu, saved by the server from the kitchen tablet's hourly read (toastMenu/current).
+ *  Read only: the server writes it. Fields may be missing on an old or partial save. */
+export interface ToastMenu {
+  groups?: { id: string; name: string; items: { id: string; name: string; description?: string }[] }[];
+  changedAt?: number;
+}
+
 /** Single documents, by id. Use useSingleton / saveSingleton from @shared/data. */
 export interface Singletons {
   music: MusicSettings;
@@ -157,5 +164,7 @@ export interface Collections {
   /** One doc per screen id: when it last reported in. Kept apart from `screens` so a
    *  heartbeat doesn't wake every TV's listener (Firestore free-plan read limits). */
   heartbeats: { lastSeen: number };
+  /** Read only (the server writes it): use useDoc('toastMenu', 'current'). */
+  toastMenu: ToastMenu;
 }
 export type CollectionName = keyof Collections;

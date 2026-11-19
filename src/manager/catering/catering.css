@@ -55,7 +55,8 @@
 .c-toast .t-btn { flex: none; }
 
 /* Header: calendar icon + New order */
-.c-head-actions { display: flex; gap: 8px; align-items: center; }
+.c-head-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.c-head-actions .t-btn { white-space: nowrap; }
 .c-cal-btn { min-width: var(--tap); min-height: var(--tap); padding: 0 12px; font-size: 1.25rem; }
 
 /* Same-day orders under date and time */

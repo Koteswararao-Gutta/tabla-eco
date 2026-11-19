@@ -1,9 +1,10 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ScreenSurface } from '@shared/ui';
+import { Logo, ScreenSurface } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
 import { EditHistory, EditOrderSheet } from '../manager/catering';
+import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
 import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
@@ -243,6 +244,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   // if it is deleted elsewhere, the sheet closes.
   const [editing, setEditing] = useState<string | null>(null);
   const editOrder = editing ? orders?.find((o) => o.id === editing) ?? null : null;
+  const [tagsFor, setTagsFor] = useState<Order | null>(null);
 
   const undoComplete = async () => {
     const o = undo && orders?.find((x) => x.id === undo.id);
@@ -257,6 +259,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
     <div className="k-board" ref={board}>
       <header className="k-bar">
         <div className="k-bar-title">
+          <Logo className="k-logo" />
           <h1>{showAll ? 'All orders' : 'Open orders'}</h1>
           {!showAll && orders && <span className="k-count">{open.length}</span>}
           {!online && (
@@ -293,11 +296,12 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       ) : (
         <div className="k-grid">
           {open.map((o) => (
-            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} onEdit={() => setEditing(o.id)} />
+            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} onEdit={() => setEditing(o.id)} onTags={() => setTagsFor(o)} />
           ))}
         </div>
       )}
 
+      {tagsFor && <TagsSheet order={tagsFor} now={now} onClose={() => setTagsFor(null)} />}
       {editOrder && <EditOrderSheet key={editOrder.id} order={editOrder} now={now} by="kitchen" onClose={() => setEditing(null)} onCompleted={showUndo} />}
 
       {undo && (
@@ -314,7 +318,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   );
 }
 
-function OrderCard({ order: o, now, onComplete, onEdit }: { order: Order; now: number; onComplete: () => void; onEdit: () => void }) {
+function OrderCard({ order: o, now, onComplete, onEdit, onTags }: { order: Order; now: number; onComplete: () => void; onEdit: () => void; onTags: () => void }) {
   const cd = countdown(o.dueAt, now);
   const day = dayLabel(o.dueAt, now);
   const last = lastEdit(o);
@@ -359,6 +363,9 @@ function OrderCard({ order: o, now, onComplete, onEdit }: { order: Order; now: n
       <div className="k-actions">
         <button className="t-btn k-edit" onClick={onEdit}>
           Edit
+        </button>
+        <button className="t-btn k-edit" onClick={onTags}>
+          Print tags
         </button>
         <button className="t-btn primary k-done" onClick={onComplete}>
           Mark completed

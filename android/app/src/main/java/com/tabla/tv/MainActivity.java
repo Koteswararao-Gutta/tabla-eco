@@ -13,12 +13,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.print.PrintAttributes;
+import android.print.PrintManager;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -42,6 +45,7 @@ import java.util.regex.Pattern;
  * to pick up updates. Watchdog brings it back to the front if something else is showing.
  * Updater installs newer versions of this app by itself.
  * On the kitchen tablet it also reads the Toast menu once an hour (see ToastReader).
+ * Pages can print (catering name tags) through window.TablaPrint, since a web view has no window.print().
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
@@ -67,6 +71,8 @@ public class MainActivity extends Activity {
     private int backPresses;
     private long firstBackAt;
     private long lastLoadAt;
+    /** True while Android's print screen is open, so the watchdog leaves it alone. */
+    private boolean printing;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -254,6 +260,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 21) CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
         web.setWebChromeClient(new WebChromeClient());
+        web.addJavascriptInterface(new PrintBridge(), "TablaPrint");
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
@@ -278,6 +285,28 @@ public class MainActivity extends Activity {
         if ("kitchen".equals(route)) {
             toast = new ToastReader(this, report -> deliverToast(report, 1));
             toast.start();
+        }
+    }
+
+    /** window.TablaPrint.print(name): opens Android's print screen for the page as it prints (letter paper). */
+    private class PrintBridge {
+        @JavascriptInterface
+        public void print(String jobName) {
+            handler.post(() -> {
+                if (web == null) return;
+                String name = jobName == null || jobName.trim().isEmpty() ? "Tabla" : jobName.trim();
+                try {
+                    PrintManager pm = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                    if (pm == null) return;
+                    printing = true;
+                    Watchdog.quiet(MainActivity.this, true); // the print screen is another app: don't pull Tabla back over it
+                    pm.print(name, web.createPrintDocumentAdapter(name),
+                        new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.NA_LETTER).build());
+                } catch (Exception e) {
+                    printing = false;
+                    Watchdog.quiet(MainActivity.this, false);
+                }
+            });
         }
     }
 
@@ -383,6 +412,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         Watchdog.inFront = true;
+        if (printing) {
+            printing = false; // back from the print screen
+            Watchdog.quiet(this, false);
+        }
         String screen = prefs.getString("screen", null);
         if (web == null && screen != null && !Watchdog.isQuiet(this)) {
             // Chooser left open (e.g. the owner went into settings) and the quiet time is over: back to work.
