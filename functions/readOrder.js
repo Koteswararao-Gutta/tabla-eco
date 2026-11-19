@@ -89,15 +89,22 @@ export async function readOrderPhoto(client, data) {
 export const UNREADABLE = "Couldn't read this. Please try another photo or type the order in.";
 export const UNREADABLE_TEXT = "Couldn't read this. Please check the message or type the order in.";
 
+/** What a 400 from the API says when the problem is the photo or message itself (not our setup). */
+const INPUT_PROBLEM = /image|media type|base64|too large|too long|exceed|refus/i;
+
 /**
- * Sorts a failure: 'unreadable' when trying again with the same photo won't help (the API refused the
- * request or image, the model refused, or no form came back), 'unavailable' for network trouble,
- * overload or server errors that may pass.
+ * Sorts a failure:
+ *  - 'unreadable': trying again with the same photo won't help (the image couldn't be processed or is too
+ *    large, the model refused, or no form came back),
+ *  - 'setup': any other 400 (a wrong model name or setting: our mistake, needs a fix in the code),
+ *  - 'unavailable': network trouble, overload or server errors that may pass.
  */
 export function readError(e) {
   if (e?.unreadable) return 'unreadable';
   const status = e?.status;
-  if (status === 400 || status === 413) return 'unreadable';
-  if (status === undefined && /Failed to parse structured output/.test(e?.message ?? '')) return 'unreadable';
+  const message = `${e?.message ?? ''} ${e?.error?.error?.message ?? ''}`;
+  if (status === 413) return 'unreadable';
+  if (status === 400) return INPUT_PROBLEM.test(message) ? 'unreadable' : 'setup';
+  if (status === undefined && /Failed to parse structured output/.test(message)) return 'unreadable';
   return 'unavailable';
 }
