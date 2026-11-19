@@ -30,6 +30,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Shown only if the app never starts (e.g. a very old TV web viewer); hidden as soon as the app is on screen. -->
+    <div id="boot-fail" hidden style="position: fixed; top: 0; left: 0; right: 0; padding: 48px; color: #888; font: 24px/1.4 sans-serif">
+      This screen's web viewer is too old or failed to start. Update 'Android System WebView' (or Chrome) and restart.
+    </div>
+    <style>#root:not(:empty) ~ #boot-fail { display: none; }</style>
+    <script>
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && !root.firstChild) document.getElementById('boot-fail').hidden = false;
+      }, 20000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -33,6 +33,9 @@ jobs:
         with:
           gradle-version: 8.14.3
       - run: gradle -p android assembleRelease --no-daemon
+        env: # signed with android/keystore/tabla-release.jks, so updates install over the old app
+          TABLA_VERSION_CODE: ${{ github.run_number }}
+          TABLA_VERSION_NAME: 1.${{ github.run_number }}
       - run: cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
       - uses: actions/upload-pages-artifact@v3
         with:
