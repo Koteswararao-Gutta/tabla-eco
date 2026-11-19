@@ -43,23 +43,23 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history: the app's version number counts commits that changed android/
           # The commit the tests passed on (not whatever main is by now).
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build
       # The Android screen app, served from the same site: <site>/tabla.apk
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: 8.14.3
       # The version only goes up when android/ changed, so installed apps update themselves (Updater.java)
@@ -73,8 +73,8 @@ jobs:
       - run: |
           cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
           echo '{"versionCode": ${{ steps.apkver.outputs.code }}}' > dist/tabla-version.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
