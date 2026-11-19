@@ -16,7 +16,8 @@
 
 .c-form .t-seg { display: flex; }
 .c-form .t-seg button { flex: 1; min-height: 44px; }
-.c-people { max-width: 160px; }
+.c-people, .c-amount { max-width: 160px; }
+.c-hint { color: var(--muted); font-size: 0.85rem; }
 .c-notes.t-textarea { min-height: 72px; }
 .c-err { color: var(--bad); font-size: 0.88rem; font-weight: 500; }
 .c-err-summary { margin: 0; }

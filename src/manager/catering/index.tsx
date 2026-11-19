@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, describeChanges, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
+  amountError, amountInput, amountLabel, dayLabel, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -46,6 +46,9 @@ function useSaver() {
 
 export default function Catering() {
   const orders = useCollection('orders');
+  // Manager only: what each order costs (orderAmounts/{order id}). The kitchen never loads this.
+  const amounts = useCollection('orderAmounts');
+  const amountOf = (id: string): number | null | undefined => (amounts ? amounts.find((a) => a.id === id)?.amount ?? null : undefined);
   const now = useNow(30_000);
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
@@ -120,17 +123,17 @@ export default function Catering() {
               Tap “+ New order” to add one.
             </div>
           )}
-          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} showDate onOpen={openOrder} late />
-          <Group title="Today" orders={groups.today} now={now} onOpen={openOrder} />
-          <Group title="Tomorrow" orders={groups.tomorrow} now={now} onOpen={openOrder} />
-          <Group title="Later" orders={groups.later} now={now} showDate onOpen={openOrder} />
+          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} amountOf={amountOf} showDate onOpen={openOrder} late />
+          <Group title="Today" orders={groups.today} now={now} amountOf={amountOf} onOpen={openOrder} />
+          <Group title="Tomorrow" orders={groups.tomorrow} now={now} amountOf={amountOf} onOpen={openOrder} />
+          <Group title="Later" orders={groups.later} now={now} amountOf={amountOf} showDate onOpen={openOrder} />
 
           {past.length > 0 && (
             <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
               {showHistory ? 'Hide history' : `History (${past.length})`}
             </button>
           )}
-          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} showDate onOpen={openOrder} />}
+          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} amountOf={amountOf} showDate onOpen={openOrder} />}
         </div>
       )}
 
@@ -155,6 +158,7 @@ export default function Catering() {
         <OrderSheet
           key={editing!}
           order={editOrder}
+          amount={editOrder ? amountOf(editOrder.id) : null}
           day={newDay}
           now={now}
           onClose={() => setEditing(null)}
@@ -198,6 +202,7 @@ export default function Catering() {
               onClick={() =>
                 remove.run(async () => {
                   await store.deleteDoc('orders', deleting.id);
+                  await store.deleteDoc('orderAmounts', deleting.id).catch(() => {});
                   setDeleting(null);
                 }, DELETE_FAILED)
               }
@@ -265,23 +270,24 @@ function AlertsCard() {
   );
 }
 
-function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; onOpen: (o: Order) => void }) {
+function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; amountOf: (id: string) => number | null | undefined; onOpen: (o: Order) => void }) {
   if (props.orders.length === 0) return null;
   return (
     <section className="c-group" aria-label={props.title}>
       <h2 className={'c-group-title' + (props.late ? ' late' : '')}>{props.title}</h2>
       <div className="t-stack">
         {props.orders.map((o) => (
-          <OrderCard key={o.id} order={o} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
+          <OrderCard key={o.id} order={o} amount={props.amountOf(o.id)} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
         ))}
       </div>
     </section>
   );
 }
 
-function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: number; showDate?: boolean; onClick: () => void }) {
+/** Manager list card. The kitchen has its own cards (src/kitchen), which never show the amount. */
+function OrderCard({ order: o, amount, now, showDate, onClick }: { order: Order; amount?: number | null; now: number; showDate?: boolean; onClick: () => void }) {
   const n = itemLines(o.items).length;
-  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`].filter(Boolean);
+  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, amountLabel(amount) || null].filter(Boolean);
   return (
     <button className={'c-card' + (o.status === 'completed' ? ' done' : '')} onClick={onClick} data-testid="order-card">
       <span className="c-card-top">
@@ -301,8 +307,9 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-/** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager). */
-type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
+/** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager).
+ *  `amount` (manager only): the order's saved amount, undefined while loading. The amount box shows only when `by` is Manager. */
+type SheetProps = { order: Order | null; amount?: number | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -352,7 +359,7 @@ function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
   );
 }
 
-function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
+function OrderSummary({ order: o, amount, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
   const { busy, error, run } = useSaver();
   const items = itemLines(o.items);
   const open = o.status === 'open';
@@ -389,6 +396,12 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onPrintTa
           <div>
             <dt>People</dt>
             <dd>{o.people}</dd>
+          </div>
+        )}
+        {amount != null && (
+          <div data-testid="order-amount">
+            <dt>Amount</dt>
+            <dd>{amountLabel(amount)}</dd>
           </div>
         )}
       </dl>
@@ -473,6 +486,9 @@ export function EditOrderSheet({ order, now, by, onClose, onCompleted }: { order
 
 function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSaved: (shareText: string) => void }) {
   const { order, onClose, onCompleted, onDelete, by = 'manager' } = props;
+  // The amount box is for the manager app only. It is kept apart from the order form, so it never goes
+  // into the order, its change history, the WhatsApp message or the kitchen's edit form.
+  const showAmount = by === 'manager';
   const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
@@ -495,8 +511,29 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   const [pasted, setPasted] = useState('');
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
+  // The saved amount can arrive after the form opens: take it then, unless something was typed already.
+  const [amountStart, setAmountStart] = useState<string | undefined>(() => (props.amount === undefined && order ? undefined : amountInput(props.amount)));
+  const [amount, setAmount] = useState(amountStart ?? '');
+  const [amountErr, setAmountErr] = useState('');
+  useEffect(() => {
+    if (amountStart !== undefined || props.amount === undefined) return;
+    const a = amountInput(props.amount);
+    setAmountStart(a);
+    setAmount((typed) => (typed ? typed : a));
+  }, [props.amount, amountStart]);
+  const amountChanged = showAmount && amountStart !== undefined && parseAmount(amount) !== parseAmount(amountStart);
+  const typeAmount = (v: string) => {
+    setAmount(v);
+    if (tried) setAmountErr(amountError(v));
+  };
+  /** Saves the amount for this order id (manager only), when it changed. */
+  const saveAmount = async (id: string) => {
+    if (!amountChanged) return;
+    await store.setDoc('orderAmounts', id, { amount: parseAmount(amount), updatedAt: store.now() });
+  };
+
   const changed = JSON.stringify(f) !== JSON.stringify(start);
-  props.dirty.current = changed || scan.state === 'done' || pasted.trim() !== '';
+  props.dirty.current = changed || amountChanged || scan.state === 'done' || pasted.trim() !== '';
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
@@ -549,9 +586,11 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   /** Checks the form; false (and the errors shown, first one focused) when something needs fixing. */
   const check = () => {
     const e = validate(f);
+    const ae = showAmount ? amountError(amount) : '';
     setTried(true);
     setErrors(e);
-    if (Object.keys(e).length) {
+    setAmountErr(ae);
+    if (Object.keys(e).length || ae) {
       setAttempt((n) => n + 1);
       return false;
     }
@@ -574,10 +613,12 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
       const now = store.now();
       if (order) {
         await store.updateDoc('orders', order.id, editFields());
+        await saveAmount(order.id);
         return onClose();
       }
       const fields = orderFields(f);
-      await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
+      const id = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
+      await saveAmount(id);
       props.onSaved(shareText(fields, 'New catering order'));
     });
   };
@@ -585,9 +626,10 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   // Mark completed / Reopen keeps what was typed: changed fields are checked and saved with the new status.
   const setStatus = (status: CateringOrder['status']) => {
     if (!order) return;
-    if (changed && !check()) return;
+    if ((changed || amountChanged) && !check()) return;
     run(async () => {
       await store.updateDoc('orders', order.id, changed ? { ...editFields(), ...statusPatch(status) } : statusPatch(status));
+      await saveAmount(order.id);
       if (status === 'completed') onCompleted(order);
       onClose();
     });
@@ -599,7 +641,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     ) : (
       unsure.includes(k) && <small className="c-check">Please check this: it was {scan.from === 'message' ? 'unclear' : 'hard to read'}.</small>
     );
-  const count = Object.keys(errors).length;
+  const count = Object.keys(errors).length + (amountErr ? 1 : 0);
 
   return (
     <form
@@ -724,6 +766,22 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
         {err('notes')}
       </Field>
+      {showAmount && (
+        <Field label="Amount $ (optional, manager only)">
+          <input
+            className="t-input c-amount"
+            inputMode="decimal"
+            placeholder="e.g. 200"
+            value={amount}
+            disabled={amountStart === undefined}
+            onChange={(e) => typeAmount(e.target.value)}
+            aria-invalid={!!amountErr}
+            autoComplete="off"
+            data-testid="amount-input"
+          />
+          {amountErr ? <small className="c-err" role="alert">{amountErr}</small> : <small className="c-hint">Not shown on the kitchen tablet.</small>}
+        </Field>
+      )}
 
       {order && (
         <div className={onDelete ? 't-grid2' : 't-stack'}>

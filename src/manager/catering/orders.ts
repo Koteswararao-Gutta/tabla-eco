@@ -347,3 +347,37 @@ export function withEdit(history: OrderEdit[] | undefined, edit: OrderEdit): Ord
 
 /** The latest edit, or null. */
 export const lastEdit = (o: Pick<Order, 'history'>): OrderEdit | null => (Array.isArray(o.history) && o.history.length ? o.history[o.history.length - 1] : null);
+
+// ---------- amount (manager only) ----------
+// The amount lives in orderAmounts/{order id}, never on the order, so the kitchen never sees it.
+// Keep it out of OrderForm, shareText, describeChanges and the tags: they all reach the kitchen or front staff.
+
+/** Biggest amount the box takes (matches firestore.rules). */
+export const AMOUNT_MAX = 1_000_000;
+
+/** What was typed in the amount box ("200", "$1,250.50") as dollars; null when empty; NaN when it isn't an amount. */
+export function parseAmount(text: string): number | null {
+  const t = text.replace(/[\s$,]/g, '');
+  if (!t) return null;
+  if (!/^\d+(\.\d{1,2})?$|^\.\d{1,2}$/.test(t)) return NaN;
+  const n = Math.round(parseFloat(t) * 100) / 100;
+  return n > AMOUNT_MAX ? NaN : n;
+}
+
+/** An error for the amount box, or ''. */
+export function amountError(text: string): string {
+  return Number.isNaN(parseAmount(text)) ? 'Please enter an amount like 200 or 200.50, or leave it empty.' : '';
+}
+
+/** The amount as the box shows it when editing: 200 -> "200", 200.5 -> "200.50". */
+export function amountInput(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return '';
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+}
+
+/** "$200", "$1,250.50"; '' when there is no amount. */
+export function amountLabel(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return '';
+  const cents = !Number.isInteger(amount);
+  return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 });
+}
