@@ -10,6 +10,12 @@ async function typePin(kitchen: Page, pin: string) {
   for (const d of pin) await kitchen.getByRole('button', { name: d, exact: true }).click();
 }
 
+/** Kitchen: one tap on an order card opens its options; pick one. */
+async function kitchenOption(kitchen: Page, customer: string, option: 'Mark completed' | 'Edit order' | 'Print name tags') {
+  await kitchen.getByRole('article', { name: `Order for ${customer}` }).click({ position: { x: 20, y: 20 } });
+  await kitchen.getByRole('dialog', { name: customer }).getByRole('button', { name: new RegExp(option) }).click();
+}
+
 test.setTimeout(60_000);
 
 test('manager adds an order, kitchen sees it live, completes, undoes and reopens', async ({ browser }) => {
@@ -92,13 +98,20 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(card.getByText(/^in /)).toBeVisible();
   await shot(kitchen, 'kitchen-open-orders');
 
-  // Mark completed: card goes, Undo brings it back.
-  await card.getByRole('button', { name: 'Mark completed' }).click();
+  // One tap shows the options; Mark completed: card goes, Undo brings it back.
+  await card.click({ position: { x: 20, y: 20 } });
+  const options = kitchen.getByRole('dialog', { name: 'Anika Wedding' });
+  await expect(options.getByRole('button', { name: /Edit order/ })).toBeVisible();
+  await expect(options.getByRole('button', { name: /Print name tags/ })).toBeVisible();
+  await shot(kitchen, 'kitchen-order-options');
+  await options.getByRole('button', { name: /Mark completed/ }).click();
   await expect(card).toHaveCount(0);
   await kitchen.getByRole('button', { name: 'Undo' }).click();
   await expect(card).toBeVisible();
-  await card.getByRole('button', { name: 'Mark completed' }).click();
+  // A double tap completes it at once, without the options.
+  await card.dblclick({ position: { x: 20, y: 20 } });
   await expect(card).toHaveCount(0);
+  await expect(options).toBeHidden();
   await expect(kitchen.getByRole('button', { name: 'Undo' })).toBeHidden({ timeout: 9000 });
 
   // Show all orders: ticked as completed, and it can be reopened.
@@ -365,7 +378,7 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
   await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
 
   // ...the kitchen completes the order while it is open...
-  await kitchen.getByRole('article', { name: 'Order for Desert Tech office' }).getByRole('button', { name: 'Mark completed' }).click();
+  await kitchenOption(kitchen, 'Desert Tech office', 'Mark completed');
   await expect(edit.getByRole('button', { name: 'Reopen' })).toBeVisible(); // the sheet shows the live status
 
   // ...and saving the edit keeps it completed.
@@ -713,7 +726,7 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   // Kitchen: Edit on the card opens the form, with no Delete.
   const card = kitchen.getByRole('article', { name: 'Order for Priya Sharma' });
   await expect(card.getByRole('button', { name: /Changed by/ })).toHaveCount(0); // never edited yet
-  await card.getByRole('button', { name: 'Edit', exact: true }).click();
+  await kitchenOption(kitchen, 'Priya Sharma', 'Edit order');
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Delete' })).toHaveCount(0);
   await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
@@ -833,13 +846,13 @@ test('kitchen: Print tags on an order card uses the tablet app bridge, 2 sheets 
   await kitchen.goto('/#/kitchen');
   for (const d of '1234') await kitchen.getByRole('button', { name: d, exact: true }).click();
   // Give Priya's order 12 dishes.
-  await kitchen.getByRole('article', { name: 'Order for Priya Sharma' }).getByRole('button', { name: 'Edit' }).click();
+  await kitchenOption(kitchen, 'Priya Sharma', 'Edit order');
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
   const dishes = ['Rose Milk - 15 Gallons', 'Reshampatti Chicken - 6 FT', 'Kodi Vepudu - 5 FT', 'Baby Corn Chilli - 4 FT', 'Veg Hakka Noodles - 4 FT', 'Mango Mudda Pappu Rice - 6 FT', 'Donne Chicken Biryani - 6 FT', 'Andhra Chicken Curry (Bone-in) - 4 FT', 'Phool Makhana Masala - 3 FT', 'Madupu Karakam Podi', 'Curd Rice - 4 FT', 'Semiya Kheer - 4 FT'];
   await edit.getByLabel('Order items (one per line)').fill(dishes.join('\n'));
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await expect(edit).toBeHidden();
-  await kitchen.getByRole('article', { name: 'Order for Priya Sharma' }).getByRole('button', { name: 'Print tags' }).click();
+  await kitchenOption(kitchen, 'Priya Sharma', 'Print name tags');
   const sheet = kitchen.getByRole('dialog', { name: 'Name tags' });
   await expect(sheet.getByTestId('tag-row')).toHaveCount(12);
   await kitchen.waitForTimeout(400);
