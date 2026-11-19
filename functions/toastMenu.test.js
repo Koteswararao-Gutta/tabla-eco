@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu, settleKilled, wasKilled } from './toastMenu.js';
+import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu, settleKilled, wasKilled, withTimeout } from './toastMenu.js';
 
 // Shaped like Tabla's real ordering page (checked 2026-11-18): the menu sits in window.__OO_STATE__.
 const state = {
@@ -128,4 +128,9 @@ test('a run killed before it saved counts as a failed try, so repeated kills sti
   // A finished run's status (startedAt equal to lastTryAt) is not a kill.
   assert.equal(wasKilled({ ...ok, startedAt: ok.lastTryAt }), false);
   assert.deepEqual(settleKilled(null), { status: null, alert: null });
+});
+
+test('withTimeout gives up on a slow step but passes a fast one through', async () => {
+  assert.equal(await withTimeout(Promise.resolve(5), 50, 'slow'), 5);
+  await assert.rejects(withTimeout(new Promise(() => {}), 20, 'Chrome took too long'), /took too long/);
 });
