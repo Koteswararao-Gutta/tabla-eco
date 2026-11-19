@@ -66,16 +66,38 @@ export function buildRequest({ image, mediaType, text, today, weekday }) {
         ];
   return {
     model: MODEL,
-    max_tokens: 2000,
+    // Room for the model's thinking plus a long order, so it isn't cut off; low effort keeps it quick and cheap.
+    max_tokens: 8000,
     system: SYSTEM,
     messages: [{ role: 'user', content }],
-    output_config: { format: zodOutputFormat(ScannedOrder) },
+    output_config: { format: zodOutputFormat(ScannedOrder), effort: 'low' },
   };
 }
 
 /** Reads one photo or message. `client` is an Anthropic client. */
 export async function readOrderPhoto(client, data) {
   const res = await client.messages.parse(buildRequest(data));
-  if (!res.parsed_output) throw new Error(`No order in the reply (stop reason ${res.stop_reason})`);
+  if (!res.parsed_output) {
+    const e = new Error(`No order in the reply (stop reason ${res.stop_reason})`);
+    e.unreadable = true;
+    throw e;
+  }
   return res.parsed_output;
+}
+
+/** What the manager sees when the photo or message can't be read (as opposed to the service being down). */
+export const UNREADABLE = "Couldn't read this. Please try another photo or type the order in.";
+export const UNREADABLE_TEXT = "Couldn't read this. Please check the message or type the order in.";
+
+/**
+ * Sorts a failure: 'unreadable' when trying again with the same photo won't help (the API refused the
+ * request or image, the model refused, or no form came back), 'unavailable' for network trouble,
+ * overload or server errors that may pass.
+ */
+export function readError(e) {
+  if (e?.unreadable) return 'unreadable';
+  const status = e?.status;
+  if (status === 400 || status === 413) return 'unreadable';
+  if (status === undefined && /Failed to parse structured output/.test(e?.message ?? '')) return 'unreadable';
+  return 'unavailable';
 }

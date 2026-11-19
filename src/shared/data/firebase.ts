@@ -252,6 +252,9 @@ export class FirebaseStore implements DataStore {
       return res.data;
     } catch (e) {
       console.warn('readOrder', e);
+      // The server says plainly when this photo or message can't be read (trying again won't help).
+      const err = e as { code?: string; message?: string };
+      if (err?.code === 'functions/invalid-argument' && err.message) throw new Error(err.message);
       throw new Error(`Couldn't read the ${what} right now. Please try again, or type the order in.`);
     }
   }
