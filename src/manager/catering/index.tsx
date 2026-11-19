@@ -1,9 +1,9 @@
 // Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
+import { store, useCollection, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref,
+  dayLabel, describeChanges, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
@@ -282,7 +282,8 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void };
+/** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager). */
+type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; by?: EditedBy };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -399,10 +400,11 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
         <button type="button" className="t-btn" onClick={onEdit}>
           Edit
         </button>
-        <button type="button" className="t-btn danger" onClick={() => onDelete(o)}>
+        <button type="button" className="t-btn danger" onClick={() => onDelete?.(o)}>
           Delete
         </button>
       </div>
+      <EditHistory history={o.history} now={now} />
       <button type="button" className="t-btn ghost block" onClick={onClose}>
         Close
       </button>
@@ -410,8 +412,43 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
   );
 }
 
+/** "Changes": who edited the order (Kitchen or Manager), when, and what changed. Newest first. Nothing when never edited. */
+export function EditHistory({ history, now }: { history?: OrderEdit[]; now: number }) {
+  const list = Array.isArray(history) ? [...history].reverse() : [];
+  if (list.length === 0) return null;
+  return (
+    <section className="c-hist" data-testid="edit-history" aria-label="Changes">
+      <h3 className="c-sum-h">Changes</h3>
+      <ol className="c-hist-list">
+        {list.map((e, i) => (
+          <li key={`${e.at}-${i}`} className="c-hist-entry">
+            <div className="c-hist-who">
+              <b>{EDITED_BY_LABEL[e.by] ?? 'Someone'}</b> · {dayLabel(e.at, now)}, {timeLabel(e.at)}
+            </div>
+            <ul className="c-hist-changes">
+              {(Array.isArray(e.changes) ? e.changes : []).map((c, j) => (
+                <li key={j}>{c}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** The edit form on its own, in a sheet: used by the kitchen tablet ("Edit" on an order). Saves as `by`, no Delete. */
+export function EditOrderSheet({ order, now, by, onClose, onCompleted }: { order: Order; now: number; by: EditedBy; onClose: () => void; onCompleted: (o: Order) => void }) {
+  const dirty = useRef(false);
+  return (
+    <Sheet open title="Edit order" onClose={onClose} confirmClose={() => (dirty.current ? 'Discard your changes?' : null)}>
+      <OrderFormView order={order} now={now} by={by} dirty={dirty} onClose={onClose} onCompleted={onCompleted} onSaved={() => onClose()} />
+    </Sheet>
+  );
+}
+
 function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSaved: (shareText: string) => void }) {
-  const { order, onClose, onCompleted, onDelete } = props;
+  const { order, onClose, onCompleted, onDelete, by = 'manager' } = props;
   const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
@@ -498,9 +535,13 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   };
   // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
   // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
+  // What changed (compared with the order as saved right now) is added to its history, with who saved it.
   const editFields = () => {
     const fields = orderFields(f);
-    return { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: store.now() };
+    const at = store.now();
+    const next = { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: at };
+    const changes = order ? describeChanges(order, next) : [];
+    return changes.length ? { ...next, history: withEdit(order!.history, { at, by, changes }) } : next;
   };
 
   const save = () => {
@@ -661,7 +702,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
       </Field>
 
       {order && (
-        <div className="t-grid2">
+        <div className={onDelete ? 't-grid2' : 't-stack'}>
           {order.status === 'open' ? (
             <button type="button" className="t-btn" disabled={busy} onClick={() => setStatus('completed')}>
               Mark completed
@@ -671,9 +712,11 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
               Reopen
             </button>
           )}
-          <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
-            Delete
-          </button>
+          {onDelete && (
+            <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
+              Delete
+            </button>
+          )}
         </div>
       )}
       {/* Save stays in view at the bottom of the sheet while the form scrolls. */}

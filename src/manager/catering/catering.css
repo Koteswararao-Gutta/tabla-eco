@@ -118,3 +118,10 @@
 /* Share to WhatsApp */
 .c-share { text-decoration: none; }
 .c-share-preview { margin: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; font-size: 0.92rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+
+/* edit history ("Changes") in the order details; also used on the kitchen tablet */
+.c-hist { border-top: 1px solid var(--line); padding-top: 12px; }
+.c-hist-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.c-hist-who { color: var(--muted); }
+.c-hist-who b { color: var(--ink); font-weight: 650; }
+.c-hist-changes { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }

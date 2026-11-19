@@ -700,3 +700,72 @@ test('Save stays visible at the bottom of a long order form', async ({ browser }
   expect(n.y + n.height).toBeLessThanOrEqual(bar.y + 1);
   await context.close();
 });
+
+test('kitchen edits an order: history shows who changed what, on the tablet and the manager app', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  const kitchen = await openScreen(context, '/kitchen');
+  await kitchen.setViewportSize({ width: 1280, height: 800 });
+  await typePin(kitchen, '1234');
+
+  // Kitchen: Edit on the card opens the form, with no Delete.
+  const card = kitchen.getByRole('article', { name: 'Order for Priya Sharma' });
+  await expect(card.getByRole('button', { name: /Changed by/ })).toHaveCount(0); // never edited yet
+  await card.getByRole('button', { name: 'Edit', exact: true }).click();
+  const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
+  await expect(edit.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
+  await edit.getByLabel('Order items (one per line)').fill('Chicken dum biryani, 3 large trays\nVeg dum biryani, 1 large tray\nRaita, 2 quarts\nGulab jamun, 40 pcs\nSamosa, 25');
+  await edit.getByLabel('Number of people (optional)').fill('50');
+  await kitchen.waitForTimeout(400);
+  await shot(kitchen, 'kitchen-edit-form');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+
+  // Saved with a Kitchen history entry.
+  const o = (await readCollection<CateringOrder>(kitchen, 'orders')).find((x) => x.customerName === 'Priya Sharma')!;
+  expect(o.people).toBe(50);
+  expect(o.history).toHaveLength(1);
+  expect(o.history![0]).toMatchObject({
+    by: 'kitchen',
+    changes: ['People: 40 → 50', 'Items: Chicken dum biryani, 2 large trays → Chicken dum biryani, 3 large trays', 'Item added: Samosa, 25'],
+  });
+
+  // Tablet card: "Changed by Kitchen", tap to see what changed.
+  const changed = card.getByRole('button', { name: /Changed by Kitchen/ });
+  await expect(changed).toBeVisible();
+  await changed.click();
+  await expect(card.getByTestId('edit-history')).toContainText('People: 40 → 50');
+  await shot(kitchen, 'kitchen-card-history');
+
+  // Manager details show the same history, newest first, after a manager edit.
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(details.getByTestId('edit-history')).toContainText('Kitchen');
+  await expect(details.getByTestId('edit-history')).toContainText('Item added: Samosa, 25');
+  await details.getByRole('button', { name: 'Edit' }).click();
+  const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
+  await mEdit.getByLabel('Time').fill('18:00');
+  await mEdit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(mEdit).toHaveCount(0);
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const entries = details.getByTestId('edit-history').locator('.c-hist-entry');
+  await expect(entries).toHaveCount(2);
+  await expect(entries.first()).toContainText('Manager');
+  await expect(entries.first()).toContainText('Time: 5:30 PM → 6:00 PM');
+  await manager.waitForTimeout(400);
+  await details.getByTestId('edit-history').scrollIntoViewIfNeeded();
+  await shot(manager, 'manager-order-history');
+
+  // The tablet shows the manager's change at once.
+  await expect(card.getByRole('button', { name: /Changed by Manager/ })).toBeVisible();
+
+  // Saving with nothing changed adds no entry.
+  await details.getByRole('button', { name: 'Edit' }).click();
+  await mEdit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(mEdit).toHaveCount(0);
+  const again = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.customerName === 'Priya Sharma')!;
+  expect(again.history).toHaveLength(2);
+  await context.close();
+});

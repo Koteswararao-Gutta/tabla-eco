@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
+import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
 import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
@@ -207,5 +208,40 @@ describe('shareText / whatsappHref', () => {
 
   it('makes a wa.me link with the message encoded', () => {
     expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
+  });
+});
+
+describe('edit history', () => {
+  const base = order(at(20, 17), { customerName: 'Sharma', items: '20 samosas\nChicken biryani, 2 trays', notes: '', people: 30 });
+  it('says what changed in plain words', () => {
+    const after = { ...base, dueAt: at(21, 18, 30), items: '25 samosas\nChicken biryani, 2 trays\nRaita', people: 40, notes: 'Extra spicy' };
+    expect(describeChanges(base, after)).toEqual([
+      'Date: Fri, Nov 20 → Sat, Nov 21',
+      'Time: 5:00 PM → 6:30 PM',
+      'People: 30 → 40',
+      'Items: 20 samosas → 25 samosas',
+      'Item added: Raita',
+      'Notes: (none) → Extra spicy',
+    ]);
+  });
+  it('is empty when nothing changed, and ignores spacing', () => {
+    expect(describeChanges(base, { ...base, items: ' 20 samosas \n\nChicken biryani, 2 trays', notes: '  ' })).toEqual([]);
+  });
+  it('covers pickup/delivery, address, name, phone and removed items', () => {
+    const after = { ...base, customerName: 'R Sharma', phone: '555 000 1111', type: 'delivery' as const, address: '1 Main St', items: '20 samosas' };
+    expect(describeChanges(base, after)).toEqual([
+      'Name: Sharma → R Sharma',
+      'Phone: 555 123 4567 → 555 000 1111',
+      'Pickup → Delivery',
+      'Address: (none) → 1 Main St',
+      'Item removed: Chicken biryani, 2 trays',
+    ]);
+  });
+  it('keeps the latest edits only', () => {
+    let h = withEdit(undefined, { at: 0, by: 'manager', changes: ['a'] });
+    for (let i = 1; i <= HISTORY_MAX + 5; i++) h = withEdit(h, { at: i, by: 'kitchen', changes: ['b'] });
+    expect(h).toHaveLength(HISTORY_MAX);
+    expect(lastEdit({ history: h })?.at).toBe(HISTORY_MAX + 5);
+    expect(lastEdit({})).toBeNull();
   });
 });

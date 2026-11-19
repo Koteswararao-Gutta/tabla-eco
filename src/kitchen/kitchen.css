@@ -53,7 +53,13 @@
 .k-items li::before { content: ''; position: absolute; left: 2px; top: 0.6em; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .k-notes { margin: 0; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 1.1rem; }
 .k-notes::before { content: 'Note: '; font-weight: 700; }
-.k-done { min-height: 64px; font-size: 1.15rem; margin-top: auto; }
+.k-actions { display: flex; gap: 12px; margin-top: auto; }
+.k-done { flex: 1; min-height: 64px; font-size: 1.15rem; }
+.k-edit { min-height: 64px; min-width: 110px; font-size: 1.15rem; }
+/* "Changed by Manager, 5:42 PM": tap to see what changed. */
+.k-changed { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 48px; padding: 8px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-size: 1.05rem; font-weight: 600; text-align: left; cursor: pointer; }
+.k-changed-more { margin-left: auto; color: var(--muted); font-weight: 500; }
+.k-card .c-hist { font-size: 1.05rem; }
 .k-empty { margin-top: 40px; font-size: 1.2rem; line-height: 1.6; padding: 48px 16px; }
 
 /* undo bar */
