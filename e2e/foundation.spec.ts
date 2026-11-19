@@ -57,8 +57,11 @@ test.describe('device on another time zone', () => {
 
   test('every screen warns, TVs with a small corner note', async ({ context }) => {
     const phone = await openScreen(context, '/manager/catering');
-    await expect(phone.getByTestId('tz-note')).toHaveText(/time zone isn't Arizona/);
+    await expect(phone.getByTestId('tz-note')).toHaveText(/Time zone isn't Arizona/);
     await expect(phone.getByTestId('tz-note')).toHaveClass('t-tz');
+    await phone.setViewportSize({ width: 390, height: 844 });
+    // Two lines at most on a phone.
+    await expect.poll(async () => (await phone.getByTestId('tz-note').boundingBox())!.height).toBeLessThan(70);
     const kitchen = await openScreen(context, '/kitchen');
     await expect(kitchen.getByTestId('tz-note')).toBeVisible();
     const tv = await openScreen(context, '/tv/1');

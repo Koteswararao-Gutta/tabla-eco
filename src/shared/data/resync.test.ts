@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keepListening, scheduleClockSync } from './resync';
+import { keepListening, scheduleClockSync, singleFlight } from './resync';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -131,6 +131,37 @@ describe('scheduleClockSync', () => {
     expect(sync).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sync).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});
+
+describe('singleFlight', () => {
+  it('skips a new attempt while the last one is still waiting', async () => {
+    let finish: (v: boolean) => void = () => {};
+    const job = vi.fn(() => new Promise<boolean>((r) => (finish = r)));
+    const once = singleFlight(job);
+    const first = once();
+    expect(first).not.toBeNull();
+    expect(once()).toBeNull();
+    expect(once()).toBeNull();
+    expect(job).toHaveBeenCalledTimes(1);
+    finish(true);
+    await expect(first).resolves.toBe(true);
+    expect(once()).not.toBeNull();
+    expect(job).toHaveBeenCalledTimes(2);
+  });
+
+  it('with the clock schedule: a write that never ends is queued only once', async () => {
+    const write = vi.fn(() => new Promise<boolean>(() => {})); // internet down behind working Wi-Fi
+    const once = singleFlight(write);
+    const sync = async () => {
+      const a = once();
+      if (!a) return false;
+      return Promise.race([a, new Promise<false>((r) => setTimeout(() => r(false), 10_000))]);
+    };
+    const stop = scheduleClockSync(sync, { wall: () => Date.now(), mono: () => Date.now() });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(write).toHaveBeenCalledTimes(1);
     stop();
   });
 });

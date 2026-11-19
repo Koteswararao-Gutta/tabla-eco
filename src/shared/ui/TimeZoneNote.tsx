@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { deviceZoneIsWrong } from '../clock/timezone';
 
-const MESSAGE = "This device's time zone isn't Arizona. Set it to Arizona (Phoenix) in the device settings so order times are right.";
+const MESSAGE = "Time zone isn't Arizona. Set it to Arizona (Phoenix) in this device's settings.";
 
 function useHash(): string {
   const [hash, setHash] = useState(() => location.hash);
