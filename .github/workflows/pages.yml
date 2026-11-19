@@ -45,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0 # full history: the app's version number counts commits that changed android/
           # The commit the tests passed on (not whatever main is by now).
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
@@ -61,11 +62,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
+      # The version only goes up when android/ changed, so installed apps update themselves (Updater.java)
+      # only for real app changes. 1000+ keeps it above the early copies, which used the run number.
+      - id: apkver
+        run: echo "code=$((1000 + $(git rev-list --count HEAD -- android)))" >> "$GITHUB_OUTPUT"
       - run: gradle -p android assembleRelease --no-daemon
         env: # signed with android/keystore/tabla-release.jks, so updates install over the old app
-          TABLA_VERSION_CODE: ${{ github.run_number }}
-          TABLA_VERSION_NAME: 1.${{ github.run_number }}
-      - run: cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
+          TABLA_VERSION_CODE: ${{ steps.apkver.outputs.code }}
+          TABLA_VERSION_NAME: 1.${{ steps.apkver.outputs.code }}
+      - run: |
+          cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
+          echo '{"versionCode": ${{ steps.apkver.outputs.code }}}' > dist/tabla-version.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
  * First launch asks which screen this device is. Press Back 5 times quickly to choose again.
  * Recovers by itself from internet drops and browser crashes, and reloads once a night at 4 AM
  * to pick up updates. Watchdog brings it back to the front if something else is showing.
+ * Updater installs newer versions of this app by itself.
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
@@ -76,6 +77,7 @@ public class MainActivity extends Activity {
         if (screen == null) showChooser();
         else showScreen(screen);
         handler.postDelayed(nightly, CHECK_MS);
+        handler.postDelayed(() -> Updater.checkSoon(this), 2 * 60_000);
         Watchdog.start(this);
     }
 
@@ -128,6 +130,18 @@ public class MainActivity extends Activity {
             list.addView(allow);
         }
 
+        if (!Updater.allowed(this)) {
+            TextView note = new TextView(this);
+            note.setText("To update itself, Tabla needs \"Install unknown apps\" allowed.");
+            note.setTextSize(16);
+            note.setTextColor(Color.DKGRAY);
+            note.setPadding(0, dp(24), 0, dp(8));
+            list.addView(note);
+            Button allow = button("Allow automatic updates");
+            allow.setOnClickListener(v -> openInstallSettings());
+            list.addView(allow);
+        }
+
         Button settings = button("Open device settings");
         settings.setOnClickListener(v -> openSettings());
         LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) settings.getLayoutParams();
@@ -136,7 +150,7 @@ public class MainActivity extends Activity {
 
         String[] viewer = webViewer();
         TextView version = new TextView(this);
-        version.setText("Web viewer: " + viewer[0]);
+        version.setText("Web viewer: " + viewer[0] + "   ·   Tabla app: " + appVersion());
         version.setTextSize(14);
         version.setTextColor(Color.DKGRAY);
         version.setPadding(0, dp(24), 0, 0);
@@ -183,10 +197,28 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void openInstallSettings() {
+        try {
+            if (Build.VERSION.SDK_INT < 26) throw new IllegalStateException();
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+        } catch (Exception e) {
+            // Fire TV: Settings > My Fire TV > Developer options > Install unknown apps > Tabla.
+            openSettings();
+        }
+    }
+
     private void openSettings() {
         try {
             startActivity(new Intent(Settings.ACTION_SETTINGS));
         } catch (Exception ignored) {
+        }
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "unknown";
         }
     }
 
@@ -265,6 +297,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             reloadIfStale();
+            Updater.checkSoon(MainActivity.this);
             handler.postDelayed(this, CHECK_MS);
         }
     };

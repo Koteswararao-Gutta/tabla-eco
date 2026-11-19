@@ -6,6 +6,9 @@
     <!-- Lets the app open itself after the TV starts (Android 10+ blocks this otherwise). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Self-update (see Updater): install a newer tabla.apk; silently on Android 12+ after the first time. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
@@ -38,9 +41,13 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <!-- Tabla just updated itself: open it again. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
         <!-- Every few minutes: brings Tabla back to the front if something else is showing (see Watchdog). -->
         <receiver android:name=".Watchdog" android:exported="false" />
+        <!-- Hears Android's answer when Tabla installs an update of itself. -->
+        <receiver android:name=".Updater" android:exported="false" />
     </application>
 </manifest>
