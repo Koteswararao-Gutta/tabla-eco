@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alertFor, deadTokens, MAX_AHEAD_MS, onRing, planReminder, REMIND_MS } from './reminders.js';
+import { alertFor, chunks, deadTokens, MAX_AHEAD_MS, MAX_BODY, onRing, planReminder, REMIND_MS, shouldSchedule } from './reminders.js';
 
 const H = 60 * 60_000;
 const now = Date.UTC(2026, 10, 18, 20, 0); // 1:00 PM in Phoenix
@@ -42,6 +42,46 @@ test('alertFor says who, what and when in restaurant time', () => {
 });
 
 test('deadTokens picks only tokens that are gone for good', () => {
-  const r = [{ success: true }, { success: false, error: { code: 'messaging/registration-token-not-registered' } }, { success: false, error: { code: 'messaging/internal-error' } }];
-  assert.deepEqual(deadTokens(['a', 'b', 'c'], r), ['b']);
+  const fail = (code) => ({ success: false, error: { code } });
+  const r = [
+    { success: true },
+    fail('messaging/registration-token-not-registered'),
+    fail('messaging/internal-error'),
+    fail('messaging/invalid-registration-token'),
+    fail('messaging/invalid-argument'), // also sent for a bad message: must not wipe every phone
+  ];
+  assert.deepEqual(deadTokens(['a', 'b', 'c', 'd', 'e'], r), ['b', 'd']);
+});
+
+test('onRing does not send twice for the same time (retry, or moved away and back)', () => {
+  const task = { dueAt: order.dueAt };
+  const ring = order.dueAt - H;
+  assert.equal(onRing({ ...order, remindedFor: order.dueAt }, task, ring), 'skip');
+  assert.equal(onRing({ ...order, remindedFor: order.dueAt - 2 * H }, task, ring), 'send');
+  assert.equal(onRing({ ...order, remindedFor: null }, task, ring), 'send');
+});
+
+test('shouldSchedule sets an alarm only when an open order is new, reopened or moved', () => {
+  assert.equal(shouldSchedule(null, order), true);
+  assert.equal(shouldSchedule(order, { ...order, dueAt: order.dueAt + H }), true);
+  assert.equal(shouldSchedule({ ...order, status: 'completed' }, order), true);
+  assert.equal(shouldSchedule(order, { ...order, notes: 'no onions' }), false);
+  assert.equal(shouldSchedule(order, { ...order, remindedFor: order.dueAt }), false);
+  assert.equal(shouldSchedule(order, { ...order, kitchenAckFor: order.dueAt }), false);
+  assert.equal(shouldSchedule(order, { ...order, status: 'completed' }), false);
+  assert.equal(shouldSchedule(order, null), false);
+  assert.equal(shouldSchedule(null, null), false);
+});
+
+test('alertFor keeps a very long name short', () => {
+  const a = alertFor({ ...order, customerName: 'X'.repeat(5000) }, order.dueAt - H);
+  assert.ok(a.body.length <= MAX_BODY);
+  assert.match(a.body, /…, pickup at 6:00 PM$/);
+  assert.equal(alertFor({ ...order, customerName: '   ' }, order.dueAt - H).body, 'Order, pickup at 6:00 PM');
+});
+
+test('chunks splits tokens into batches of 500', () => {
+  const list = Array.from({ length: 1201 }, (_, i) => i);
+  assert.deepEqual(chunks(list).map((c) => c.length), [500, 500, 201]);
+  assert.deepEqual(chunks([]), []);
 });

@@ -1,28 +1,61 @@
 rules_version = '2';
-// Tabla Eco: Firestore security rules. Paste into Firebase console > Firestore > Rules > Publish.
-// Devices sign in anonymously (the owner chose no device password), so these rules:
-//  - keep out anything that isn't running the app (no sign-in, no access),
-//  - allow only the collections the app uses,
+// Tabla Eco: Firestore security rules. Deployed with the server code by .github/workflows/functions.yml
+// (don't edit them in the Firebase console: the next deploy overwrites that).
+// Devices sign in anonymously (the owner chose no device password). Anyone who copies the app's public
+// Firebase config can sign in the same way, so these rules are not a lock; they:
+//  - need a sign-in for everything,
+//  - allow only the collections the app uses, with basic checks on the important fields,
 //  - cap document sizes so nobody can fill the free quota with junk.
+// The server (Cloud Functions, admin access) skips these rules, e.g. when it writes remindedFor on an order.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function small() { return request.resource.data.size() <= 100; }
 
     match /screens/{id}     { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
-    match /slots/{id}       { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    // A menu loop step. Checked on the whole saved document (partial updates are merged first).
+    function validSlot(d) {
+      return d.order is number
+        && d.seconds is number && d.seconds > 0 && d.seconds <= 86400
+        && d.transition in ['fade', 'slide', 'none']
+        && d.pictures is map
+        && (!('endsAt' in d) || d.endsAt == null || d.endsAt is number)
+        && (!('kind' in d) || d.kind in ['menu', 'special', 'catering']);
+    }
+    match /slots/{id}       { allow read: if signedIn(); allow create, update: if signedIn() && small() && validSlot(request.resource.data); allow delete: if signedIn(); }
     match /pictures/{id}    { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
-    match /orders/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
+    // A catering order. New orders must have the main fields; any save keeps their types right.
+    function orderTypes(d) {
+      return (!('customerName' in d) || (d.customerName is string && d.customerName.size() <= 200))
+        && (!('dueAt' in d) || d.dueAt is number)
+        && (!('status' in d) || d.status in ['open', 'completed'])
+        && (!('items' in d) || (d.items is string && d.items.size() <= 20000))
+        && (!('type' in d) || d.type in ['pickup', 'delivery'])
+        && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number)
+        && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number);
+    }
+    function orderHasMain(d) { return d.keys().hasAll(['customerName', 'dueAt', 'status', 'items']); }
+    match /orders/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && small() && orderHasMain(request.resource.data) && orderTypes(request.resource.data);
+      allow update: if signedIn() && small() && orderTypes(request.resource.data);
+      allow delete: if signedIn();
+    }
     match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /clocks/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     // Phone alert addresses: devices can save their own, but nobody can read the list (only the server does).
     match /pushTokens/{id} {
       allow read: if false;
-      allow write: if signedIn()
+      allow create, update: if signedIn()
         && request.resource.data.keys().hasOnly(['token', 'device', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['token', 'device', 'updatedAt'])
         && request.resource.data.token is string
-        && request.resource.data.token.size() <= 4096;
+        && request.resource.data.token.size() > 0
+        && request.resource.data.token.size() <= 400
+        && request.resource.data.device is string
+        && request.resource.data.device.size() <= 200
+        && request.resource.data.updatedAt is number;
     }
     // Toast menu: saved only by the server (syncToastMenu); screens can read it.
     match /toastMenu/{id}   { allow read: if signedIn(); allow write: if false; }

@@ -15,13 +15,31 @@ export function planReminder(orderId, order, now) {
   return { at, dueAt: order.dueAt, id: `${orderId}-${order.dueAt}-${Math.round(at / 60_000)}`.replace(/[^A-Za-z0-9_-]/g, '_') };
 }
 
+/**
+ * Whether a saved order needs its alarm (re)set. `before`/`after` are the order before and after the write
+ * (null when created/deleted). Writes that only change other fields (notes, the server's `remindedFor`,
+ * the kitchen's "Got it") don't set a new alarm.
+ */
+export function shouldSchedule(before, after) {
+  if (!after || after.status !== 'open') return false;
+  if (before && before.status === after.status && before.dueAt === after.dueAt) return false;
+  return true;
+}
+
 /** What to do when the alarm rings: 'send', 'later' (still more than an hour away: plan again) or 'skip'. */
 export function onRing(order, task, now) {
   if (!order || order.status !== 'open' || order.dueAt !== task.dueAt) return 'skip'; // completed, deleted or moved
+  if (order.remindedFor === task.dueAt) return 'skip'; // already sent for this time (a retry, or moved away and back)
   if (order.dueAt <= now) return 'skip';
   if (order.dueAt - now > REMIND_MS + 5 * 60_000) return 'later';
   return 'send';
 }
+
+/** Longest title, body and name in an alert, in characters (FCM data payloads are capped at 4 KB in all). */
+export const MAX_TITLE = 80;
+export const MAX_BODY = 200;
+export const MAX_NAME = 60;
+const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** The alert's words. */
 export function alertFor(order, now) {
@@ -29,11 +47,25 @@ export function alertFor(order, now) {
   const when = mins >= 55 ? '1 hour' : `${mins} min`;
   const time = new Date(order.dueAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TIME_ZONE });
   const kind = order.type === 'delivery' ? 'delivery' : 'pickup';
-  return { title: `Catering in ${when}`, body: `${order.customerName || 'Order'}, ${kind} at ${time}`, link: APP_LINK };
+  const name = cut(String(order.customerName || '').trim(), MAX_NAME) || 'Order';
+  return { title: cut(`Catering in ${when}`, MAX_TITLE), body: cut(`${name}, ${kind} at ${time}`, MAX_BODY), link: APP_LINK };
 }
 
-/** Tokens FCM says are gone for good (app removed, notifications turned off): delete them. */
+/**
+ * Tokens FCM says are gone for good (app removed, notifications turned off): delete them.
+ * Not 'messaging/invalid-argument': FCM also answers that for a bad message, which would wipe every phone.
+ */
 export function deadTokens(tokens, responses) {
-  const gone = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
+  const gone = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];
   return tokens.filter((_, i) => !responses[i]?.success && gone.includes(responses[i]?.error?.code));
+}
+
+/** FCM's sendEachForMulticast takes at most this many tokens per call. */
+export const FCM_BATCH = 500;
+
+/** Splits a list into chunks of `size`. */
+export function chunks(list, size = FCM_BATCH) {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
 }
