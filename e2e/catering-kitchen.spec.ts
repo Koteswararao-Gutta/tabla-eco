@@ -261,7 +261,8 @@ test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   await page.evaluate(() => {
-    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    // Only these 5 orders: a sample order due within the hour (the test runs at any time of day) would make 6.
+    const t: Record<string, unknown> = {};
     const now = Date.now();
     for (const [i, name] of ['Anita Rao', 'Bharat Iyer', 'Chitra Nair', 'Deepak Shah', 'Esha Gupta'].entries())
       t['r' + i] = { id: 'r' + i, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + (10 + i * 10) * 60_000 };
