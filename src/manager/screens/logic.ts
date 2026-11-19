@@ -18,11 +18,16 @@ export function insertOrder(sorted: readonly Slot[], afterIndex: number): number
 /** The slots whose order changes when the slot at `index` moves one step up (-1) or down (+1).
  *  Renumbers 1..n so ties and fractions never pile up. Empty when the move is not possible. */
 export function moveSlot<T extends Slot>(sorted: readonly T[], index: number, dir: -1 | 1): T[] {
-  const to = index + dir;
-  if (index < 0 || index >= sorted.length || to < 0 || to >= sorted.length) return [];
+  return moveSlotTo(sorted, index, index + dir);
+}
+
+/** Moves one slot to position `to` (0 = top). Returns only the slots whose order changed, with new orders 1..n. */
+export function moveSlotTo<T extends Slot>(sorted: readonly T[], index: number, to: number): T[] {
+  if (index < 0 || index >= sorted.length || to < 0 || to >= sorted.length || to === index) return [];
   const list = [...sorted];
-  [list[index], list[to]] = [list[to], list[index]];
-  return list.filter((s, i) => s.order !== i + 1).map((s) => ({ ...s, order: list.indexOf(s) + 1 }));
+  const [moved] = list.splice(index, 1);
+  list.splice(to, 0, moved);
+  return list.flatMap((s, i) => (s.order !== i + 1 ? [{ ...s, order: i + 1 }] : []));
 }
 
 /** The slot without this TV's picture, or null when no pictures are left (delete the slot). */

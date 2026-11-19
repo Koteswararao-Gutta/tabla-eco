@@ -44,7 +44,7 @@ test('home shows six tiles and TV 1 lists the seeded pictures in order', async (
 test('adding a picture creates a slot after that spot and restarts the loop on it', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
   await expect(page.getByTestId('slot')).toHaveCount(4);
-  await page.getByRole('button', { name: 'Add a picture after picture 1' }).click();
+  await page.getByRole('button', { name: 'Add a picture between 1 and 2' }).click();
   const sheet = page.getByRole('dialog');
   await expect(sheet).toBeVisible();
   await expect(page.getByTestId('add-hint')).toContainText('TV 2 shows the restaurant name in this spot');
@@ -67,6 +67,50 @@ test('adding a picture creates a slot after that spot and restarts the loop on i
   expect((await singleton(page, 'loop')).firstSlotId).toBe(added.id);
   await expect(page.getByTestId('slot').nth(1)).toHaveAttribute('data-slot-id', added.id);
   await expect(page.getByTestId('slot').nth(1).locator('img')).toBeVisible();
+});
+
+test('one clear add button at the end, quiet + buttons in between with their own names', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  const between = page.getByRole('button', { name: /^Add a picture between/ });
+  await expect(between).toHaveCount(3);
+  expect(await between.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual([
+    'Add a picture between 1 and 2',
+    'Add a picture between 2 and 3',
+    'Add a picture between 3 and 4',
+  ]);
+  const end = page.getByRole('button', { name: 'Add a picture', exact: true });
+  await end.scrollIntoViewIfNeeded();
+  await shot(page, 'tv1-end');
+  expect((await end.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await end.click();
+  const sheet = page.getByRole('dialog');
+  await page.getByTestId('add-file').setInputFiles({ name: 'dish.png', mimeType: 'image/png', buffer: PNG });
+  await sheet.getByRole('button', { name: 'Add picture' }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByTestId('slot')).toHaveCount(5);
+  const added = (await readCollection<Slot>(page, 'slots')).find((s) => !s.id.startsWith('slot-'))!;
+  expect(added.order).toBe(5);
+  await expect(page.getByTestId('slot').last()).toHaveAttribute('data-slot-id', added.id);
+});
+
+test('move to top and move to bottom in one tap, restarting the loop once', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  const order = () => page.getByTestId('slot').evaluateAll((els) => els.map((e) => e.getAttribute('data-slot-id')));
+  await page.getByRole('button', { name: 'Picture 4: options' }).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('button', { name: 'Move to bottom' })).toBeDisabled();
+  if (SHOTS) await page.waitForTimeout(400); // let the sheet finish rising
+  await shot(page, 'options-move');
+  await sheet.getByRole('button', { name: 'Move to top' }).click();
+  await expect.poll(order).toEqual(['slot-catering', 'slot-menu-1', 'slot-menu-2', 'slot-special']);
+  expect((await singleton(page, 'loop')).firstSlotId).toBe('slot-catering');
+  await expect(sheet.getByRole('button', { name: 'Move to top' })).toBeDisabled();
+  await expect(sheet).toContainText('Picture 1 of 4');
+  await sheet.getByRole('button', { name: 'Move to bottom' }).click();
+  await expect.poll(order).toEqual(['slot-menu-1', 'slot-menu-2', 'slot-special', 'slot-catering']);
+  const orders = (await readCollection<Slot>(page, 'slots')).sort((a, b) => a.order - b.order).map((s) => s.order);
+  expect(orders).toEqual([1, 2, 3, 4]);
 });
 
 test('changing seconds and transition saves on the slot', async ({ context }) => {
@@ -144,7 +188,7 @@ test('picture options: preview, seconds, transition and end date in one place', 
 
 test('picture buttons work from the keyboard', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
-  await page.getByRole('button', { name: 'Add a picture after picture 1' }).click();
+  await page.getByRole('button', { name: 'Add a picture between 1 and 2' }).click();
   const choose = page.getByRole('dialog').getByRole('button', { name: 'Choose a picture' });
   await choose.focus();
   await expect(choose).toBeFocused();
@@ -159,7 +203,8 @@ test('TV 3 mirroring can be turned off', async ({ context }) => {
   const sw = page.getByRole('switch', { name: /Mirror TV 1/ });
   await expect(sw).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByTestId('mirror-note')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Add a picture after/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Add a picture between/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add a picture', exact: true })).toHaveCount(0);
   await expect(page.getByTestId('mirror-note').getByRole('link', { name: /TV 1/ })).toHaveAttribute('href', '#/manager/screens/tv1');
   const before = await sw.boundingBox();
   await sw.click();
@@ -185,6 +230,7 @@ test('TV 5 music settings save as you change them', async ({ context }) => {
   await expect(page.getByTestId('clip-picture')).toHaveCount(2);
   await page.getByRole('button', { name: 'Remove clip picture 1' }).click();
   await expect(page.getByTestId('clip-picture')).toHaveCount(1);
+  await expect(page.getByTestId('undo-toast')).toContainText('Picture removed');
   await expect
     .poll(async () => {
       const m = await singleton(page, 'music');
@@ -213,4 +259,40 @@ test('kitchen PIN must be 4 digits and saves', async ({ context }) => {
   await expect(page.getByTestId('current-pin')).toHaveText('4321');
   await expect(page.getByRole('link', { name: 'Open the kitchen screen' })).toHaveAttribute('href', '#/kitchen');
   await shot(page, 'kitchen');
+});
+
+test('TV 5 clip picture: × offers Undo, and the file is deleted only after the Undo is gone', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv5');
+  await expect(page.getByTestId('clip-picture')).toHaveCount(1);
+  await page.getByTestId('clip-file').setInputFiles({ name: 'tray.png', mimeType: 'image/png', buffer: PNG });
+  await expect(page.getByTestId('clip-picture')).toHaveCount(2);
+  const clip = async () => (await singleton(page, 'music')).clipPictures as string[];
+  await expect.poll(async () => (await clip()).length).toBe(2);
+  const [seeded, added] = await clip();
+  const pictureIds = async () => (await readCollection<{ id: string }>(page, 'pictures')).map((p) => p.id);
+
+  // the visible × is 32 px
+  const x = page.getByRole('button', { name: 'Remove clip picture 2' });
+  expect(await x.evaluate((el) => getComputedStyle(el, '::after').width)).toBe('32px');
+  await shot(page, 'tv5-clip');
+
+  // Remove, then Undo: back in the same place, file kept.
+  await page.getByRole('button', { name: 'Remove clip picture 1' }).click();
+  await expect(page.getByTestId('clip-picture')).toHaveCount(1);
+  await expect.poll(clip).toEqual([added]);
+  const toast = page.getByTestId('undo-toast');
+  await expect(toast).toBeVisible();
+  await shot(page, 'tv5-undo');
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await expect(toast).toBeHidden();
+  await expect.poll(clip).toEqual([seeded, added]);
+  expect(await pictureIds()).toContain(seeded);
+
+  // Remove without Undo: the file stays while Undo is offered, and goes after.
+  await x.click();
+  await expect.poll(clip).toEqual([seeded]);
+  await page.waitForTimeout(1000);
+  expect(await pictureIds()).toContain(added);
+  await expect(toast).toBeHidden({ timeout: 8000 });
+  await expect.poll(pictureIds).not.toContain(added);
 });

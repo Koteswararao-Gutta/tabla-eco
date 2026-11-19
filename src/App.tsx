@@ -1,17 +1,24 @@
 // Routes. Owned by the foundation. Each area's screen lives in its own folder.
+import { lazy, Suspense } from 'react';
 import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { PageHeader } from '@shared/ui';
 import type { ScreenId } from '@shared/data';
-import MenuTv from './tv-menu';
-import MusicTv from './tv-music';
-import Kitchen from './kitchen';
 import ManagerShell from './manager/ManagerShell';
+
+// Each screen's code loads only when that screen opens, so a TV never downloads the manager app and the
+// phone never downloads the TV code. The service worker keeps every part for offline start-up.
+const MenuTv = lazy(() => import('./tv-menu'));
+const MusicTv = lazy(() => import('./tv-music'));
+const Kitchen = lazy(() => import('./kitchen'));
 
 function TvRoute() {
   const { n } = useParams();
-  if (n === '5') return <MusicTv />;
-  if (n === '1' || n === '2' || n === '3' || n === '4') return <MenuTv screenId={('tv' + n) as ScreenId} />;
-  return <Navigate to="/" replace />;
+  let screen;
+  if (n === '5') screen = <MusicTv />;
+  else if (n === '1' || n === '2' || n === '3' || n === '4') screen = <MenuTv screenId={('tv' + n) as ScreenId} />;
+  else return <Navigate to="/" replace />;
+  // While the TV's code arrives: a plain black screen, never a white flash.
+  return <Suspense fallback={<div className="t-screen" />}>{screen}</Suspense>;
 }
 
 function Home() {
@@ -44,7 +51,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/tv/:n" element={<TvRoute />} />
-        <Route path="/kitchen" element={<Kitchen />} />
+        <Route path="/kitchen" element={<Suspense fallback={null}><Kitchen /></Suspense>} />
         <Route path="/manager/*" element={<ManagerShell />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -15,6 +15,8 @@ const toForm = (m: MusicSettings): Form => ({ ...m, everySeconds: String(m.every
 type Section = 'music' | 'clip';
 /** Typing waits this long before saving (or saves when the field loses focus, or the page closes). */
 const TYPING_MS = 600;
+/** How long "Picture removed" offers Undo before the stored file is deleted. */
+const UNDO_MS = 6000;
 
 export default function MusicPage() {
   const music = useSingleton('music');
@@ -129,11 +131,41 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
     setUploading(false);
   };
 
+  // A removed picture leaves the clip at once; its stored file is deleted only when Undo is no longer offered.
+  const [removed, setRemoved] = useState<{ id: string; index: number } | null>(null);
+  const removedRef = useRef(removed);
+  const undoTimer = useRef<ReturnType<typeof setTimeout>>();
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  const finishRemove = useCallback(() => {
+    clearTimeout(undoTimer.current);
+    const r = removedRef.current;
+    removedRef.current = null;
+    // Slots still loading: keep the file (leaving an unused picture behind is harmless).
+    if (r && slotsRef.current) void deletePictureIfUnused(r.id, slotsRef.current, pictures.current);
+  }, []);
+  useEffect(() => finishRemove, [finishRemove]); // leaving the page ends the Undo
+
   const removePicture = (i: number) => {
-    const id = pictures.current[i];
-    const list = pictures.current.filter((_, j) => j !== i);
+    finishRemove(); // an earlier removal can no longer be undone
+    const r = { id: pictures.current[i], index: i };
+    setPictures(pictures.current.filter((_, j) => j !== i));
+    removedRef.current = r;
+    setRemoved(r);
+    undoTimer.current = setTimeout(() => {
+      finishRemove();
+      setRemoved(null);
+    }, UNDO_MS);
+  };
+  const undoRemove = () => {
+    clearTimeout(undoTimer.current);
+    const r = removedRef.current;
+    removedRef.current = null;
+    setRemoved(null);
+    if (!r) return;
+    const list = [...pictures.current];
+    list.splice(Math.min(r.index, list.length), 0, r.id);
     setPictures(list);
-    if (slots) void deletePictureIfUnused(id, slots, list);
   };
 
   return (
@@ -227,6 +259,13 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
       </section>
 
       {failed && <p className="sc-error" role="alert">Could not save. Check the connection and try again.</p>}
+
+      {removed && (
+        <div className="sc-toast" role="status" data-testid="undo-toast">
+          <span className="sc-toast-text">Picture removed</span>
+          <button className="t-btn accent" onClick={undoRemove}>Undo</button>
+        </div>
+      )}
     </div>
   );
 }

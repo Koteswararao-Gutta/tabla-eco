@@ -47,6 +47,11 @@ p.sc-meta { cursor: default; }
 .sc-insert { position: relative; display: flex; justify-content: center; padding: 0 0 12px; }
 .sc-insert::before { content: ''; position: absolute; left: 0; right: 0; top: 20px; border-top: 1px solid var(--line); }
 .sc-insert .t-plus { position: relative; width: 44px; height: 44px; }
+/* in-between +: quiet (grey, thin line), still a full-size tap target; the clear add button is at the end */
+.sc-insert .sc-insert-plus { border: 1px solid var(--line); color: var(--muted); font-size: 20px; }
+.sc-insert .sc-insert-plus:hover, .sc-insert .sc-insert-plus:focus-visible { border-color: var(--accent); color: var(--accent); }
+.sc-add-end { margin-top: 8px; }
+.sc-add-end span { font-size: 1.25rem; line-height: 1; }
 .sc-big-plus { width: 100%; margin-top: 16px; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 1.5px dashed var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font-weight: 600; cursor: pointer; }
 .sc-big-plus .t-plus, .sc-pic-empty .t-plus { width: 52px; height: 52px; font-size: 28px; }
 
@@ -65,9 +70,9 @@ p.sc-meta { cursor: default; }
 .sc-clip { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius-sm); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
 .sc-clip:has(img) { background: #000; }
 .sc-clip img { width: 100%; height: 100%; object-fit: contain; display: block; }
-/* remove: a small round × in the corner, inside a 44px tap area */
-.sc-clip-x { position: absolute; top: 0; right: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-.sc-clip-x::after { content: '×'; position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); color: var(--ink); box-shadow: var(--shadow); font-size: 16px; line-height: 21px; text-align: center; }
+/* remove: a round × in the corner (32px), inside a 48px tap area */
+.sc-clip-x { position: absolute; top: 0; right: 0; width: 48px; height: 48px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.sc-clip-x::after { content: '×'; position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; background: var(--bg); color: var(--ink); box-shadow: var(--shadow); font-size: 22px; line-height: 31px; text-align: center; }
 .sc-clip-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px; border: 1.5px dashed var(--line); background: var(--surface); color: var(--muted); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 .sc-clip-add:disabled { opacity: 0.5; cursor: not-allowed; }
 .sc-clip-add .t-plus { width: 30px; height: 30px; font-size: 18px; }
@@ -78,3 +83,8 @@ p.sc-meta { cursor: default; }
 .sc-page a.t-btn { text-decoration: none; color: var(--ink); }
 .sc-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
 .sc-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
+
+/* "Picture removed" with Undo, for a few seconds (same look as the catering toast) */
+.sc-toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30; width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
+.sc-toast-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-toast .t-btn { flex: none; }
