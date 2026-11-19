@@ -84,7 +84,8 @@ p.sc-meta { cursor: default; }
 .sc-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
 .sc-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
 
-/* "Picture removed" with Undo, for a few seconds (same look as the catering toast) */
-.sc-toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30; width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
+/* "Picture removed" with Undo, for a few seconds (same look as the catering toast). It sits right under the
+   clip pictures, in the page, so it never covers them or the Add picture tile. */
+.sc-toast { align-self: flex-start; max-width: 100%; scroll-margin-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
 .sc-toast-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-toast .t-btn { flex: none; }

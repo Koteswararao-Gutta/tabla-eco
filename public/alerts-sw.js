@@ -89,27 +89,37 @@ async function keepShellAssets(cache, res) {
     const scope = self.registration.scope;
     // Each screen's code is a separate file loaded when that screen opens. Keep them all now, so a TV
     // that has opened once still starts offline (its first load may happen before this worker is running).
+    let listed = false;
     try {
       const list = await fetch(new URL('asset-manifest.json', scope).href, { cache: 'no-cache' });
       if (list.ok) {
+        const all = new Set();
         for (const e of Object.values(await list.json())) {
-          for (const f of [e.file, ...(e.css || []), ...(e.assets || [])]) if (typeof f === 'string' && f.startsWith('assets/')) used.add(f);
+          for (const f of [e.file, ...(e.css || []), ...(e.assets || [])]) if (typeof f === 'string' && f.startsWith('assets/')) all.add(f);
+        }
+        // Use the list only when it belongs to this page (a deploy can land between the two downloads).
+        if ([...used].every((n) => all.has(n))) {
+          for (const f of all) used.add(f);
+          listed = true;
         }
       }
     } catch {
       /* no list: screens' files are still kept the first time each one opens */
     }
+    let complete = true;
     for (const name of used) {
       const url = new URL(name, scope).href;
-      if (!(await cache.match(url))) await cache.add(url).catch(() => {});
+      if (!(await cache.match(url))) await cache.add(url).catch(() => (complete = false));
     }
+    // Only once every file of the new version is kept: drop the files of older versions (each deploy renames
+    // them all). Without the list, only old entry files go, since the page names nothing else.
+    if (!complete) return;
     for (const key of await cache.keys()) {
       const p = new URL(key.url).pathname;
       const i = p.indexOf('/assets/');
       if (i < 0) continue;
       const name = p.slice(i + 1);
-      // Old entry files go. Old screen files stay (small), in case a window still running the old version opens one.
-      if (!used.has(name) && /^assets\/index-/.test(name)) await cache.delete(key);
+      if (!used.has(name) && (listed || /^assets\/index-/.test(name))) await cache.delete(key);
     }
   } catch {
     /* keeping old files is harmless */

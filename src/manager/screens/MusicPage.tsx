@@ -256,16 +256,16 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
           </div>
         </div>
         {uploadFailed && <p className="sc-error" role="alert">That file could not be saved as a picture. Try another one.</p>}
+        {removed && (
+          <div className="sc-toast" role="status" data-testid="undo-toast" ref={(el) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })}>
+            <span className="sc-toast-text">Picture removed</span>
+            <button className="t-btn accent" onClick={undoRemove}>Undo</button>
+          </div>
+        )}
       </section>
 
       {failed && <p className="sc-error" role="alert">Could not save. Check the connection and try again.</p>}
 
-      {removed && (
-        <div className="sc-toast" role="status" data-testid="undo-toast">
-          <span className="sc-toast-text">Picture removed</span>
-          <button className="t-btn accent" onClick={undoRemove}>Undo</button>
-        </div>
-      )}
     </div>
   );
 }
