@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 import { openScreen, readCollection } from './helpers';
 import type { CateringOrder } from '../src/shared/data/types';
 
@@ -12,8 +12,31 @@ async function typePin(kitchen: Page, pin: string) {
 
 test.setTimeout(60_000);
 
+/** The kitchen's 1-hour alarm covers the whole screen, and a sample order can be due within the hour at
+ *  any time of day. So unless a test sets its own staff hours, the staff schedule starts as "closed every
+ *  day": heads-ups still show as a banner, but the alarm stays off. */
+async function newContext(browser: Browser, opts: BrowserContextOptions = {}) {
+  const context = await browser.newContext(opts);
+  await context.addInitScript(() => {
+    if (localStorage.getItem('tabla:singletons')) return;
+    const days = Array.from({ length: 7 }, () => ({ closed: true }));
+    localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
+  });
+  return context;
+}
+
+/** Staff hours for the test (test-only): 'open' = staffed all day, every day; 'closed' = never. */
+async function setHours(page: Page, hours: 'open' | 'closed') {
+  await page.evaluate((h) => {
+    const t = JSON.parse(localStorage.getItem('tabla:singletons') || '{}');
+    const day = h === 'open' ? { open: 0, close: 1440, brk: null } : { closed: true };
+    t.staffConfig = { id: 'staffConfig', settings: { days: Array.from({ length: 7 }, () => day) } };
+    localStorage.setItem('tabla:singletons', JSON.stringify(t));
+  }, hours);
+}
+
 test('manager adds an order, kitchen sees it live, completes, undoes and reopens', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
   const kitchen = await openScreen(context, '/kitchen');
@@ -153,7 +176,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
 });
 
 test('kitchen stays unlocked on this tablet through a reload, until Lock or a new PIN', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
   const kitchen = await openScreen(context, '/kitchen');
   await typePin(kitchen, '1234');
   await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
@@ -189,21 +212,18 @@ test('kitchen stays unlocked on this tablet through a reload, until Lock or a ne
   await context.close();
 });
 
-test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
-  // Count chimes, and watch the sound output, through a stand-in for the browser's sound output.
+test('kitchen 1-hour alarm: full screen, flashing, rings until touched (at least twice), only in staffed hours', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  // Count beeps through a stand-in for the browser's sound output, and record the app's volume switch.
   await context.addInitScript(() => {
-    const w = window as unknown as { chimeNotes: number; audioCtxs: AudioContext[]; AudioContext: unknown };
-    w.chimeNotes = 0;
-    w.audioCtxs = [];
+    const w = window as unknown as { beeps: number; loud: boolean[]; AudioContext: unknown; TablaAlarm: unknown };
+    w.beeps = 0;
+    w.loud = [];
+    w.TablaAlarm = { loud: (on: boolean) => w.loud.push(on) };
     const Real = window.AudioContext;
     w.AudioContext = class extends Real {
-      constructor() {
-        super();
-        w.audioCtxs.push(this);
-      }
       createOscillator() {
-        w.chimeNotes++;
+        w.beeps++;
         return super.createOscillator();
       }
     };
@@ -212,52 +232,76 @@ test('kitchen heads-up shows over the PIN screen, rings every 45 s until Got it'
   await page.clock.install();
   await page.goto('/#/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
-  await page.evaluate(() => {
-    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
-    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed';
-    const now = Date.now();
-    t.soon = { id: 'soon', customerName: 'Anita Rao', phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + 30 * 60_000 };
-    localStorage.setItem('tabla:orders', JSON.stringify(t));
-  });
-  await page.reload();
+  const addOrder = (id: string, name: string, inMin: number) =>
+    page.evaluate(({ id, name, inMin }: { id: string; name: string; inMin: number }) => {
+      const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+      for (const o of Object.values(t) as { status: string }[]) o.status = 'completed'; // only this order is open
+      const now = Date.now();
+      t[id] = { id, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + inMin * 60_000 };
+      localStorage.setItem('tabla:orders', JSON.stringify(t));
+    }, { id, name, inMin });
+  const beeps = () => page.evaluate(() => (window as unknown as { beeps: number }).beeps);
+  const loud = () => page.evaluate(() => (window as unknown as { loud: boolean[] }).loud);
+  const BEEPS = 8; // per ring
+  const CYCLE = 8 * 360 + 1200; // one ring plus the pause
+  const alarm = page.getByTestId('kitchen-alarm');
   const banner = page.getByTestId('kitchen-reminder');
-  await expect(banner).toContainText('Anita Rao pickup at'); // locked, still shown
-  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
-  await shot(page, 'kitchen-reminder-locked');
-  const notes = () => page.evaluate(() => (window as unknown as { chimeNotes: number }).chimeNotes);
-  const first = await notes();
-  expect(first).toBeGreaterThan(0); // rang once
-  // A tap anywhere wakes the sound.
-  await page.mouse.click(5, 760);
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { audioCtxs: AudioContext[] }).audioCtxs.map((c) => c.state).join()))
-    .toBe('running'); // one sound output, and it is on
-  await page.clock.runFor(46_000);
-  expect(await notes()).toBe(first * 2); // rang again
-  await page.clock.runFor(45_000);
-  expect(await notes()).toBe(first * 3);
-  // Unlocking and locking again neither replays the chime nor restarts the 45 s.
+
+  // Out of hours (break, closed): only the quiet banner, no alarm, no sound.
+  await setHours(page, 'closed');
+  await addOrder('soon', 'Anita Rao', 30);
+  await page.reload();
+  await expect(banner).toContainText('Anita Rao pickup at');
   await page.clock.runFor(20_000);
-  await typePin(page, '1234');
-  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
-  await expect(banner).toContainText('Anita Rao');
-  await page.getByRole('button', { name: 'Lock' }).click();
-  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
-  expect(await notes()).toBe(first * 3);
-  await page.clock.runFor(26_000); // 45 s after the last ring
-  expect(await notes()).toBe(first * 4);
-  // Got it works without the PIN, and the ringing stops.
-  await banner.getByRole('button', { name: 'Got it' }).click();
+  await expect(alarm).toHaveCount(0);
+  expect(await beeps()).toBe(0);
+
+  // Staffed: the alarm covers the whole screen, over the PIN screen, and flashes.
+  await setHours(page, 'open');
+  await page.reload();
+  await expect(alarm).toBeVisible();
+  await expect(alarm).toContainText('Catering order soon');
+  await expect(alarm).toContainText('Anita Rao');
+  await expect(alarm).toContainText('Pickup at');
+  await expect(alarm).toContainText('Touch anywhere to stop');
+  expect(await alarm.boundingBox()).toEqual({ x: 0, y: 0, width: 1024, height: 768 });
+  await expect(alarm).toHaveCSS('animation-name', 'k-alarm-flash');
+  await expect(alarm).toHaveCSS('animation-iteration-count', 'infinite');
+  await shot(page, 'kitchen-alarm');
+  expect(await page.evaluate(() => { const top = document.elementFromPoint(512, 700); return !!top?.closest('.k-alarm'); })).toBe(true); // keypad covered
+  expect(await beeps()).toBe(BEEPS); // first ring
+  expect(await loud()).toEqual([true]); // the app turns the volume up
+  // Nobody touches it: it keeps ringing.
+  await page.clock.runFor(5 * CYCLE);
+  expect(await beeps()).toBe(6 * BEEPS);
+
+  // A touch anywhere stops it at once and acknowledges the order (no PIN needed).
+  await page.mouse.click(100, 100);
+  await expect(alarm).toHaveCount(0);
   await expect(banner).toHaveCount(0);
-  await page.clock.runFor(100_000);
-  expect(await notes()).toBe(first * 4);
+  expect(await loud()).toEqual([true, false]); // volume back
+  await page.clock.runFor(30_000);
+  expect(await beeps()).toBe(6 * BEEPS);
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible(); // the touch didn't press a key
+  await page.reload();
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await expect(alarm).toHaveCount(0); // saved on the order
+
+  // Touched during the first ring: it still finishes 2 full rings.
+  await addOrder('next', 'Bharat Iyer', 50);
+  await page.reload();
+  await expect(alarm).toContainText('Bharat Iyer');
+  expect(await beeps()).toBe(BEEPS); // first ring playing
+  await alarm.click();
+  await expect(alarm).toHaveCount(0);
+  await page.clock.runFor(3 * CYCLE);
+  expect(await beeps()).toBe(2 * BEEPS); // the second ring still played, then quiet
   await context.close();
 });
 
 test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on screen', async ({ browser }) => {
   // A New York tablet shows the time zone warning strip, which pushes the page down.
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 }, timezoneId: 'America/New_York' });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1024, height: 768 }, timezoneId: 'America/New_York' });
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   await page.evaluate(() => {
@@ -296,7 +340,7 @@ test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on
 });
 
 test('kitchen: shows "Tap anywhere to turn on sound" while the browser keeps sound off', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1024, height: 768 } });
   // A stand-in sound output that stays off until a tap, like Chrome after a restart.
   await context.addInitScript(() => {
     class FakeAudio extends EventTarget {
@@ -334,7 +378,7 @@ test('kitchen: shows "Tap anywhere to turn on sound" while the browser keeps sou
 });
 
 test('kitchen: Show all orders goes back to open orders after 3 minutes with no touch', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   await page.clock.install();
   await page.goto('/#/kitchen');
@@ -351,7 +395,7 @@ test('kitchen: Show all orders goes back to open orders after 3 minutes with no 
 });
 
 test('saving an edit never undoes a completion made in the kitchen meanwhile', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
   const kitchen = await openScreen(context, '/kitchen');
@@ -381,7 +425,7 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
 });
 
 test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late orders drop off', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   // An order due in 30 minutes and one 3 hours late, written straight into the local store (test-only).
@@ -430,7 +474,7 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
 });
 
 test('kitchen: long names wrap, portrait all-orders rows fit, offline is clear', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 800, height: 1280 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 800, height: 1280 } });
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   await page.evaluate(() => {
@@ -456,7 +500,7 @@ test('kitchen: long names wrap, portrait all-orders rows fit, offline is clear',
 });
 
 test('scan paper order fills the new order form for checking, then saves', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
   await manager.getByRole('button', { name: '+ New order' }).click();
@@ -484,7 +528,7 @@ test('scan paper order fills the new order form for checking, then saves', async
 });
 
 test('paste a customer message fills the new order form, then saves', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
   await manager.getByRole('button', { name: '+ New order' }).click();
@@ -513,7 +557,7 @@ test('paste a customer message fills the new order form, then saves', async ({ b
 });
 
 test('one tap on Paste message reads what was copied and fills the form', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const manager = await openScreen(context, '/manager/catering');
   await manager.evaluate(() => navigator.clipboard.writeText('Hi, Meera here. 2 trays veg biryani and 50 gulab jamun tomorrow 6:30pm pickup'));
   await manager.getByRole('button', { name: '+ New order' }).click();
@@ -526,7 +570,7 @@ test('one tap on Paste message reads what was copied and fills the form', async 
 });
 
 test('calendar shows the month, and a new order from it warns about a nearby order', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await manager.getByRole('button', { name: 'Calendar' }).click();
   const cal = manager.getByRole('dialog', { name: 'Calendar' });
@@ -556,7 +600,7 @@ test('calendar shows the month, and a new order from it warns about a nearby ord
 });
 
 test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   const card = manager.getByTestId('alerts');
   await expect(card).toContainText('Get a phone alert 1 hour before each order.');
@@ -567,7 +611,7 @@ test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
 });
 
 test('catering list fits a phone with a long no-space customer name', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
   await manager.evaluate(() => {
@@ -584,7 +628,7 @@ test('catering list fits a phone with a long no-space customer name', async ({ b
 });
 
 test('order summary: big time, Call link, items; Edit opens the form', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
   const summary = manager.getByRole('dialog', { name: 'Order details' });
@@ -607,7 +651,7 @@ test('order summary: big time, Call link, items; Edit opens the form', async ({ 
 });
 
 test('closing a form with typed changes asks first; untouched forms close at once', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   // Untouched new order: Escape closes straight away.
   await manager.getByRole('button', { name: '+ New order' }).click();
@@ -658,7 +702,7 @@ test('closing a form with typed changes asks first; untouched forms close at onc
 });
 
 test('Mark completed in the edit form saves the typed changes too, and checks them first', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
   await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
@@ -680,7 +724,7 @@ test('Mark completed in the edit form saves the typed changes too, and checks th
 });
 
 test('Save stays visible at the bottom of a long order form', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await manager.getByRole('button', { name: '+ New order' }).click();
   const sheet = manager.getByRole('dialog', { name: 'New order' });
@@ -703,7 +747,7 @@ test('Save stays visible at the bottom of a long order form', async ({ browser }
 });
 
 test('kitchen edits an order: history shows who changed what, on the tablet and the manager app', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1 });
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
   const kitchen = await openScreen(context, '/kitchen');
@@ -772,7 +816,7 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
 });
 
 test('print name tags: one tag per dish, veg or non-veg, printed 10 to a letter sheet', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await expect(manager.getByRole('img', { name: 'Tabla Indian Restaurant' })).toBeVisible(); // the logo in the header
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
@@ -824,7 +868,7 @@ test('print name tags: one tag per dish, veg or non-veg, printed 10 to a letter 
 });
 
 test('kitchen: Print tags on an order card uses the tablet app bridge, 2 sheets for 12 dishes', async ({ browser }) => {
-  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
   const kitchen = await context.newPage();
   await kitchen.addInitScript(() => {
     (window as unknown as { jobs: string[] }).jobs = [];

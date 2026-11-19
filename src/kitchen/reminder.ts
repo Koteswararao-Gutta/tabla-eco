@@ -14,10 +14,14 @@ export type KitchenOrder = WithId<CateringOrder> & { kitchenAckFor?: number | nu
 export const ackPatch = (o: { dueAt: number }): Partial<KitchenOrder> => ({ kitchenAckFor: o.dueAt });
 
 /** Open orders whose heads-up time has come (see ringAt), not yet acknowledged for their current
- *  due time, and at most an hour late. Soonest first. */
+ *  due time, and at most an hour late (or an hour after its heads-up, when that only came at opening). Soonest first. */
 export function dueReminders<T extends KitchenOrder>(orders: readonly T[], now: number, staff?: unknown): T[] {
   return orders
-    .filter((o) => o.status === 'open' && now >= ringAt(o.dueAt, staff) && now <= o.dueAt + LATE_MS && o.kitchenAckFor !== o.dueAt)
+    .filter((o) => {
+      if (o.status !== 'open' || o.kitchenAckFor === o.dueAt) return false;
+      const ring = ringAt(o.dueAt, staff);
+      return now >= ring && now <= Math.max(o.dueAt, ring) + LATE_MS;
+    })
     .sort((a, b) => a.dueAt - b.dueAt);
 }
 
@@ -72,14 +76,33 @@ export function ringAt(dueAt: number, staff?: unknown): number {
   if (back) return back[0];
   const before = spans.filter(([, b]) => b <= target && b > target - 12 * 60 * MIN).pop(); // last chance before they leave
   if (before) return Math.max(before[0], before[1] - 15 * MIN);
+  const next = spans.find(([a]) => a > target); // nobody there before it's due: ring when they arrive
+  if (next) return next[0];
   return target;
 }
 
-/** One key per order and due time (so the chime rings again when the time changes). */
+/** True while the kitchen is staffed (staff schedule hours), so the alarm may ring. Without usable hours: always. */
+export function staffedAt(now: number, staff?: unknown): boolean {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const spans = staffedSpans(staff, d.getTime());
+  if (spans === null) return true;
+  return spans.some(([a, b]) => now >= a && now < b);
+}
+
+/** One key per order and due time (so the alarm rings again when the time changes). */
 export const ackKey = (o: { id: string; dueAt: number }) => o.id + ':' + o.dueAt;
 
-/** While a heads-up is showing and nobody has tapped "Got it", the chime rings again this often. */
-export const CHIME_REPEAT_MS = 45_000;
+// ---------- the alarm ----------
+// While a heads-up is waiting, the tablet rings a loud siren over and over until someone touches the screen.
+// It always plays at least MIN_RINGS full rings, even if someone touches it during the first one.
+
+/** One ring: a siren of ALARM_BEEPS beeps. Then a short pause, then the next ring. */
+export const ALARM_BEEPS = 8;
+const BEEP_S = 0.36;
+export const RING_MS = Math.round(ALARM_BEEPS * BEEP_S * 1000);
+export const ALARM_CYCLE_MS = RING_MS + 1200;
+export const MIN_RINGS = 2;
 
 // One sound output for the page. Browsers keep it muted until someone touches the screen,
 // so the kitchen wakes it on the first tap (PIN digits, Got it, anywhere) with wakeAudio().
@@ -98,12 +121,12 @@ function audioContext(): AudioContext | null {
   }
 }
 
-/** Call on a user tap: lets the chime play from then on. */
+/** Call on a user tap: lets the alarm sound from then on. */
 export function wakeAudio(): void {
   audioContext();
 }
 
-/** Sound is on: the browser lets the chime play. Also true when there is no sound output at all
+/** Sound is on: the browser lets the alarm sound. Also true when there is no sound output at all
  *  (nothing a tap could fix). */
 export const soundIsOn = (): boolean => !audio || audio.state === 'running';
 
@@ -115,28 +138,87 @@ export function onSoundChange(cb: () => void): () => void {
   return () => ctx.removeEventListener('statechange', cb);
 }
 
-/** Peak loudness of each note (1 is the maximum). The notes never overlap, so it never clips. */
+/** Peak loudness of each beep (1 is the maximum). The beeps never overlap, so it never clips. */
 export const CHIME_PEAK = 0.8;
 
-/** A clear four-note chime (high, low, high, low), made in the browser (no sound file needed). */
-export function chime(): void {
-  const ctx = audioContext();
-  if (!ctx) return; // No sound available: the banner still shows.
+/** The Android app's volume switch: full volume while the alarm rings, then back to what it was. */
+type Loud = { loud?: (on: boolean) => void };
+function setLoud(on: boolean): void {
   try {
-    [880, 660, 880, 660].forEach((f, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'triangle'; // fuller than a plain sine, so it carries over kitchen noise
-      o.frequency.value = f;
-      const t = ctx.currentTime + 0.05 + i * 0.5;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(CHIME_PEAK, t + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-      o.connect(g).connect(ctx.destination);
-      o.start(t);
-      o.stop(t + 0.47);
-    });
+    (window as unknown as { TablaAlarm?: Loud }).TablaAlarm?.loud?.(on);
   } catch {
-    // ignore: the banner still shows
+    // not in the app: the browser's own volume applies
   }
 }
+
+/** One ring of the siren (high, low, high, low ...), made in the browser (no sound file needed). */
+export function ring(): void {
+  const ctx = audioContext();
+  if (!ctx) return; // No sound available: the screen still flashes.
+  try {
+    for (let i = 0; i < ALARM_BEEPS; i++) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'square'; // harsh and loud, so it cuts through kitchen noise
+      o.frequency.value = i % 2 ? 740 : 1040;
+      const t = ctx.currentTime + 0.05 + i * BEEP_S;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(CHIME_PEAK, t + 0.02);
+      g.gain.setValueAtTime(CHIME_PEAK, t + BEEP_S - 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + BEEP_S - 0.02);
+      o.connect(g).connect(ctx.destination);
+      o.start(t);
+      o.stop(t + BEEP_S - 0.01);
+      playing.push(o);
+    }
+  } catch {
+    // ignore: the screen still flashes
+  }
+}
+
+let playing: OscillatorNode[] = [];
+let loop: { rings: number; stopping: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
+
+function tick(): void {
+  if (!loop) return;
+  if (loop.stopping && loop.rings >= MIN_RINGS) return endAlarm();
+  playing = [];
+  ring();
+  loop.rings++;
+  loop.timer = setTimeout(tick, ALARM_CYCLE_MS);
+}
+
+function endAlarm(): void {
+  if (loop?.timer) clearTimeout(loop.timer);
+  loop = null;
+  playing.forEach((o) => {
+    try {
+      o.stop();
+    } catch {
+      // already stopped
+    }
+  });
+  playing = [];
+  setLoud(false);
+}
+
+/** Starts ringing over and over (does nothing if already ringing; a pending stop is called off). */
+export function startAlarm(): void {
+  if (loop) {
+    loop.stopping = false;
+    return;
+  }
+  setLoud(true);
+  loop = { rings: 0, stopping: false, timer: null };
+  tick();
+}
+
+/** Stops the ringing: at once if it already rang MIN_RINGS full rings, otherwise after finishing them. */
+export function stopAlarm(): void {
+  if (!loop) return;
+  if (loop.rings > MIN_RINGS) return endAlarm(); // a later ring is playing: cut it off now
+  loop.stopping = true;
+}
+
+/** How many rings the current alarm has started (0 when quiet). For tests. */
+export const alarmRings = (): number => loop?.rings ?? 0;
