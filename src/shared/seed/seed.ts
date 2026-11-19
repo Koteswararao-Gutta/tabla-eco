@@ -1,7 +1,9 @@
 // Sample data so every link shows something real from the first load.
-// Runs once per browser (when no settings exist yet). resetDemoData() wipes and reseeds.
+// Runs once (see rule.ts: in the local preview when not seeded yet; on Firebase only into a brand-new,
+// empty project, never over real data). resetDemoData() wipes and reseeds the local preview.
 
 import { store } from '../data';
+import { seedDecision } from './rule';
 import type { AppSettings, CateringOrder, MusicSettings, Screen, Slot } from '../data/types';
 
 const W = 1920;
@@ -36,10 +38,11 @@ const SCREENS: Screen[] = [
 ];
 
 export async function seedIfEmpty(): Promise<void> {
+  const decision = await seedDecision(store);
+  if (decision === 'skip') return;
   // The marker is written first, so a seed that fails partway never runs twice and duplicates data.
-  if (await store.getDoc('singletons', 'seeded')) return;
   await store.setDoc('singletons', 'seeded', { at: store.now() });
-  await seed();
+  if (decision === 'seed') await seed();
 }
 
 export async function resetDemoData(): Promise<void> {
