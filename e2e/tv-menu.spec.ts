@@ -173,3 +173,18 @@ test('screenshots at 1920x1080', async ({ browser }) => {
   await tv2.screenshot({ path: 'test-results/screens/tv2-special.png' });
   await context.close();
 });
+
+test('a TV opened once still starts with no internet (its own code is kept for offline)', async ({ context }) => {
+  const tv = await openScreen(context, '/tv/1');
+  await expect(now(tv)).toBeVisible();
+  // The service worker keeps every screen's code, also the parts loaded only when a screen opens.
+  await tv.evaluate(() => navigator.serviceWorker.ready);
+  await expect
+    .poll(() => tv.evaluate(async () => (await (await caches.open('tabla-shell-v2')).keys()).map((r) => r.url).filter((u) => /assets\/tv-menu-.*\.js$/.test(u)).length), { timeout: 10_000 })
+    .toBe(1);
+  await context.setOffline(true);
+  await tv.reload();
+  await expect(now(tv)).toBeVisible();
+  await expect(tv.locator('.tvm-layer img').first()).toBeVisible();
+  await context.setOffline(false);
+});
