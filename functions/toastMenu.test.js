@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu } from './toastMenu.js';
+import { ALERT_AFTER_MS, menuFromState, nextStatus, readFromPage, readPageState, readToastMenu, withTimeout } from './toastMenu.js';
 
 // Shaped like Tabla's real ordering page (checked 2026-11-18): the menu sits in window.__OO_STATE__.
 const state = {
@@ -100,4 +100,9 @@ test('nextStatus alerts once after failing for an hour, and once when it works a
   assert.match(s.alert.title, /again/);
   assert.equal(s.status.failingSince, null);
   assert.equal(nextStatus(s.status, { ok: true, source: 'page' }, since + 4 * ALERT_AFTER_MS).alert, null);
+});
+
+test('withTimeout gives up on a slow step but passes a fast one through', async () => {
+  assert.equal(await withTimeout(Promise.resolve(5), 50, 'slow'), 5);
+  await assert.rejects(withTimeout(new Promise(() => {}), 20, 'Chrome took too long'), /took too long/);
 });
