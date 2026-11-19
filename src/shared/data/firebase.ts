@@ -23,7 +23,6 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { fitPicture } from './local';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
@@ -242,8 +241,10 @@ export class FirebaseStore implements DataStore {
     await this.ready;
     const d = new Date(this.now());
     const p = (n: number) => String(n).padStart(2, '0');
-    const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
     try {
+      // Loaded only when a photo or message is read, so the app itself opens faster.
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const call = httpsCallable<object, ScannedOrder>(getFunctions(this.app), 'readOrder', { timeout: 70_000 });
       const res = await call({
         ...input,
         today: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,

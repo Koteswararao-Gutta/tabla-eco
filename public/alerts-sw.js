@@ -87,6 +87,18 @@ async function keepShellAssets(cache, res) {
     const used = new Set(Array.from(html.matchAll(/assets\/[^"'\s)]+/g), (m) => m[0]));
     if (!used.size) return;
     const scope = self.registration.scope;
+    // Each screen's code is a separate file loaded when that screen opens. Keep them all now, so a TV
+    // that has opened once still starts offline (its first load may happen before this worker is running).
+    try {
+      const list = await fetch(new URL('asset-manifest.json', scope).href, { cache: 'no-cache' });
+      if (list.ok) {
+        for (const e of Object.values(await list.json())) {
+          for (const f of [e.file, ...(e.css || []), ...(e.assets || [])]) if (typeof f === 'string' && f.startsWith('assets/')) used.add(f);
+        }
+      }
+    } catch {
+      /* no list: screens' files are still kept the first time each one opens */
+    }
     for (const name of used) {
       const url = new URL(name, scope).href;
       if (!(await cache.match(url))) await cache.add(url).catch(() => {});
@@ -96,7 +108,7 @@ async function keepShellAssets(cache, res) {
       const i = p.indexOf('/assets/');
       if (i < 0) continue;
       const name = p.slice(i + 1);
-      // Only the entry files are named in the page; lazy chunks are kept unless the entry changed.
+      // Old entry files go. Old screen files stay (small), in case a window still running the old version opens one.
       if (!used.has(name) && /^assets\/index-/.test(name)) await cache.delete(key);
     }
   } catch {
