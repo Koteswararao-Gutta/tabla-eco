@@ -2,15 +2,30 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import './theme.css';
+import logoUrl from './brand/tabla-logo.webp';
+
+/** The Tabla logo (transparent background). */
+export const LOGO_URL: string = logoUrl;
+
+export function Logo({ className }: { className?: string }) {
+  return <img className={'t-logo' + (className ? ' ' + className : '')} src={logoUrl} alt="Tabla Indian Restaurant" draggable={false} />;
+}
 
 export { ErrorBoundary } from './ErrorBoundary';
 export { TimeZoneNote } from './TimeZoneNote';
 
-export function PageHeader({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
+export function PageHeader({ title, sub, action, logo }: { title: string; sub?: string; action?: ReactNode; logo?: boolean }) {
   return (
     <>
       <header className="t-header">
-        <h1>{title}</h1>
+        {logo ? (
+          <div className="t-title">
+            <Logo />
+            <h1>{title}</h1>
+          </div>
+        ) : (
+          <h1>{title}</h1>
+        )}
         {action}
       </header>
       {sub && <p className="t-sub">{sub}</p>}

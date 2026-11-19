@@ -25,7 +25,7 @@ function Home() {
   const nav = useNavigate();
   return (
     <main className="t-page sc-page">
-      <PageHeader title="Screens" sub="Tap a screen to change what it shows." />
+      <PageHeader logo title="Screens" sub="Tap a screen to change what it shows." />
       <div className="t-grid2 sc-tiles">
         {SCREEN_IDS.map((id) => {
           const s = screens?.find((x) => x.id === id);
