@@ -26,6 +26,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- Lets Tabla be chosen as the home app (Google TV box, tablet): Home and standby lead back here. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
@@ -34,5 +40,7 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- Every few minutes: brings Tabla back to the front if something else is showing (see Watchdog). -->
+        <receiver android:name=".Watchdog" android:exported="false" />
     </application>
 </manifest>
