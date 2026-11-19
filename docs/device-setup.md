@@ -19,21 +19,23 @@ Any TV screen (TV 1 to TV 5) can run on any of the TV devices; you pick it when 
 
 1. Connect to the restaurant Wi-Fi.
 2. **Time zone: Arizona (Phoenix).** Settings > Date & time (Fire TV: Settings > Preferences > Time zone). Automatic time ON, time zone "Phoenix" / "Mountain Standard Time (Arizona)". Not "Denver" (Arizona has no daylight saving).
-3. Check for system updates (this also updates the web viewer).
+3. Check for system updates. The web viewer updates separately: on a Google TV box or the tablet, update **Android System WebView** (and Chrome) in the Play Store; on Fire TV it comes with the system update.
 
 ## Google TV box
 
 1. **Allow the install:** Settings > System > About > click "Android TV OS build" 7 times (turns on developer options). Then Settings > Apps > Security & restrictions > Unknown sources: turn on for the app you download with (Downloader from the Play Store is easiest).
 2. **Install:** open Downloader, type the download address above, install, Open.
 3. **Choose the screen** (TV 1 to TV 5). The bottom of this page shows "Web viewer: Chrome N". If it shows a red "too old" warning, update **Android System WebView** in the Play Store and restart.
-4. **Auto-start:** on the same page press "Allow auto-start" and turn on "Display over other apps" for Tabla (or Settings > Apps > Special app access > Display over other apps).
+4. **Auto-start:** on the same page press "Allow auto-start" and turn on "Display over other apps" for Tabla (or Settings > Apps > Special app access > Display over other apps). If the box has no such setting, use a computer with adb (as for Fire TV below): `adb connect <box-ip>:5555`, then `adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow`.
 5. **Tabla as the home app (optional, best):** if pressing Home shows "Choose a home app", pick Tabla > Always. Most Google TV boxes don't ask; then, from a computer with adb: `adb shell cmd package set-home-activity com.tabla.tv/.MainActivity`. To undo it, uninstall Tabla.
 6. **Never sleep:** Settings > System > Energy (or Power & energy) > "Turn off display" / "When inactive": Never. Settings > System > Ambient mode (screensaver): Off.
 7. **On the Vizio:** Settings > System > Power Mode: Quick Start. Turn off Sleep Timer, Auto Power Off and any Eco / energy-saving mode. Keep CEC on (System > CEC) so the Vizio remote turns both on together.
 
 ## Fire TV Stick
 
-Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself when the TV turns on, and within about 5 minutes if someone leaves it.
+Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself when the TV turns on, and within up to 10 minutes if someone leaves it.
+
+**Check the model first:** the newest Fire TV Sticks running **Vega OS** (for example Fire TV Stick 4K Select) are not Android and cannot install `tabla.apk`. Use an Android-based Fire TV Stick or a Google TV box instead.
 
 1. **Developer options:** Settings > My Fire TV > About > click the device name 7 times. Then My Fire TV > Developer options: turn on **ADB debugging**.
 2. **Downloader:** search for "Downloader" (by AFTVnews) and install it. Settings > My Fire TV > Developer options > Install unknown apps > Downloader: ON.
@@ -61,7 +63,7 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 
 - **Press Back 5 times quickly** (within 3 seconds). The "Which screen is this?" page opens. From there you can pick a different screen, allow auto-start, or press **Open device settings**.
 - While that page has been opened, Tabla waits 30 minutes before pulling itself back to the front, so you have time in settings.
-- On Fire TV, Home also leaves Tabla; it comes back within about 5 minutes, or when the TV is turned off and on.
+- On Fire TV, Home also leaves Tabla; it comes back within up to 10 minutes, or when the TV is turned off and on.
 
 ## Updates
 
@@ -76,7 +78,7 @@ Leave every screen running for a full day and tick each one:
 - [ ] Each screen shows the right thing (TV 1 left, TV 2 right, TV 3/4 mirror, TV 5 music, kitchen).
 - [ ] Pull the power plug, plug it back in: the screen comes back by itself (no remote).
 - [ ] Turn the TV off and on with its remote: the screen comes back.
-- [ ] Press Home: Tabla comes back (straight away on Google TV/tablet, within ~5 minutes on Fire TV).
+- [ ] Press Home: Tabla comes back (straight away on Google TV/tablet, within up to 10 minutes on Fire TV).
 - [ ] Unplug the internet router for 10 minutes: screens keep showing; they catch up after it is back.
 - [ ] Change a menu picture in the Manager app: all menu TVs show it.
 - [ ] TV 5 plays music with sound; a catering clip shows between songs.
