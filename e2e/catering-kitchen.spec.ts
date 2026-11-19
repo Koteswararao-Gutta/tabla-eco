@@ -769,3 +769,87 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   expect(again.history).toHaveLength(2);
   await context.close();
 });
+
+test('print name tags: one tag per dish, veg or non-veg, printed 10 to a letter sheet', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await expect(manager.getByRole('img', { name: 'Tabla Indian Restaurant' })).toBeVisible(); // the logo in the header
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: /Print name tags/ }).click();
+  const sheet = manager.getByRole('dialog', { name: 'Name tags' });
+  const rows = sheet.getByTestId('tag-row');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0).getByRole('textbox')).toHaveValue('Chicken Dum Biryani');
+  await expect(rows.nth(0).getByRole('button', { name: 'Non-veg' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(1).getByRole('textbox')).toHaveValue('Veg Dum Biryani');
+  await expect(rows.nth(1).getByRole('button', { name: 'Veg', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(3).getByRole('textbox')).toHaveValue('Gulab Jamun');
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-tags-sheet');
+
+  // Fix a name, add one, remove one: the printout follows.
+  await rows.nth(2).getByRole('textbox').fill('Cucumber Raita');
+  await sheet.getByRole('button', { name: '+ Add a tag' }).click();
+  await rows.nth(4).getByRole('textbox').fill('Mutton Kheema');
+  await rows.nth(4).getByRole('button', { name: 'Non-veg' }).click();
+  await sheet.getByRole('button', { name: 'Remove Gulab Jamun' }).click();
+  await expect(sheet.getByRole('button', { name: 'Print 4 tags (1 sheet)' })).toBeEnabled();
+
+  // On screen the tags are hidden; printing shows only them.
+  await expect(manager.getByTestId('name-tag').first()).toBeHidden();
+  await manager.emulateMedia({ media: 'print' });
+  const tags = manager.getByTestId('name-tag');
+  await expect(tags).toHaveCount(4);
+  await expect(tags.nth(0)).toBeVisible();
+  await expect(tags.nth(2)).toContainText('Cucumber Raita');
+  await expect(tags.nth(3)).toContainText('Mutton Kheema');
+  await expect(tags.nth(3)).toContainText('Non-vegetarian');
+  await expect(tags.nth(1)).toContainText('Vegetarian');
+  await expect(manager.getByRole('dialog', { name: 'Name tags' })).toBeHidden();
+  await manager.emulateMedia({ media: 'screen' });
+
+  // The Print button prints (window.print in a browser; the Android app's bridge when there is one).
+  await manager.evaluate(() => {
+    (window as unknown as { printed: number }).printed = 0;
+    window.print = () => void ((window as unknown as { printed: number }).printed += 1);
+  });
+  await sheet.getByRole('button', { name: 'Print 4 tags (1 sheet)' }).click();
+  await expect.poll(() => manager.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(1);
+
+  // Close goes back to the order.
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect(manager.getByRole('dialog', { name: 'Order details' })).toBeVisible();
+  await context.close();
+});
+
+test('kitchen: Print tags on an order card uses the tablet app bridge, 2 sheets for 12 dishes', async ({ browser }) => {
+  const context = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const kitchen = await context.newPage();
+  await kitchen.addInitScript(() => {
+    (window as unknown as { jobs: string[] }).jobs = [];
+    (window as unknown as { TablaPrint: { print: (n: string) => void } }).TablaPrint = { print: (n) => void (window as unknown as { jobs: string[] }).jobs.push(n) };
+  });
+  await kitchen.goto('/#/kitchen');
+  for (const d of '1234') await kitchen.getByRole('button', { name: d, exact: true }).click();
+  // Give Priya's order 12 dishes.
+  await kitchen.getByRole('article', { name: 'Order for Priya Sharma' }).getByRole('button', { name: 'Edit' }).click();
+  const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
+  const dishes = ['Rose Milk - 15 Gallons', 'Reshampatti Chicken - 6 FT', 'Kodi Vepudu - 5 FT', 'Baby Corn Chilli - 4 FT', 'Veg Hakka Noodles - 4 FT', 'Mango Mudda Pappu Rice - 6 FT', 'Donne Chicken Biryani - 6 FT', 'Andhra Chicken Curry (Bone-in) - 4 FT', 'Phool Makhana Masala - 3 FT', 'Madupu Karakam Podi', 'Curd Rice - 4 FT', 'Semiya Kheer - 4 FT'];
+  await edit.getByLabel('Order items (one per line)').fill(dishes.join('\n'));
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toBeHidden();
+  await kitchen.getByRole('article', { name: 'Order for Priya Sharma' }).getByRole('button', { name: 'Print tags' }).click();
+  const sheet = kitchen.getByRole('dialog', { name: 'Name tags' });
+  await expect(sheet.getByTestId('tag-row')).toHaveCount(12);
+  await kitchen.waitForTimeout(400);
+  await shot(kitchen, 'kitchen-tags-sheet');
+  await sheet.getByRole('button', { name: 'Print 12 tags (2 sheets)' }).click();
+  await expect.poll(() => kitchen.evaluate(() => (window as unknown as { jobs: string[] }).jobs)).toEqual([expect.stringMatching(/^Tags Priya Sharma /)]);
+
+  // The printout, as a PDF and as pictures for the eye check.
+  await kitchen.emulateMedia({ media: 'print' });
+  await expect(kitchen.getByTestId('name-tag')).toHaveCount(12);
+  await kitchen.evaluate(() => document.fonts.ready);
+  await kitchen.pdf({ path: `${SHOTS}/tags.pdf`, format: 'Letter', printBackground: true, preferCSSPageSize: true });
+  await context.close();
+});

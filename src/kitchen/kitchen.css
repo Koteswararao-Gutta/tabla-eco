@@ -26,6 +26,7 @@
 .k-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 16px 0; background: var(--bg); border-bottom: 1px solid var(--line); margin-bottom: 20px; }
 .k-bar-title { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex: 1; min-width: 0; }
 .k-bar h1 { margin: 0; font-size: 1.8rem; font-weight: 650; }
+.k-logo { height: 48px; }
 .k-count { min-width: 40px; height: 40px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.2rem; }
 .k-offline { font-size: 1.05rem; padding: 8px 16px; border: 1px solid var(--bad); }
 .k-clock { font-size: 1.4rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -53,8 +54,8 @@
 .k-items li::before { content: ''; position: absolute; left: 2px; top: 0.6em; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .k-notes { margin: 0; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 1.1rem; }
 .k-notes::before { content: 'Note: '; font-weight: 700; }
-.k-actions { display: flex; gap: 12px; margin-top: auto; }
-.k-done { flex: 1; min-height: 64px; font-size: 1.15rem; }
+.k-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; }
+.k-done { flex: 1 1 200px; min-height: 64px; font-size: 1.15rem; }
 .k-edit { min-height: 64px; min-width: 110px; font-size: 1.15rem; }
 /* "Changed by Manager, 5:42 PM": tap to see what changed. */
 .k-changed { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 48px; padding: 8px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-size: 1.05rem; font-weight: 600; text-align: left; cursor: pointer; }

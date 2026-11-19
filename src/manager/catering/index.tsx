@@ -7,6 +7,7 @@ import {
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
+import { TagsSheet } from './TagsSheet';
 import './catering.css';
 
 type Order = WithId<CateringOrder>;
@@ -51,6 +52,8 @@ export default function Catering() {
   const [showHistory, setShowHistory] = useState(false);
   const [calendar, setCalendar] = useState(false);
   const [newDay, setNewDay] = useState<number | undefined>(undefined);
+  // "Print tags": the order's tag sheet replaces its summary; closing it goes back to the order.
+  const [tagsFor, setTagsFor] = useState<Order | null>(null);
   // "Marked completed" toast with Undo, for a few seconds.
   const [done, setDone] = useState<{ id: string; name: string } | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -86,6 +89,7 @@ export default function Catering() {
   return (
     <main className="t-page c-page">
       <PageHeader
+        logo
         title="Catering"
         action={
           <div className="c-head-actions">
@@ -158,6 +162,21 @@ export default function Catering() {
           onDelete={(o) => {
             setEditing(null);
             setDeleting(o);
+          }}
+          onPrintTags={(o) => {
+            setEditing(null);
+            setTagsFor(o);
+          }}
+        />
+      )}
+
+      {tagsFor && (
+        <TagsSheet
+          order={tagsFor}
+          now={now}
+          onClose={() => {
+            if (orders?.some((o) => o.id === tagsFor.id)) setEditing(tagsFor.id);
+            setTagsFor(null);
           }}
         />
       )}
@@ -283,7 +302,7 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
 }
 
 /** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager). */
-type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; by?: EditedBy };
+type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -333,7 +352,7 @@ function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
   );
 }
 
-function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
+function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
   const { busy, error, run } = useSaver();
   const items = itemLines(o.items);
   const open = o.status === 'open';
@@ -396,6 +415,11 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
         {open ? '✓ Mark completed' : 'Reopen'}
       </button>
       {open && <ShareLink text={shareText(o)} />}
+      {onPrintTags && (
+        <button type="button" className="t-btn block" onClick={() => onPrintTags(o)}>
+          🏷️ Print name tags
+        </button>
+      )}
       <div className="t-grid2">
         <button type="button" className="t-btn" onClick={onEdit}>
           Edit
