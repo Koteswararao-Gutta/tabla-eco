@@ -513,15 +513,26 @@ test('closing a form with typed changes asks first; untouched forms close at onc
   await shot(manager, 'manager-discard-ask');
   await ask.getByRole('button', { name: 'Keep editing' }).click();
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await expect(sheet.getByRole('button', { name: 'Cancel' })).toBeFocused(); // focus back where it was
+  await sheet.getByLabel('Phone').focus();
   await manager.keyboard.press('Escape');
   await expect(ask).toBeVisible();
   await manager.keyboard.press('Escape'); // Escape on the question = keep editing
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Half typed');
+  await expect(sheet.getByLabel('Phone')).toBeFocused();
   await manager.mouse.click(195, 10); // the dimmed backdrop above the sheet
   await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Discard' }).click();
   await expect(manager.getByRole('dialog')).toHaveCount(0);
   expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Half typed')).toBe(false);
+
+  // A key typed right before Escape still counts.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await sheet.getByLabel('Customer name').focus();
+  await manager.keyboard.type('Q');
+  await manager.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
 
   // Editing an existing order asks "Discard your changes?".
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
@@ -569,5 +580,13 @@ test('Save stays visible at the bottom of a long order form', async ({ browser }
   expect(box.y + box.height).toBeLessThanOrEqual(sheetBox.y + sheetBox.height);
   expect(box.y).toBeGreaterThan(sheetBox.y + sheetBox.height - 120); // pinned to the bottom, not far down the form
   await shot(manager, 'manager-form-sticky-save');
+  // A short screen (keyboard up): a focused field is scrolled clear of the Save bar.
+  await manager.setViewportSize({ width: 390, height: 500 });
+  const notes = sheet.getByLabel('Notes (optional)');
+  await notes.focus();
+  await manager.waitForTimeout(300);
+  const n = (await notes.boundingBox())!;
+  const bar = (await sheet.locator('.c-form-foot').boundingBox())!;
+  expect(n.y + n.height).toBeLessThanOrEqual(bar.y + 1);
   await context.close();
 });

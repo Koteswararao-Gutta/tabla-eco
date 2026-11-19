@@ -63,21 +63,40 @@ export const useSheetClose = () => useContext(SheetClose);
 
 /** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap, Escape,
  *  or (phones) dragging it down from the handle or from the top of its content.
- *  `confirmClose` (e.g. "Discard your changes?"): while set, those ways of closing ask first,
+ *  `confirmClose` (e.g. "Discard your changes?", or a function returning it or null, read at the moment
+ *  of closing so a change typed just before always counts): while set, those ways of closing ask first,
  *  with "Discard" and "Keep editing". The content stays mounted behind the question. */
-export function Sheet({ open, title, onClose, confirmClose, children }: { open: boolean; title: string; onClose: () => void; confirmClose?: string | null; children: ReactNode }) {
+export function Sheet({ open, title, onClose, confirmClose, children }: { open: boolean; title: string; onClose: () => void; confirmClose?: string | null | (() => string | null); children: ReactNode }) {
   const sheet = useRef<HTMLDivElement>(null);
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<string | null>(null); // the question being asked
   const close = useRef(onClose);
   close.current = onClose;
   const askFirst = useRef(confirmClose);
   askFirst.current = confirmClose;
   const askingRef = useRef(asking);
   askingRef.current = asking;
-  const request = useRef(() => (askFirst.current ? setAsking(true) : close.current()));
+  const question = () => (typeof askFirst.current === 'function' ? askFirst.current() : askFirst.current) || null;
+  // Where focus was before the question, so "Keep editing" puts it back.
+  const before = useRef<HTMLElement | null>(null);
+  const ask = (q: string) => {
+    before.current = document.activeElement as HTMLElement | null;
+    setAsking(q);
+  };
+  const keepEditing = () => {
+    setAsking(null);
+    const el = before.current;
+    requestAnimationFrame(() => (el && el.isConnected && sheet.current?.contains(el) ? el : sheet.current)?.focus({ preventScroll: true }));
+  };
+  const request = useRef(() => {
+    const q = question();
+    if (q) ask(q);
+    else close.current();
+  });
+  const keep = useRef(keepEditing);
+  keep.current = keepEditing;
   useEffect(() => {
-    if (!open || !confirmClose) setAsking(false);
-  }, [open, confirmClose]);
+    if (!open) setAsking(null);
+  }, [open]);
   useEffect(() => {
     if (asking) sheet.current?.focus({ preventScroll: true });
   }, [asking]);
@@ -92,7 +111,7 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
     // The sheet itself takes focus (not its first field), so phones don't pop up the keyboard.
     if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
     const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') return askingRef.current ? setAsking(false) : request.current();
+      if (e.key === 'Escape') return askingRef.current ? keep.current() : request.current();
       if (e.key !== 'Tab' || !el) return;
       const list = focusables();
       if (!list.length) return e.preventDefault(), el.focus();
@@ -157,9 +176,10 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
       dragging = false;
       const fast = dy / Math.max(1, performance.now() - startT) > 0.6;
       if (dy > Math.min(160, el.offsetHeight * 0.3) || (fast && dy > 40)) {
-        if (askFirst.current) {
+        const q = question();
+        if (q) {
           set(0, true);
-          setAsking(true);
+          ask(q);
           return;
         }
         set(el.offsetHeight + 40, true);
@@ -181,23 +201,23 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
   if (!open) return null;
   return (
     <div className="t-sheet-back" onClick={(e) => e.target === e.currentTarget && !asking && request.current()}>
-      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={asking && confirmClose ? confirmClose : title} tabIndex={-1}>
+      <div ref={sheet} className="t-sheet" role="dialog" aria-modal="true" aria-label={asking ?? title} tabIndex={-1}>
         <div className="t-sheet-head">
           <div className="t-sheet-grab" aria-hidden="true" />
-          <h2>{asking && confirmClose ? confirmClose : title}</h2>
+          <h2>{asking ?? title}</h2>
         </div>
-        {asking && confirmClose && (
+        {asking && (
           <div className="t-stack">
             <button type="button" className="t-btn block danger" onClick={() => close.current()}>
               Discard
             </button>
-            <button type="button" className="t-btn primary block" onClick={() => setAsking(false)}>
+            <button type="button" className="t-btn primary block" onClick={keepEditing}>
               Keep editing
             </button>
           </div>
         )}
         <SheetClose.Provider value={request.current}>
-          <div className="t-sheet-body" hidden={asking && !!confirmClose}>
+          <div className="t-sheet-body" hidden={!!asking}>
             {children}
           </div>
         </SheetClose.Provider>

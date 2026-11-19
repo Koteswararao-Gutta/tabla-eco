@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, telHref, validate } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, telHref, validate, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -171,5 +171,20 @@ describe('telHref', () => {
   it('keeps only digits and a leading plus', () => {
     expect(telHref('555 123-4567')).toBe('tel:5551234567');
     expect(telHref('+1 (480) 555-0101')).toBe('tel:+14805550101');
+    expect(telHref('(480) 555-0101 ext 2')).toBe('tel:4805550101');
+    expect(telHref('480.555.0101 x23')).toBe('tel:4805550101');
+    expect(telHref('480-555-0101 #4')).toBe('tel:4805550101');
+    expect(telHref('480 555 0101 Ext. 12')).toBe('tel:4805550101');
+    expect(telHref('480 555 0101 extension 7')).toBe('tel:4805550101');
+    expect(telHref('+44 20 7946 0958')).toBe('tel:+442079460958');
+    expect(telHref('1+480-555-0101')).toBe('tel:14805550101'); // only a leading + is kept
+  });
+});
+
+describe('validate: name length', () => {
+  it('rejects a name longer than the box allows, with a plain message', () => {
+    const f = { ...emptyForm(at(18, 12), undefined), customerName: 'A'.repeat(NAME_MAX + 1) };
+    expect(validate(f).customerName).toBe(`Please shorten the name to ${NAME_MAX} letters or fewer.`);
+    expect(validate({ ...f, customerName: 'A'.repeat(NAME_MAX) }).customerName).toBeUndefined();
   });
 });
