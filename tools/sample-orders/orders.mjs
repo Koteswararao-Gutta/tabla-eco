@@ -1,0 +1,83 @@
+// The 10 sample (test) catering orders. Every one has sample: true, a name starting "TEST" and an id
+// starting "sample-", so they are easy to find and delete. Times are Phoenix time (UTC-7, no DST).
+const D = {
+  samosa: ['de94b0af-1e4f-43e5-bdfa-7a18e8d4e68b', 'Onion Samosa (6 pcs) (V)'],
+  samosaChaat: ['48b84830-ef5e-4fb5-ad51-305d2cb96651', 'Samosa Chaat'],
+  gobi65: ['b6d2f73f-8696-4792-98c9-b3c4d7be4482', 'Gobi 65'],
+  gobiManch: ['2c26e3e3-a452-4963-8336-7cda58416cb4', 'Gobi Manchurian'],
+  chilliPaneer: ['a4a07639-015f-4bf1-aed1-e3862cd7170f', 'Chilli Paneer'],
+  springRolls: ['eba56075-af8e-415b-b793-6b34b70bf3d5', 'Spring Rolls (6 pc)'],
+  cutMirchi: ['95625f4b-0ad3-4566-87c9-3098316bfb08', 'Cut Mirchi'],
+  chicken65: ['c99efe85-f986-48cb-93c0-e5f7f32a5218', 'Chicken 65'],
+  apolloFish: ['3a2970ba-fb52-48f2-9e30-c7da5bd44cf9', 'Apollo Fish'],
+  pepperFry: ['b7d01878-7f94-412e-bd08-ce608984610b', 'Chicken Pepper Fry'],
+  tandooriLeg: ['7e007769-dfa4-4dbc-a89e-fe5a146e31ef', 'Tandoori Chicken Leg'],
+  seekh: ['26a52245-5ebe-47ba-8e50-4b6590c254d4', 'Chicken Seekh Kebab'],
+  dalMakhani: ['f32d3863-78fc-4da5-b092-c696f2f21431', 'Dal Makhani'],
+  palakPaneer: ['16385cf5-ec65-487a-8411-eb17b77c9a3f', 'Palak Paneer'],
+  malaiKofta: ['3b575142-3fd3-429e-a54c-f5ff5347fe2c', 'Malai Kofta'],
+  paneerTikkaMasala: ['bf91f679-6475-45b7-ba85-85207eda1311', 'Paneer Tikka Masala'],
+  butterChicken: ['4e385d99-c2d8-4882-a3d4-cb34c8d2bc03', 'Butter Chicken'],
+  ctm: ['7867a1f8-ca58-42eb-ade3-ec194eef6b41', 'Chicken Tikka Masala'],
+  chettinadu: ['abc408c4-874e-4a6c-964d-9e1893345055', 'Chicken Chettinadu'],
+  plainNaan: ['52b1d7d4-7403-487c-939b-b4925735629b', 'Plain Naan'],
+  butterNaan: ['fa1f7603-8b67-448f-b2ca-fbebdacfecf8', 'Butter Naan'],
+  garlicNaan: ['fc3f86bb-e4cc-4012-8a36-0c7858b774fe', 'Garlic Naan'],
+  cheeseNaan: ['e206c59b-b9f4-401d-9bb3-cd7a2904238f', 'Cheese Naan'],
+  parota: ['bea8752d-b4a8-412d-a8ef-9ca1219fefc1', 'Malabar Parota'],
+  vegBiryani: ['c8f948e8-9a55-469d-b4c2-16fe5472b06c', 'Hyderabadi Veg Dum Biryani'],
+  ulavaVeg: ['f105d2a8-50ff-410f-bfc6-42c01fe275b8', 'Ulavacharu Veg Dum Biryani'],
+  chickenDum: ['833c4458-1dff-426b-9046-70579c503109', 'Hyderabadi Chicken Dum Biryani'],
+  gonguraChicken: ['e211f632-a622-4041-8ec1-95873427878f', 'Gongura Chicken Biryani'],
+  vijayawada: ['dcd5b3ec-3595-47c9-b5ce-6ccdb3726c89', 'Vijayawada Boneless Chicken Biryani'],
+  goatFry: ['73c71e79-bd86-4e55-8dac-9fd7e10a2bfe', 'Goat Fry Biryani'],
+  vegFriedRice: ['d74b7537-7d78-4a74-a8fa-26ecabbb8cc8', 'Veg Fried Rice'],
+  hakka: ['1a4c6559-a03e-4d58-bf67-8d936cd7e7d4', 'Hakka Veg Noodles'],
+  gulab: ['583858bf-3076-48f8-b647-24004c7130f3', 'Gulab Jamun (4 pc)'],
+  rasmalai: ['7d740fff-bb7d-4492-8a14-6055a600ad84', 'Rasmalai (3 pc)'],
+  halwa: ['9bf66339-d41b-4c8a-a945-246d7ee7f76f', 'Moong Dal Halwa'],
+  mysorePak: ['6826cc0d-1b0b-4b7a-8aa4-5c88c4e7d575', 'Mysore Pak'],
+  mangoLassi: ['ecd93a6e-920a-441b-b23c-1eb61f3ab3e6', 'Mango Lassi'],
+};
+// [dish key or {name} for a dish not on the menu, qty, unit, note]
+const L = (d, qty, unit, note = '') => {
+  const [dishId, name] = typeof d === 'string' ? D[d] : [null, d.name];
+  return { dishId, name, qty, unit, note };
+};
+const FT = 'Full tray', HT = 'Half tray', PCS = 'Pieces';
+
+export const SAMPLES = [
+  { slug: 'sunita', name: 'TEST Sunita Patel', phone: '6025550101', date: '2026-11-20', time: '12:30', type: 'pickup', people: 20,
+    lines: [L('samosa', 60, PCS), L('samosaChaat', 2, HT, 'chutney on the side'), L('mangoLassi', 2, 'Gallons')],
+    completed: true, money: { amount: 210 } }, // done by the kitchen, not paid yet
+  { slug: 'priya', name: 'TEST Priya Reddy', phone: '6025550102', date: '2026-11-20', time: '18:30', type: 'pickup', people: 25,
+    lines: [L('chickenDum', 1, FT), L('paneerTikkaMasala', 1, HT), L('butterNaan', 30, PCS), L('gulab', 25, PCS)],
+    money: { amount: 320 } },
+  { slug: 'arjun', name: 'TEST Arjun Mehta', phone: '6025550103', date: '2026-11-20', time: '19:45', type: 'delivery', people: 30,
+    address: '2150 E Camelback Rd, Phoenix, AZ 85016',
+    lines: [L('chicken65', 1.5, FT, 'extra spicy'), L('vegFriedRice', 1, HT), L('gobiManch', 1, HT)],
+    money: { amount: 275, deposits: [[100, 'cash']] } },
+  { slug: 'ravi', name: 'TEST Ravi Kumar', phone: '6025550104', date: '2026-11-21', time: '18:00', type: 'delivery', people: 60,
+    address: '4400 N Scottsdale Rd, Scottsdale, AZ 85251 (community hall, setup needed)', notes: 'Medium spicy for everything.',
+    lines: [L('vijayawada', 2, FT), L('vegBiryani', 1, FT), L('butterChicken', 1.5, FT), L('dalMakhani', 1, FT), L('garlicNaan', 60, PCS, 'cut in 4'), L('rasmalai', 60, PCS)],
+    money: { amount: 1150, deposits: [[400, 'zelle']] } },
+  { slug: 'lakshmi', name: 'TEST Lakshmi Iyer', phone: '6025550105', date: '2026-11-22', time: '13:00', type: 'pickup', people: 12,
+    lines: [L('goatFry', 1, HT), L('chettinadu', 1, HT), L('parota', 20, PCS)] }, // no amount yet
+  { slug: 'vikram', name: 'TEST Vikram Singh', phone: '6025550106', date: '2026-11-23', time: '11:30', type: 'delivery', people: 40,
+    address: '1 N Central Ave, Phoenix, AZ 85004 (office lunch, 5th floor)',
+    lines: [L('ctm', 1, FT), L('palakPaneer', 1, FT), L('vegFriedRice', 1, FT), L('plainNaan', 40, PCS), L('gulab', 40, PCS)],
+    money: { amount: 680 } },
+  { slug: 'anjali', name: 'TEST Anjali Rao', phone: '6025550107', date: '2026-11-24', time: '17:30', type: 'pickup', people: 10,
+    lines: [L('chilliPaneer', 1, HT), L('hakka', 1, HT), L('springRolls', 30, PCS)],
+    money: { amount: 145, paid: 'cash' } },
+  { slug: 'deepak', name: 'TEST Deepak Nair', phone: '6025550108', date: '2026-11-25', time: '19:00', type: 'delivery', people: 30,
+    address: '7000 E Mayo Blvd, Phoenix, AZ 85054',
+    lines: [L('tandooriLeg', 30, PCS), L('seekh', 1, HT), L('chickenDum', 1.5, FT), L({ name: 'Raita' }, 2, 'Quarts')],
+    money: { amount: 520, deposits: [[200, 'card']] } },
+  { slug: 'meera', name: 'TEST Meera Joshi', phone: '6025550109', date: '2026-11-26', time: '12:30', type: 'pickup', people: 15,
+    lines: [L('butterChicken', 1, HT), L('malaiKofta', 1, HT), L('cheeseNaan', 15, PCS), L('halwa', 2, 'Lbs')],
+    money: { amount: 240, paid: 'card' } },
+  { slug: 'suresh', name: 'TEST Suresh Babu', phone: '6025550110', date: '2026-11-28', time: '18:30', type: 'delivery', people: 80,
+    address: '9000 W Glendale Ave, Glendale, AZ 85305 (wedding reception)', notes: 'Mild to medium. Serve 7:00 to 9:00 PM.',
+    lines: [L('gonguraChicken', 2, FT), L('ulavaVeg', 1.5, FT), L('apolloFish', 1, FT), L('gobi65', 1, FT), L('pepperFry', 1, HT), L('cutMirchi', 1, HT), L('butterNaan', 80, PCS), L('mysorePak', 80, PCS)] },
+];

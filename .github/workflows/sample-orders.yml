@@ -1,0 +1,23 @@
+name: Sample orders (testing only)
+# Runs tools/sample-orders on pushes to this branch only. Never merged to main.
+on:
+  push:
+    branches: [claude/project-thread-gnzmrt]
+    paths: [tools/sample-orders/**]
+permissions:
+  contents: read
+concurrency:
+  group: sample-orders
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save --prefix tools/sample-orders firebase-admin@14.5.1
+      - run: node tools/sample-orders/run.mjs
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
