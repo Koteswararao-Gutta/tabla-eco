@@ -12,6 +12,7 @@ import { useBrowserFullscreen } from './fullscreen';
 import { KitchenNotice } from './notice';
 import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
 import { Alarm } from './Alarm';
+import { PrepView } from './Prep';
 import { CalendarView, DayGroups } from './views';
 import './kitchen.css';
 
@@ -36,6 +37,7 @@ export default function Kitchen() {
     setDeviceValue(UNLOCK_KEY, value);
     setSaved(value);
   };
+  const [prep, setPrep] = useState(false);
 
   // Browsers keep sound muted until the screen is touched: any tap wakes it for the chime.
   useEffect(() => {
@@ -65,8 +67,10 @@ export default function Kitchen() {
     // ScreenSurface keeps the screen awake; .k-root turns it into a light page.
     <ScreenSurface testId="kitchen">
       <div className="k-root">
-        {pin === undefined ? null : unlocked ? (
-          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} />
+        {pin === undefined ? null : unlocked && prep ? (
+          <PrepView orders={orders} now={now} banner={banner} onBack={() => setPrep(false)} />
+        ) : unlocked ? (
+          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} onPrep={() => setPrep(true)} />
         ) : (
           <div className={'k-lock' + (reminders.length ? ' has-remind' : '')}>
             {reminders.length > 0 && <div className="k-remind-over">{banner}</div>}
@@ -174,7 +178,7 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 
 // ---------- orders ----------
 
-function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
+function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void; onPrep: () => void }) {
   const [showAll, setShowAll] = useState(false);
   const [view, setView] = useState<'list' | 'calendar'>('list');
   const away = showAll || view === 'calendar';
@@ -269,6 +273,11 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
         ) : (
           <button className="t-btn k-bar-btn" onClick={() => setShowAll(true)}>
             Show all orders
+          </button>
+        )}
+        {!showAll && (
+          <button className="t-btn k-bar-btn" onClick={onPrep}>
+            Prep
           </button>
         )}
         <button className="t-btn k-bar-btn" onClick={onLock}>
