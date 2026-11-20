@@ -1,18 +1,37 @@
-// Manager > More (☰): manager-only tools behind the manager PIN. Statistics comes next.
+// Manager > More (☰): manager-only tools behind the manager PIN: Payments, and Statistics next.
 import { useState } from 'react';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { saveSingleton, useSingleton } from '@shared/data';
 import { Field, PageHeader } from '@shared/ui';
 import { expectedPin } from '../../kitchen/pin';
 import { useManagerLock } from '../lock';
 import { expectedManagerPin } from '../lock/pin';
+import Payments from './Payments';
 import './more.css';
 
 export default function More() {
+  return (
+    <Routes>
+      <Route index element={<MoreHome />} />
+      <Route path="payments" element={<Payments />} />
+      <Route path="*" element={<Navigate to="/manager/more" replace />} />
+    </Routes>
+  );
+}
+
+function MoreHome() {
   const { lockNow } = useManagerLock();
   return (
     <main className="t-page">
       <PageHeader title="More" sub="Manager only. Front staff can't open this without the PIN." />
       <div className="t-stack">
+        <Link className="t-card mo-link" to="payments">
+          <span>
+            <h2 className="mo-h2">Payments</h2>
+            <span className="mo-note">Each day's catering orders, paid or unpaid.</span>
+          </span>
+          <span className="mo-chev" aria-hidden="true">›</span>
+        </Link>
         <section className="t-card mo-soon" data-testid="statistics">
           <h2 className="mo-h2">Statistics</h2>
           <p className="mo-note">This week's catering orders and their total, Monday to Sunday.</p>
