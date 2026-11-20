@@ -33,17 +33,31 @@ async function inspect() {
 
 async function importOrders() {
   const list = JSON.parse(readFileSync(new URL('orders.json', here), 'utf8'));
+  // Check the whole file first: nothing is written unless every entry looks right.
+  const seen = new Set();
+  for (const x of list) {
+    if (!/^wa-[a-z0-9-]+$/.test(x?.id ?? '') || seen.has(x.id)) throw new Error(`bad or repeated id ${JSON.stringify(x?.id)}`);
+    seen.add(x.id);
+    const o = x.order;
+    if (!o || typeof o.customerName !== 'string' || typeof o.dueAt !== 'number' || typeof o.items !== 'string' || !['open', 'completed'].includes(o.status)) throw new Error(`${x.id}: bad order`);
+    if (o.status === 'completed' && !(x.amount && x.amount.paid === true)) throw new Error(`${x.id}: completed order without a paid orderAmounts doc`);
+    if (/amount|paid|deposit/i.test(Object.keys(o).join(' '))) throw new Error(`${x.id}: money field on the order`);
+  }
   let added = 0, skipped = 0;
   for (const { id, order, amount } of list) {
     const ref = db.collection('orders').doc(id);
+    const amountRef = db.collection('orderAmounts').doc(id);
+    // Never overwrite: an existing order, or an existing amount doc for this id, means skip both.
     const res = await db.runTransaction(async (tx) => {
-      if ((await tx.get(ref)).exists) return false;
+      const [o, a] = await Promise.all([tx.get(ref), tx.get(amountRef)]);
+      if (o.exists) return 'exists ';
+      if (a.exists) return 'amount exists, skipped';
       tx.create(ref, { ...order, id });
-      if (amount) tx.create(db.collection('orderAmounts').doc(id), { ...amount, id });
-      return true;
+      if (amount) tx.create(amountRef, { ...amount, id });
+      return 'added  ';
     });
-    res ? added++ : skipped++;
-    console.log(`${res ? 'added  ' : 'exists '} ${id} | ${order.customerName}`);
+    res.startsWith('added') ? added++ : skipped++;
+    console.log(`${res} ${id} | ${order.customerName}`);
   }
   console.log(`added ${added}, skipped (already there) ${skipped}`);
 }
