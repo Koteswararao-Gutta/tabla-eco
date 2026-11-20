@@ -58,13 +58,16 @@ test('kitchen Prep adds up the day’s open orders by dish and unit', async ({ b
   await kitchen.getByRole('button', { name: 'Next day' }).click();
   await expect(kitchen.getByText(/No open orders for/)).toBeVisible();
 
-  await kitchen.setViewportSize({ width: 800, height: 1280 });
-  await kitchen.getByRole('button', { name: 'Day before' }).click();
-  await kitchen.getByRole('button', { name: 'Day before' }).click();
-  await shot(kitchen, 'kitchen-prep-portrait');
-
   await kitchen.getByRole('button', { name: '← Back to open orders' }).click();
   await expect(kitchen.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await shot(kitchen, 'kitchen-open-orders-with-prep');
+
+  // Portrait tablet, in a fresh page (the kitchen goes full screen once touched, so it can't be resized).
+  const portrait = await context.newPage();
+  await portrait.setViewportSize({ width: 800, height: 1280 });
+  await portrait.goto('/#/kitchen');
+  await portrait.getByRole('button', { name: 'Prep', exact: true }).click();
+  await expect(portrait.locator('.kp-day-label')).toHaveText('Today');
+  await shot(portrait, 'kitchen-prep-portrait');
   await context.close();
 });
