@@ -1277,3 +1277,79 @@ test('kitchen: small red notice at the top while offline, gone when the internet
   await expect(notice).toHaveCount(0);
   await context.close();
 });
+
+test('kitchen list groups open orders by day, and Calendar shows the month with orders per day', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  // Seed has Priya today and Desert Tech tomorrow. Add one left open from 2 days ago and one in 10 days.
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    const now = Date.now();
+    const day = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      d.setHours(13, 0, 0, 0);
+      return d.getTime();
+    };
+    t.old = { id: 'old', customerName: 'Old Open Order', phone: '555', dueAt: day(-2), type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now };
+    t.far = { id: 'far', customerName: 'Far Future Party', phone: '555', dueAt: day(10), type: 'pickup', items: 'Naan, 50', status: 'open', createdAt: now, updatedAt: now };
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await typePin(page, '1234');
+
+  const groups = page.getByTestId('kitchen-group');
+  await expect(groups).toHaveCount(4);
+  await expect(groups.nth(0).getByRole('heading')).toContainText('Not completed from earlier days');
+  await expect(groups.nth(0).getByRole('article', { name: 'Order for Old Open Order' })).toBeVisible();
+  await expect(groups.nth(1).getByRole('heading')).toContainText('Today1 order');
+  await expect(groups.nth(1).getByRole('article', { name: 'Order for Priya Sharma' })).toBeVisible();
+  await expect(groups.nth(2).getByRole('heading')).toContainText('Tomorrow');
+  await expect(groups.nth(2).getByRole('article', { name: 'Order for Desert Tech office' })).toBeVisible();
+  await expect(groups.nth(3).getByRole('heading')).toContainText('Later');
+  await expect(groups.nth(3).getByRole('article', { name: 'Order for Far Future Party' })).toBeVisible();
+  await shot(page, 'kitchen-by-day');
+
+  // Calendar: the month with a count per day; tap a day to see its orders, an open one opens its options.
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calendar' })).toBeVisible();
+  const cal = page.getByTestId('kitchen-calendar');
+  const long = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  await expect(cal.getByRole('button', { name: `${long(today)}: 1 order` })).toBeVisible();
+  await expect(cal.getByTestId('kitchen-cal-row')).toHaveCount(1);
+  await expect(cal.getByTestId('kitchen-cal-row')).toContainText('Priya Sharma');
+  await shot(page, 'kitchen-calendar');
+  if (tomorrow.getMonth() !== today.getMonth()) await cal.getByRole('button', { name: 'Next month' }).click();
+  await cal.getByRole('button', { name: `${long(tomorrow)}: 1 order` }).click();
+  await cal.getByTestId('kitchen-cal-row').filter({ hasText: 'Desert Tech office' }).click();
+  await expect(page.getByRole('dialog', { name: 'Desert Tech office' }).getByRole('button', { name: /Mark completed/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Portrait: month above the day's orders, nothing runs off the side.
+  await page.setViewportSize({ width: 800, height: 1280 });
+  const fits = () => page.evaluate(() => [...document.querySelectorAll('.k-root *')].every((el) => el.getBoundingClientRect().right <= window.innerWidth + 1));
+  expect(await fits()).toBe(true);
+  await shot(page, 'kitchen-calendar-portrait');
+
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  expect(await fits()).toBe(true);
+  await shot(page, 'kitchen-by-day-portrait');
+  await context.close();
+});
+
+test('kitchen: the Calendar view goes back to the open orders list after 3 minutes with no touch', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  await page.clock.install();
+  await page.goto('/#/kitchen');
+  await typePin(page, '1234');
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calendar' })).toBeVisible();
+  await page.clock.runFor(181_000);
+  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await context.close();
+});
