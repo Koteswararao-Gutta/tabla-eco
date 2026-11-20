@@ -1,6 +1,6 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Logo, ScreenSurface, Sheet } from '@shared/ui';
+import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
 import { EditHistory, EditOrderSheet, ItemList } from '../manager/catering';
@@ -12,6 +12,7 @@ import { useBrowserFullscreen } from './fullscreen';
 import { KitchenNotice } from './notice';
 import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
 import { Alarm } from './Alarm';
+import { CalendarView, DayGroups } from './views';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -175,19 +176,25 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 
 function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
   const [showAll, setShowAll] = useState(false);
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const away = showAll || view === 'calendar';
+  const backToList = () => {
+    setShowAll(false);
+    setView('list');
+  };
   const board = useRef<HTMLDivElement>(null);
   // Each view opens at its top, not at the other view's scroll position.
   useEffect(() => {
     const root = board.current?.closest('.k-root');
     if (root) root.scrollTop = 0;
-  }, [showAll]);
-  // Left on "Show all orders"? After 3 minutes with no touch, back to the open orders.
+  }, [showAll, view]);
+  // Left on "Show all orders" or the calendar? After 3 minutes with no touch, back to the open orders list.
   useEffect(() => {
-    if (!showAll) return;
-    let t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+    if (!away) return;
+    let t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
     const touched = () => {
       clearTimeout(t);
-      t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+      t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
     };
     const events = ['pointerdown', 'keydown', 'wheel', 'scroll'];
     events.forEach((e) => window.addEventListener(e, touched, true));
@@ -195,7 +202,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       clearTimeout(t);
       events.forEach((e) => window.removeEventListener(e, touched, true));
     };
-  }, [showAll]);
+  }, [away]);
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -239,11 +246,22 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       <header className="k-bar">
         <div className="k-bar-title">
           <Logo className="k-logo" />
-          <h1>{showAll ? 'All orders' : 'Open orders'}</h1>
-          {!showAll && orders && <span className="k-count">{open.length}</span>}
+          <h1>{showAll ? 'All orders' : view === 'calendar' ? 'Calendar' : 'Open orders'}</h1>
+          {!showAll && view === 'list' && orders && <span className="k-count">{open.length}</span>}
           {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
+        {!showAll && (
+          <Segmented
+            label="View"
+            value={view}
+            options={[
+              { value: 'list', label: 'List' },
+              { value: 'calendar', label: 'Calendar' },
+            ]}
+            onChange={setView}
+          />
+        )}
         {showAll ? (
           <button className="t-btn primary k-bar-btn" onClick={() => setShowAll(false)}>
             ← Back to open orders
@@ -261,6 +279,8 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
 
       {!orders ? null : showAll ? (
         <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />
+      ) : view === 'calendar' ? (
+        <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor(o.id)} />
       ) : open.length === 0 ? (
         <div className="t-empty k-empty">
           No open orders right now.
@@ -268,11 +288,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           New orders from the manager show up here by themselves.
         </div>
       ) : (
-        <div className="k-grid">
-          {open.map((o) => (
-            <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor(o.id)} onDoubleTap={() => complete(o)} />
-          ))}
-        </div>
+        <DayGroups orders={open} now={now} card={(o) => <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor(o.id)} onDoubleTap={() => complete(o)} />} />
       )}
 
       {optionsOrder && (
