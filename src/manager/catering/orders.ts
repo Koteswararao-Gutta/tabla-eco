@@ -1,6 +1,9 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
-import type { CateringOrder, EditedBy, OrderEdit, ScannedOrder } from '@shared/data';
+import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
+import { cleanLine, findDish, itemLines, linesText, normalizeUnit, orderLines, type Dish } from './lines';
+
+export { itemLines };
 
 type Order = CateringOrder;
 
@@ -106,9 +109,6 @@ export function countdown(dueAt: number, now: number): { text: string; late: boo
 /** Open and due within two hours (or already late). */
 export const isSoon = (o: Order, now: number) => o.status === 'open' && o.dueAt - now <= SOON_MS;
 
-export const itemLines = (items: string) =>
-  items.split('\n').map((l) => l.trim()).filter(Boolean);
-
 // ---------- month calendar ----------
 
 /** The weeks shown for a month, Sunday first: each day is local midnight (ms), or null outside the month. */
@@ -155,8 +155,55 @@ export interface OrderForm {
   type: 'pickup' | 'delivery';
   address: string;
   people: string;
-  items: string;
+  /** The order's items as typed in the form. */
+  lines: LineDraft[];
   notes: string;
+}
+
+/** One item row of the form: as OrderLine, but the quantity is the text in its box. */
+export interface LineDraft {
+  dishId: string | null;
+  name: string;
+  qty: string;
+  unit: string;
+  note: string;
+  /** Kept from the saved line while the row is untouched (any change drops it): see OrderLine.text. */
+  text?: string;
+  /** Read by a guess and not checked yet: the row asks to be checked. */
+  check?: boolean;
+}
+
+export const blankLine = (unit = ''): LineDraft => ({ dishId: null, name: '', qty: '', unit, note: '' });
+
+const qtyInput = (q: number | null) => (q === null || !Number.isFinite(q) ? '' : String(Math.round(q * 100) / 100));
+
+export function draftFromLine(l: OrderLine): LineDraft {
+  const d: LineDraft = { dishId: l.dishId ?? null, name: l.name, qty: qtyInput(l.qty), unit: l.unit, note: l.note };
+  if (l.text) d.text = l.text;
+  if (l.check) d.check = true;
+  return d;
+}
+
+/** A filled row: it has a dish name. Empty rows are left out when saving. */
+const filled = (d: LineDraft) => d.name.trim() !== '';
+
+/** A quantity box's text as a number: null when empty, NaN when it isn't a positive number. */
+export function parseQty(text: string): number | null {
+  const t = text.trim().replace(',', '.');
+  if (!t) return null;
+  if (!/^\d*\.?\d+$/.test(t)) return NaN;
+  const n = parseFloat(t);
+  return n > 0 && n <= 100_000 ? Math.round(n * 100) / 100 : NaN;
+}
+
+/** The order's lines from the form's rows: empty rows dropped, checks cleared (whoever saves has seen the form). */
+export function linesFromForm(drafts: LineDraft[]): OrderLine[] {
+  return drafts.filter(filled).map((d) => {
+    const qty = parseQty(d.qty);
+    const line: OrderLine = { dishId: d.dishId, name: d.name.trim(), qty: qty === null || Number.isNaN(qty) ? null : qty, unit: d.unit, note: d.note };
+    if (d.text) line.text = d.text;
+    return cleanLine(line);
+  });
 }
 
 export type FormErrors = Partial<Record<keyof OrderForm, string>>;
@@ -180,10 +227,11 @@ export function fromInputs(date: string, time: string): number | null {
 }
 
 export function emptyForm(now: number, day?: number): OrderForm {
-  return { customerName: '', phone: '', date: toDateInput(day ?? now), time: '', type: 'pickup', address: '', people: '', items: '', notes: '' };
+  return { customerName: '', phone: '', date: toDateInput(day ?? now), time: '', type: 'pickup', address: '', people: '', lines: [blankLine()], notes: '' };
 }
 
-export function formFromOrder(o: Order): OrderForm {
+export function formFromOrder(o: Order, dishes: Dish[] = []): OrderForm {
+  const lines = orderLines(o, dishes).map(draftFromLine);
   return {
     customerName: o.customerName,
     phone: o.phone,
@@ -192,7 +240,7 @@ export function formFromOrder(o: Order): OrderForm {
     type: o.type,
     address: o.address ?? '',
     people: o.people ? String(o.people) : '',
-    items: o.items,
+    lines: lines.length ? lines : [blankLine()],
     notes: o.notes ?? '',
   };
 }
@@ -213,18 +261,25 @@ export function validate(f: OrderForm): FormErrors {
   if (f.type === 'delivery' && !f.address.trim()) e.address = 'Please enter the delivery address.';
   if (f.people.trim() && !/^\d+$/.test(f.people.trim())) e.people = 'Please enter a whole number.';
   else if (f.people.trim() && +f.people === 0) e.people = 'Please enter at least 1, or leave it empty.';
-  if (itemLines(f.items).length === 0) e.items = 'Please add at least one item.';
+  const rows = f.lines.filter(filled);
+  const badQty = f.lines.findIndex((d) => Number.isNaN(parseQty(d.qty)));
+  const noName = f.lines.findIndex((d) => !filled(d) && (d.qty.trim() || d.note.trim()));
+  if (rows.length === 0) e.lines = 'Please add at least one item.';
+  else if (badQty >= 0) e.lines = `Please check the quantity of item ${badQty + 1}: enter a number like 2 or 1.5.`;
+  else if (noName >= 0) e.lines = `Item ${noName + 1} has no dish. Please add the dish, or remove the row.`;
   return e;
 }
 
 /** The order fields from a valid form. Never contains undefined: optional fields are left out. */
-export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items' | 'people'> & Partial<Pick<Order, 'address' | 'notes'>> {
+export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items' | 'people'> & { lines: OrderLine[] } & Partial<Pick<Order, 'address' | 'notes'>> {
+  const lines = linesFromForm(f.lines);
   const out: ReturnType<typeof orderFields> = {
     customerName: f.customerName.trim(),
     phone: f.phone.trim(),
     dueAt: fromInputs(f.date, f.time)!,
     type: f.type,
-    items: itemLines(f.items).join('\n'),
+    items: linesText(lines),
+    lines,
     people: f.people.trim() ? parseInt(f.people, 10) : null,
   };
   if (f.type === 'delivery') out.address = f.address.trim();
@@ -234,19 +289,41 @@ export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' 
 
 // ---------- scanned paper orders ----------
 
-const FORM_KEYS: (keyof OrderForm)[] = ['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'items', 'notes'];
+const FORM_KEYS: (keyof OrderForm)[] = ['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'lines', 'notes'];
+
+/** The item rows from what the AI read: menu dishes matched by name, units made standard. A row is marked
+ *  to check when the AI was unsure, the dish isn't on the menu, or there's no quantity. */
+export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes: Dish[]): LineDraft[] {
+  const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  if (Array.isArray(s.lines) && s.lines.length) {
+    return s.lines
+      .filter((l) => l && text(l.dish))
+      .map((l) => {
+        const dish = findDish(text(l.dish), dishes);
+        const qty = parseQty(text(l.qty).replace(/[^\d.,]/g, ''));
+        const unit = normalizeUnit(text(l.unit));
+        const d: LineDraft = { dishId: dish?.id ?? null, name: dish?.name ?? text(l.dish), qty: qty === null || Number.isNaN(qty) ? '' : String(qty), unit: unit.unit, note: text(l.note) };
+        if (l.unsure === true || !dish || !d.qty || !unit.sure) d.check = true;
+        return d;
+      });
+  }
+  // An older server sends each item as text.
+  const items = (Array.isArray(s.items) ? s.items : []).map(text).filter(Boolean);
+  // Read as new rows, not kept as typed: the text is dropped.
+  return orderLines({ items: items.join('\n') }, dishes).map(({ text: _typed, ...l }) => draftFromLine(l));
+}
 
 /** Fills the form from what the AI read. Anything missing or malformed keeps the form's current value,
  *  and is listed in `unsure` along with the fields the AI flagged, so the sheet can ask to check them. */
-export function formFromScan(s: ScannedOrder, base: OrderForm): { form: OrderForm; unsure: (keyof OrderForm)[] } {
-  const unsure = new Set(FORM_KEYS.filter((k) => s.unsure?.includes(k)));
+export function formFromScan(s: ScannedOrder, base: OrderForm, dishes: Dish[] = []): { form: OrderForm; unsure: (keyof OrderForm)[] } {
+  const unsure = new Set(FORM_KEYS.filter((k) => (s.unsure as string[] | undefined)?.includes(k === 'lines' ? 'items' : k)));
   const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(text(s.date)) && fromInputs(text(s.date), '12:00') !== null ? text(s.date) : '';
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(text(s.time)) ? text(s.time) : '';
   const people = text(s.people).replace(/\D/g, '');
   const address = text(s.address);
   const type = s.type === 'pickup' || s.type === 'delivery' ? s.type : address ? 'delivery' : base.type;
-  const items = (Array.isArray(s.items) ? s.items : []).map(text).filter(Boolean).join('\n');
+  const lines = draftsFromScan(s, dishes);
   const form: OrderForm = {
     customerName: text(s.customerName) || base.customerName,
     phone: text(s.phone) || base.phone,
@@ -255,7 +332,7 @@ export function formFromScan(s: ScannedOrder, base: OrderForm): { form: OrderFor
     type,
     address: address || base.address,
     people: people && +people > 0 ? people : base.people,
-    items: items || base.items,
+    lines: lines.length ? lines : base.lines,
     notes: text(s.notes) || base.notes,
   };
   if (!date) unsure.add('date');

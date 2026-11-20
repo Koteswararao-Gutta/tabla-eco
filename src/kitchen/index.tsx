@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Logo, ScreenSurface, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
-import { EditHistory, EditOrderSheet } from '../manager/catering';
+import { EditHistory, EditOrderSheet, ItemList } from '../manager/catering';
+import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
@@ -369,11 +370,7 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
 
-      <ul className="k-items">
-        {itemLines(o.items).map((l, i) => (
-          <li key={i}>{l}</li>
-        ))}
-      </ul>
+      <ItemList lines={orderLines(o)} className="k-items" />
 
       {o.notes && <p className="k-notes">{o.notes}</p>}
 

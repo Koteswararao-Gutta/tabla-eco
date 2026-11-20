@@ -209,7 +209,11 @@ export class LocalStore implements DataStore {
       type: 'pickup',
       address: '',
       people: '40',
-      items: ['Veg biryani, 2 large trays', 'Gulab jamun, 50'],
+      lines: [
+        { dish: 'Veg Dum Biryani', qty: '2', unit: 'Full tray', note: '', unsure: false },
+        { dish: 'Gulab Jamun', qty: '50', unit: 'Pieces', note: '', unsure: false },
+        { dish: 'Mirchi bajji', qty: '30', unit: 'Pieces', note: 'extra chutney', unsure: true },
+      ],
       notes: 'Less spicy',
       unsure: ['phone'],
     };

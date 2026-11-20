@@ -75,7 +75,8 @@ describe('grouping', () => {
 });
 
 describe('form', () => {
-  const good = { ...emptyForm(NOW), customerName: ' Priya ', phone: '555 123 4567', time: '17:30', items: 'Biryani\n\n  Raita  \n', people: '40' };
+  const row = (name: string, qty = '', unit = '', note = '') => ({ dishId: null, name, qty, unit, note });
+  const good = { ...emptyForm(NOW), customerName: ' Priya ', phone: '555 123 4567', time: '17:30', lines: [row('Biryani'), row(''), row('  Raita  ')], people: '40' };
 
   it('turns date and time inputs into local ms', () => {
     expect(fromInputs('2026-11-18', '17:30')).toBe(at(18, 17, 30));
@@ -84,13 +85,35 @@ describe('form', () => {
   it('accepts a good form and builds clean fields', () => {
     expect(validate(good)).toEqual({});
     const f = orderFields(good);
-    expect(f).toEqual({ customerName: 'Priya', phone: '555 123 4567', dueAt: at(18, 17, 30), type: 'pickup', items: 'Biryani\nRaita', people: 40 });
+    expect(f).toEqual({
+      customerName: 'Priya', phone: '555 123 4567', dueAt: at(18, 17, 30), type: 'pickup', items: 'Biryani\nRaita', people: 40,
+      lines: [{ dishId: null, name: 'Biryani', qty: null, unit: '', note: '' }, { dishId: null, name: 'Raita', qty: null, unit: '', note: '' }],
+    });
     expect(Object.values(f)).not.toContain(undefined);
     expect('address' in f).toBe(false);
   });
   it('requires the main fields', () => {
     const e = validate(emptyForm(NOW));
-    expect(Object.keys(e).sort()).toEqual(['customerName', 'items', 'phone', 'time']);
+    expect(Object.keys(e).sort()).toEqual(['customerName', 'lines', 'phone', 'time']);
+  });
+  it('saves dish, quantity, unit and note, and the items as text', () => {
+    const f = orderFields({ ...good, lines: [{ ...row('Chicken Dum Biryani', '2', 'Full tray', 'extra spicy'), dishId: 'g1' }, row('Gulab Jamun', '40', 'Pieces'), row('Raita', '1', 'Quarts')] });
+    expect(f.lines[0]).toEqual({ dishId: 'g1', name: 'Chicken Dum Biryani', qty: 2, unit: 'Full tray', note: 'extra spicy' });
+    expect(f.items).toBe('Chicken Dum Biryani, 2 Full trays (extra spicy)\nGulab Jamun, 40 pieces\nRaita, 1 quart');
+  });
+  it('checks quantities and rows with no dish', () => {
+    expect(validate({ ...good, lines: [row('Rice', 'two')] }).lines).toMatch(/quantity of item 1/);
+    expect(validate({ ...good, lines: [row('Rice', '0')] }).lines).toMatch(/quantity/);
+    expect(validate({ ...good, lines: [row('Rice', '1.5')] }).lines).toBeUndefined();
+    expect(validate({ ...good, lines: [row('Rice'), row('', '3')] }).lines).toMatch(/Item 2 has no dish/);
+  });
+  it('keeps an untouched old line exactly as typed, so saving changes nothing', () => {
+    const o = order(at(19, 12, 0), { items: 'Chicken dum biryani, 2 large trays\nGarlic naan, 30' });
+    const form = formFromOrder(o);
+    expect(form.lines[0]).toMatchObject({ name: 'Chicken Dum Biryani', qty: '2', unit: 'Full tray', text: 'Chicken dum biryani, 2 large trays' });
+    const f = orderFields(form);
+    expect(f.items).toBe(o.items);
+    expect(describeChanges(o, { ...o, ...f })).toEqual([]);
   });
   it('requires an address for delivery only', () => {
     expect(validate({ ...good, type: 'delivery' }).address).toMatch(/address/);
@@ -107,7 +130,7 @@ describe('form', () => {
   });
   it('round-trips an order through the form', () => {
     const o = order(at(19, 12, 0), { type: 'delivery', address: 'X', people: 25, notes: 'N' });
-    expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N' });
+    expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N', lines: [{ dishId: null, name: 'Rice', qty: null, unit: '', note: '', text: 'Rice' }] });
   });
 });
 
@@ -120,7 +143,8 @@ describe('formFromScan', () => {
 
   it('fills every field it can and keeps the AI flags', () => {
     const { form, unsure } = formFromScan(scan, base);
-    expect(form).toMatchObject({ customerName: 'Meera Iyer', date: '2026-11-19', time: '18:30', type: 'delivery', address: '12 Palm St', people: '40', items: 'Veg biryani, 2 trays\nNaan, 30', notes: '' });
+    expect(form).toMatchObject({ customerName: 'Meera Iyer', date: '2026-11-19', time: '18:30', type: 'delivery', address: '12 Palm St', people: '40', notes: '' });
+    expect(form.lines.map((l) => [l.name, l.qty, l.unit])).toEqual([['Veg Biryani', '2', 'Full tray'], ['Naan', '30', '']]);
     expect(unsure).toEqual(['phone']);
     expect(validate(form)).toEqual({});
   });
@@ -131,8 +155,28 @@ describe('formFromScan', () => {
     expect(form.time).toBe('');
     expect(form.type).toBe('pickup');
     expect(form.people).toBe('');
-    expect(form.items).toBe('');
+    expect(form.lines).toEqual(base.lines);
     expect(unsure).toEqual(['phone', 'date', 'type']);
+  });
+});
+
+describe('formFromScan with structured lines', () => {
+  const dishes = [{ id: 'g1', name: 'Chicken Dum Biryani', group: 'Biryani', description: '' }, { id: 'g2', name: 'Gulab Jamun', group: 'Desserts', description: '' }];
+  const scan: ScannedOrder = {
+    isOrder: true, customerName: 'Meera', phone: '555 404 1212', date: '2026-11-19', time: '18:30', type: 'pickup', address: '', people: '', notes: '', unsure: [],
+    lines: [
+      { dish: 'Chicken Dum Biryani', qty: '2', unit: 'FT', note: 'mild', unsure: false },
+      { dish: 'gulab jamun', qty: '40', unit: 'pcs', note: '', unsure: true },
+      { dish: 'Kaju Katli', qty: '', unit: '', note: '', unsure: false },
+    ],
+  };
+  it('matches menu dishes, makes units standard and marks rows to check', () => {
+    const { form } = formFromScan(scan, emptyForm(NOW), dishes);
+    expect(form.lines).toEqual([
+      { dishId: 'g1', name: 'Chicken Dum Biryani', qty: '2', unit: 'Full tray', note: 'mild' },
+      { dishId: 'g2', name: 'Gulab Jamun', qty: '40', unit: 'Pieces', note: '', check: true },
+      { dishId: null, name: 'Kaju Katli', qty: '', unit: '', note: '', check: true },
+    ]);
   });
 });
 
