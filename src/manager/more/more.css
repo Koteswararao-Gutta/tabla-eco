@@ -1,6 +1,5 @@
 .mo-h2 { margin: 0; font-size: 1.05rem; font-weight: 650; }
 .mo-note { margin: 0; color: var(--muted); font-size: 0.92rem; }
-.mo-soon { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; background: var(--surface); box-shadow: none; }
 .mo-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
 .mo-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
 .mo-pin { font-size: 1.4rem; letter-spacing: 0.4em; max-width: 180px; }
@@ -33,3 +32,13 @@
 .mo-totals b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .mo-good { color: var(--good); }
 .mo-bad { color: var(--bad); }
+
+/* Statistics */
+.mo-week { cursor: default; }
+.mo-total { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 16px; border-radius: var(--radius); background: var(--surface); }
+.mo-total span { color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.mo-total b { font-size: 2rem; font-variant-numeric: tabular-nums; }
+.mo-total small { color: var(--muted); font-size: 0.85rem; }
+.mo-noamount { margin-top: 12px; text-align: center; }
+.mo-week-list { margin-top: 16px; }
+.mo-row .t-badge { white-space: nowrap; }

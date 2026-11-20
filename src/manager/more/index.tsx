@@ -1,4 +1,4 @@
-// Manager > More (☰): manager-only tools behind the manager PIN: Payments, and Statistics next.
+// Manager > More (☰): manager-only tools behind the manager PIN: Payments and Statistics.
 import { useState } from 'react';
 import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { saveSingleton, useSingleton } from '@shared/data';
@@ -7,6 +7,7 @@ import { expectedPin } from '../../kitchen/pin';
 import { useManagerLock } from '../lock';
 import { expectedManagerPin } from '../lock/pin';
 import Payments from './Payments';
+import Statistics from './Statistics';
 import './more.css';
 
 export default function More() {
@@ -14,6 +15,7 @@ export default function More() {
     <Routes>
       <Route index element={<MoreHome />} />
       <Route path="payments" element={<Payments />} />
+      <Route path="statistics" element={<Statistics />} />
       <Route path="*" element={<Navigate to="/manager/more" replace />} />
     </Routes>
   );
@@ -32,11 +34,13 @@ function MoreHome() {
           </span>
           <span className="mo-chev" aria-hidden="true">›</span>
         </Link>
-        <section className="t-card mo-soon" data-testid="statistics">
-          <h2 className="mo-h2">Statistics</h2>
-          <p className="mo-note">This week's catering orders and their total, Monday to Sunday.</p>
-          <span className="t-badge">Coming soon</span>
-        </section>
+        <Link className="t-card mo-link" to="statistics" data-testid="statistics">
+          <span>
+            <h2 className="mo-h2">Statistics</h2>
+            <span className="mo-note">This week's catering orders and total, Monday to Sunday.</span>
+          </span>
+          <span className="mo-chev" aria-hidden="true">›</span>
+        </Link>
         <ManagerPin />
         <button className="t-btn block" onClick={lockNow}>Lock now</button>
       </div>
