@@ -157,7 +157,6 @@
 .k-cal .cal-dot { width: 16px; height: 16px; }
 .k-cal-day h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 12px; font-size: 1.5rem; font-weight: 700; }
 .k-cal-row { width: 100%; background: var(--bg); color: var(--ink); font: inherit; text-align: left; border: 0; border-top: 1px solid var(--line); cursor: pointer; }
-.k-cal-row:disabled { cursor: default; opacity: 1; }
 @media (max-width: 900px) {
   .k-cal { grid-template-columns: minmax(0, 1fr); }
 }
@@ -166,3 +165,6 @@
   .k-bar-title { flex-basis: 100%; }
   .k-clock { margin-right: auto; }
 }
+
+/* Calendar: tap an order to see all of it above its options. */
+.k-details { display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
