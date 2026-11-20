@@ -282,13 +282,20 @@ test('TV 5 clip picture: × offers Undo, and the file is deleted only after the 
   await expect.poll(clip).toEqual([added]);
   const toast = page.getByTestId('undo-toast');
   await expect(toast).toBeVisible();
+  // The toast scrolls itself into view smoothly, so the page is still moving here. Every
+  // position check reads all the boxes in one go (same frame); reading them one after the
+  // other let the page scroll in between and made this test fail now and then.
+  const boxes = () =>
+    page.evaluate(() => {
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const t = box('[data-testid="undo-toast"]');
+      return { toastTop: t.top, toastBottom: t.bottom, gridBottom: box('.sc-clip-grid').bottom, tabBarTop: box('.t-tabbar').top };
+    });
   // the toast never covers the pictures or the Add picture tile
-  const grid = (await page.locator('.sc-clip-grid').boundingBox())!;
-  const t = (await toast.boundingBox())!;
-  expect(t.y).toBeGreaterThanOrEqual(grid.y + grid.height);
+  const b = await boxes();
+  expect(b.toastTop).toBeGreaterThanOrEqual(b.gridBottom);
   // ...and it scrolls clear of the tab bar so Undo can be tapped
-  const tabBarTop = async () => (await page.locator('.t-tabbar').boundingBox())!.y;
-  await expect.poll(async () => (await toast.boundingBox())!.y + (await toast.boundingBox())!.height <= (await tabBarTop())).toBe(true);
+  await expect.poll(async () => { const s = await boxes(); return s.toastBottom <= s.tabBarTop; }).toBe(true);
   await shot(page, 'tv5-undo');
   await toast.getByRole('button', { name: 'Undo' }).click();
   await expect(toast).toBeHidden();
