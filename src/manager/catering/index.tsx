@@ -1,5 +1,6 @@
 // Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useCollection, useDoc, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type ScannedOrder, type WithId } from '@shared/data';
 import {
@@ -62,6 +63,14 @@ export default function Catering() {
   const menu = useDoc('toastMenu', 'current');
   useStructureOldOrders(orders, menu === undefined ? undefined : menuDishes(menu));
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
+  // "?order=<id>" (e.g. from More > Payments) opens that order.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const id = params.get('order');
+    if (!id) return;
+    setEditing(id);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [calendar, setCalendar] = useState(false);
