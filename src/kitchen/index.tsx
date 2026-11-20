@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
-import { EditHistory, EditOrderSheet, ItemList } from '../manager/catering';
+import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
+import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
@@ -366,8 +366,6 @@ function useTaps(onTap: () => void, onDoubleTap: () => void) {
 function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: number; onTap: () => void; onDoubleTap: () => void }) {
   const cd = countdown(o.dueAt, now);
   const day = dayLabel(o.dueAt, now);
-  const last = lastEdit(o);
-  const [showChanges, setShowChanges] = useState(false);
   const tap = useTaps(onTap, onDoubleTap);
   return (
     <article
@@ -405,15 +403,7 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
 
       {o.notes && <p className="k-notes">{o.notes}</p>}
 
-      {last && (
-        <button className="k-changed" aria-expanded={showChanges} onClick={() => setShowChanges(!showChanges)}>
-          ✎ Changed by {EDITED_BY_LABEL[last.by] ?? 'someone'}, {dayLabel(last.at, now) === 'Today' ? '' : `${dayLabel(last.at, now)} `}
-          {timeLabel(last.at)}
-          <span className="k-changed-more">{showChanges ? 'Hide' : 'See changes'}</span>
-        </button>
-      )}
-      {last && showChanges && <EditHistory history={o.history} now={now} />}
-
+      {/* The tablet shows only the current order; the change history is in the manager app. */}
       <p className="k-tap-hint">Tap for options · Double-tap to complete</p>
     </article>
   );

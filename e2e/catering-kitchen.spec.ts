@@ -805,7 +805,7 @@ test('Save stays visible at the bottom of a long order form', async ({ browser }
   await context.close();
 });
 
-test('kitchen edits an order: history shows who changed what, on the tablet and the manager app', async ({ browser }) => {
+test('kitchen edits an order: tablet shows only the updated order, manager app keeps the history', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
@@ -815,7 +815,7 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
 
   // Kitchen: Edit on the card opens the form, with no Delete.
   const card = kitchen.getByRole('article', { name: 'Order for Priya Sharma' });
-  await expect(card.getByRole('button', { name: /Changed by/ })).toHaveCount(0); // never edited yet
+  await expect(card.getByTestId('edit-history')).toHaveCount(0);
   await kitchenOption(kitchen, 'Priya Sharma', 'Edit order');
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Delete' })).toHaveCount(0);
@@ -845,12 +845,11 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
     changes: ['People: 40 → 50', 'Items: Chicken dum biryani, 2 large trays → Chicken Dum Biryani, 3 Full trays', 'Item added: Samosa (2), 25 pieces'],
   });
 
-  // Tablet card: "Changed by Kitchen", tap to see what changed.
-  const changed = card.getByRole('button', { name: /Changed by Kitchen/ });
-  await expect(changed).toBeVisible();
-  await changed.click();
-  await expect(card.getByTestId('edit-history')).toContainText('People: 40 → 50');
-  await shot(kitchen, 'kitchen-card-history');
+  // Tablet card shows only the updated order, no change history.
+  await expect(card).toContainText('50 people');
+  await expect(card).not.toContainText('Changed by');
+  await expect(card.getByTestId('edit-history')).toHaveCount(0);
+  await shot(kitchen, 'kitchen-card-updated');
 
   // Manager details show the same history, newest first, after a manager edit.
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
@@ -871,8 +870,9 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   await details.getByTestId('edit-history').scrollIntoViewIfNeeded();
   await shot(manager, 'manager-order-history');
 
-  // The tablet shows the manager's change at once.
-  await expect(card.getByRole('button', { name: /Changed by Manager/ })).toBeVisible();
+  // The tablet shows the manager's change at once (the new time only, no history).
+  await expect(card.locator('.k-due')).toHaveText('6:00 PM');
+  await expect(card.getByTestId('edit-history')).toHaveCount(0);
 
   // Saving with nothing changed adds no entry.
   await details.getByRole('button', { name: 'Edit' }).click();
