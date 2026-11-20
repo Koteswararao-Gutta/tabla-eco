@@ -20,6 +20,14 @@ const io: PlannerIO = {
     }),
   saveConfig: (config) => saveSingleton('staffConfig', config as unknown as StaffConfig),
   saveWeek: (id, week) => (week ? store.setDoc('staffWeeks', id, encodeWeek(week) as unknown as StaffWeek) : store.deleteDoc('staffWeeks', id)),
+  // Starting data only goes into an empty database: a phone opening Staff offline with nothing cached
+  // must not overwrite the real roster when it reconnects.
+  seedConfig: async (config) => {
+    await store.createIfMissing('singletons', 'staffConfig', { ...(config as unknown as StaffConfig), id: 'staffConfig' } as never);
+  },
+  seedWeek: async (id, week) => {
+    await store.createIfMissing('staffWeeks', id, { ...(encodeWeek(week) as unknown as StaffWeek), id } as never);
+  },
 };
 
 export default function Staff() {

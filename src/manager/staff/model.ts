@@ -54,7 +54,7 @@ export const rng = (s: number, e: number): string => fmt(s) + '–' + fmt(e);
 export const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 export const esc = (s: unknown): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-export const newPersonId = (): string => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+export const newPersonId = (): string => 'p' + Math.random().toString(36).slice(2, 12);
 export const sorted = (l: Shift[] | undefined): Shift[] => (l || []).slice().sort((a, b) => a[0] - b[0]);
 export const hoursOf = (l: Shift[]): number => l.reduce((a, [s, e]) => a + (e - s) / 60, 0);
 export const hstr = (x: number): string => Math.round(x * 100) / 100 + 'h';
@@ -179,4 +179,61 @@ export function normalizeDB(input: unknown): PlannerDB | null {
       weeks[id] = out;
     });
   return { config: { people, settings, special }, weeks };
+}
+
+/* ---------- merging with changes made on another phone ---------- */
+// The planner holds back updates from the store while something is being edited (a sheet is open,
+// Settings has unsaved changes). Saving then must not write back the old copy over what another phone
+// saved meanwhile. So each save merges three versions: what this phone last loaded (base), what it has
+// now (local) and what the store has now (latest). Whatever this phone changed wins; the rest comes from latest.
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** A week with this phone's changes (by day and person) put on top of the stored one. */
+export function mergeWeek(base: Week | undefined, local: Week, latest: Week | undefined): Week {
+  if (!latest) return clone(local);
+  const b = base ?? emptyWeek();
+  const out: Week = { locked: local.locked !== b.locked ? local.locked : latest.locked, shifts: [] };
+  for (let d = 0; d < 7; d++) {
+    const day: Record<string, Shift[]> = {};
+    const ids = new Set([...Object.keys(local.shifts[d] || {}), ...Object.keys(latest.shifts[d] || {}), ...Object.keys(b.shifts[d] || {})]);
+    ids.forEach((pid) => {
+      const mine = local.shifts[d]?.[pid], theirs = latest.shifts[d]?.[pid];
+      const pick = same(mine, b.shifts[d]?.[pid]) ? theirs : mine;
+      if (pick && pick.length) day[pid] = clone(pick);
+    });
+    out.shifts.push(day);
+  }
+  return out;
+}
+
+/** The staff list, settings and special days with this phone's changes put on top of the stored ones. */
+export function mergeConfig(base: Config, local: Config, latest: Config): Config {
+  const byId = (l: Person[]) => new Map(l.map((p) => [p.id, p]));
+  const B = byId(base.people), Lc = byId(local.people), Lt = byId(latest.people);
+  const people: Person[] = [];
+  latest.people.forEach((p) => {
+    const mine = Lc.get(p.id);
+    if (!mine) {
+      if (!B.has(p.id)) people.push(clone(p)); // added on the other phone
+      return; // removed here
+    }
+    people.push(clone(same(mine, B.get(p.id)) ? p : mine));
+  });
+  // Added here (not in base, not yet stored).
+  local.people.forEach((p) => {
+    if (!Lt.has(p.id) && !B.has(p.id)) people.push(clone(p));
+  });
+  // Reordered here: keep this phone's order for the people it has.
+  const order = (l: Person[]) => l.map((p) => p.id).filter((id) => B.has(id) && Lc.has(id));
+  if (!same(order(local.people), order(base.people))) {
+    const at = new Map(local.people.map((p, i) => [p.id, i]));
+    people.sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity));
+  }
+  const special: Record<string, SpecialDay> = {};
+  new Set([...Object.keys(local.special), ...Object.keys(latest.special), ...Object.keys(base.special)]).forEach((k) => {
+    const pick = same(local.special[k], base.special[k]) ? latest.special[k] : local.special[k];
+    if (pick) special[k] = clone(pick);
+  });
+  return { people, settings: clone(same(local.settings, base.settings) ? latest.settings : local.settings), special };
 }

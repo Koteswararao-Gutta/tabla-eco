@@ -81,7 +81,9 @@ export function dayLabel(ms: number, now: number): string {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  // Another year shows its year, so an order typed with the wrong year stands out.
+  const otherYear = new Date(ms).getFullYear() !== new Date(now).getFullYear();
+  return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}) });
 }
 
 /** "5:30 PM" */

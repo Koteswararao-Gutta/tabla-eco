@@ -2,7 +2,7 @@
 // Writes: picture changes save the whole slot (so a removed TV entry really goes, even on a
 // merging backend); seconds, transition, order and end date update only that field, so two
 // phones editing different things never overwrite each other.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
 import { PARTNER, pictureFor } from '@shared/clock/loop';
@@ -19,9 +19,20 @@ const SIDE_LINE: Partial<Record<ScreenId, string>> = {
 };
 const PLAY_LINE = 'Pictures play top to bottom, then start again.';
 
+/** Saves a change to a slot only if it still exists: another phone may have removed it meanwhile, and a
+ *  merge into a missing slot would leave a half slot (no pictures) that breaks every TV. */
+async function updateSlot(id: string, patch: Partial<Slot>) {
+  if (!(await store.getDoc('slots', id))) return;
+  await store.updateDoc('slots', id, patch);
+}
+
+/** Slots with the fields a TV needs; anything half-saved is left out rather than breaking the page. */
+export const isWholeSlot = (s: Partial<Slot>): boolean => !!s.pictures && typeof s.pictures === 'object' && typeof s.seconds === 'number' && typeof s.order === 'number';
+
 export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const screens = useCollection('screens');
-  const slots = useCollection('slots');
+  const allSlots = useCollection('slots');
+  const slots = useMemo(() => allSlots && allSlots.filter(isWholeSlot), [allSlots]);
   const now = useNow(30_000);
   if (!screens || !slots) {
     return <ScreenPage id={tv}><p className="t-sub">Loading…</p></ScreenPage>;
@@ -241,6 +252,8 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
     if (!file) return setError('Choose a picture first.');
     if (secs == null) return setError(SECONDS_ERROR);
     const endsAt = kind !== 'menu' && ends ? fromLocalInput(ends) : null;
+    if (kind !== 'menu' && ends && endsAt == null) return setError('That end date is not a valid date.');
+    if (endsAt != null && endsAt <= store.now()) return setError('That end date has already passed, so the picture would never show.');
     run(async () => {
       const pic = await store.uploadPicture(file, file.name);
       const id = newId();
@@ -306,7 +319,7 @@ function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   const save = () => {
     if (secs == null) return setError(SECONDS_ERROR);
     run(async () => {
-      await store.updateDoc('slots', slot.id, { seconds: secs, transition });
+      await updateSlot(slot.id, { seconds: secs, transition });
       await restartLoop(slot.id);
       onClose();
     });
@@ -344,7 +357,7 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
     run(async () => {
       const changed = moveSlotTo(sorted, index, to);
       if (!changed.length) return;
-      for (const s of changed) await store.updateDoc('slots', s.id, { order: s.order });
+      for (const s of changed) await updateSlot(s.id, { order: s.order });
       await restartLoop(slot.id);
     });
   const first = index <= 0;
@@ -353,7 +366,7 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
     if (secs == null) return setError(SECONDS_ERROR);
     if (ends && endsMs == null) return setError('That end date is not a valid date.');
     run(async () => {
-      await store.updateDoc('slots', slot.id, { seconds: secs, transition, endsAt: endsMs });
+      await updateSlot(slot.id, { seconds: secs, transition, endsAt: endsMs });
       await restartLoop(slot.id);
       onClose();
     });

@@ -6,7 +6,7 @@
 import {
   DAYS, SHORT, STEP, POS, POSSHORT,
   iso, parse, addDays, mondayOf, shiftWeek, dshort, wrange, toHM, fromHM, fmt, rng, clone, esc, newPersonId,
-  sorted, hoursOf, hstr, shiftTxt, key, short, emptyWeek, defaults, normalizeDB,
+  sorted, hoursOf, hstr, shiftTxt, key, short, emptyWeek, defaults, normalizeDB, mergeWeek, mergeConfig,
 } from './model';
 import type { Config, DayHours, Person, PlannerDB, Pos, Settings, Shift, SpecialDay, Week } from './model';
 
@@ -20,6 +20,9 @@ export interface PlannerIO {
   saveConfig(config: Config): Promise<void>;
   /** null deletes the week. */
   saveWeek(id: string, week: Week | null): Promise<void>;
+  /** Starting data: written only if nothing is stored yet (never over another phone's data). */
+  seedConfig(config: Config): Promise<void>;
+  seedWeek(id: string, week: Week): Promise<void>;
 }
 
 type Hours =
@@ -144,11 +147,25 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       },
     );
   }
+  // What this phone last loaded from the store, and the store's newest copy (see mergeWeek/mergeConfig).
+  let base: PlannerDB | null = null;
+  const latest = (): PlannerDB | null => (rawWeeks === undefined ? null : normalizeDB({ config: rawConfig ?? db().config, weeks: rawWeeks }));
   const saveWeek = (id: string) => {
-    const w = db().weeks[id];
+    let w = db().weeks[id];
+    const L = latest();
+    if (w && base && L) {
+      w = mergeWeek(base.weeks[id], w, L.weeks[id]);
+      db().weeks[id] = w;
+      base.weeks[id] = clone(w);
+    }
     track(() => io.saveWeek(id, w ? clone(w) : null));
   };
   const saveConfig = () => {
+    const L = latest();
+    if (base && L && rawConfig) {
+      db().config = mergeConfig(base.config, db().config, L.config);
+      base.config = clone(db().config);
+    }
     const c = clone(db().config);
     track(() => io.saveConfig(c));
   };
@@ -179,12 +196,14 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         // Save once the watchers are fully set up (this may run inside the first watch callback),
         // so the echo of these writes is heard.
         later(() => {
-          saveConfig();
-          if (!hasWeeks) Object.keys(db().weeks).forEach((id) => saveWeek(id));
+          const c = clone(db().config);
+          track(() => io.seedConfig(c));
+          if (!hasWeeks) Object.entries(db().weeks).forEach(([id, w]) => track(() => io.seedWeek(id, clone(w))));
         }, 0);
       } else {
         DB = normalizeDB({ config: rawConfig, weeks: rawWeeks }) || defaults();
       }
+      base = clone(DB);
       if (!inflight) setStatus('saved');
       render();
       return;
@@ -206,6 +225,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     if (!n || JSON.stringify(n) === JSON.stringify({ config: DB.config, weeks: DB.weeks })) return;
     draft = null;
     DB = n;
+    base = clone(n);
     render();
   }
   const pollId = window.setInterval(() => {

@@ -847,10 +847,19 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     setAmount((typed) => (typed ? typed : p.amount));
   }, [props.pay, payStart]);
   const amountChanged = showAmount && payStart !== undefined && parseAmount(amount) !== parseAmount(payStart.amount);
+  // The amount can't go below the deposits already taken (then "owed" and the week's totals stop adding up).
+  const amountProblem = (v: string) => {
+    const e = amountError(v);
+    if (e) return e;
+    const n = parseAmount(v), dep = props.pay ? depositTotal(props.pay) : 0;
+    return n !== null && dep > n ? `Deposits already add up to ${amountLabel(dep)}.` : '';
+  };
   const typeAmount = (v: string) => {
     setAmount(v);
-    if (tried) setAmountErr(amountError(v));
+    if (tried) setAmountErr(amountProblem(v));
   };
+  // A new order already added (its amount save failed): Save again retries the amount only, never a second order.
+  const created = useRef<string | null>(null);
   /** Saves the amount for this order id (manager only), when it changed. A merge, so payments stay as they are. */
   const saveAmount = async (id: string) => {
     if (!amountChanged) return;
@@ -911,7 +920,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   /** Checks the form; false (and the errors shown, first one focused) when something needs fixing. */
   const check = () => {
     const e = validate(f);
-    const ae = showAmount ? amountError(amount) : '';
+    const ae = showAmount && (amountChanged || !order) ? amountProblem(amount) : '';
     setTried(true);
     setErrors(e);
     setAmountErr(ae);
@@ -924,11 +933,19 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
   // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
   // What changed (compared with the order as saved right now) is added to its history, with who saved it.
+  // Only fields changed in this form are sent, so an edit made elsewhere while it was open (the kitchen
+  // adding an item or a note) is not written over with what the form loaded.
   const editFields = () => {
-    const fields = orderFields(f);
+    const all = orderFields(f);
+    const was = orderFields(start);
+    const full = { ...all, address: all.address ?? '', notes: all.notes ?? '' };
+    const before = { ...was, address: was.address ?? '', notes: was.notes ?? '' };
+    const changed = Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k as keyof typeof before])));
+    // Items are saved twice (as text and as lines): they always go together.
+    if ('items' in changed || 'lines' in changed) Object.assign(changed, { items: full.items, lines: full.lines });
     const at = store.now();
-    const next = { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: at };
-    const changes = order ? describeChanges(order, next) : [];
+    const next = { ...changed, updatedAt: at } as Partial<typeof full> & { updatedAt: number };
+    const changes = order ? describeChanges(order, { ...order, ...next }) : [];
     return changes.length ? { ...next, history: withEdit(order!.history, { at, by, changes }) } : next;
   };
 
@@ -942,7 +959,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         return onClose();
       }
       const fields = orderFields(f);
-      const id = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now });
+      const id = created.current ?? (created.current = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now }));
       await saveAmount(id);
       props.onSaved(shareText(fields, 'New catering order'));
     });
@@ -1046,7 +1063,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         {err('customerName')}
       </Field>
       <Field label="Phone">
-        <input className="t-input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
+        <input className="t-input" type="tel" inputMode="tel" maxLength={30} value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
         {err('phone')}
       </Field>
       <div className="t-grid2">

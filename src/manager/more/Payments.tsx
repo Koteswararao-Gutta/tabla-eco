@@ -46,7 +46,7 @@ export default function Payments() {
                     <span className="mo-row-time">{timeLabel(r.order.dueAt)}</span>
                   </span>
                   <span className="mo-row-amt">{r.amount === null ? 'No amount' : amountLabel(r.amount)}</span>
-                  <span className={'t-badge ' + (r.paid ? 'good' : 'bad')}>{r.paid ? 'Paid' : 'Unpaid'}</span>
+                  <span className={'t-badge ' + (r.status === 'paid' ? 'good' : r.status === 'part' ? '' : 'bad')}>{r.status === 'paid' ? 'Paid' : r.status === 'part' ? 'Part paid' : 'Unpaid'}</span>
                 </Link>
               </li>
             ))}

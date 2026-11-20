@@ -228,9 +228,11 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
     setUndo({ id: o.id, name: o.customerName });
     timer.current = setTimeout(() => setUndo(null), UNDO_MS);
   };
-  const complete = async (o: Order) => {
-    await setStatus(o, 'completed');
+  // Undo shows at once: offline on the live app the save only confirms when the internet is back, but the
+  // card is already gone from the list, so waiting would hide Undo until then.
+  const complete = (o: Order) => {
     showUndo(o);
+    setStatus(o, 'completed').catch(() => setUndo(null));
   };
 
   // "Edit" on a card: the order is read from the live list, so a change made elsewhere shows at once;
@@ -246,7 +248,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
     const o = undo && orders?.find((x) => x.id === undo.id);
     clearTimeout(timer.current);
     setUndo(null);
-    if (o) await setStatus(o, 'open');
+    if (o) setStatus(o, 'open').catch(() => {});
   };
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
