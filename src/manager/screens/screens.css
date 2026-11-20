@@ -25,7 +25,7 @@
 .sc-saved { color: var(--good); font-size: 0.88rem; font-weight: 600; }
 /* mirrored TV: one short line with a proper-size link */
 .sc-mirror-note { display: flex; align-items: center; flex-wrap: wrap; column-gap: 4px; margin-bottom: 4px; }
-.sc-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; margin-left: -4px; border-radius: var(--radius-sm); color: var(--accent); font-weight: 650; text-decoration: none; }
+.sc-link { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 8px; margin-left: -4px; border-radius: var(--radius-sm); color: var(--accent); font-weight: 650; text-decoration: none; }
 .sc-menu { display: flex; flex-direction: column; gap: 10px; }
 .sc-disabled { opacity: 0.5; pointer-events: none; }
 .sc-pin { font-size: 1.4rem; letter-spacing: 0.4em; max-width: 180px; }
@@ -42,11 +42,11 @@ div.sc-pic { cursor: default; }
 .sc-pic-empty { background: var(--surface); border: 1.5px dashed var(--line); }
 .sc-pic-static { cursor: default; }
 .sc-under { display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; }
-.sc-meta { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 0 2px; border: 0; background: transparent; color: var(--muted); font-size: 0.9rem; cursor: pointer; }
+.sc-meta { display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); margin: 0; padding: 0 2px; border: 0; background: transparent; color: var(--muted); font-size: 0.9rem; cursor: pointer; }
 p.sc-meta { cursor: default; }
 .sc-insert { position: relative; display: flex; justify-content: center; padding: 0 0 12px; }
 .sc-insert::before { content: ''; position: absolute; left: 0; right: 0; top: 20px; border-top: 1px solid var(--line); }
-.sc-insert .t-plus { position: relative; width: 44px; height: 44px; }
+.sc-insert .t-plus { position: relative; width: var(--tap); height: var(--tap); }
 /* in-between +: quiet (grey, thin line), still a full-size tap target; the clear add button is at the end */
 .sc-insert .sc-insert-plus { border: 1px solid var(--line); color: var(--muted); font-size: 20px; }
 .sc-insert .sc-insert-plus:hover, .sc-insert .sc-insert-plus:focus-visible { border-color: var(--accent); color: var(--accent); }
@@ -79,7 +79,7 @@ p.sc-meta { cursor: default; }
 
 /* the sheet's segmented controls fill the row on phones */
 .sc-page .t-seg { display: flex; }
-.sc-page .t-seg button { flex: 1; min-height: 44px; padding: 8px 10px; }
+.sc-page .t-seg button { flex: 1; min-height: var(--tap); padding: 8px 10px; }
 .sc-page a.t-btn { text-decoration: none; color: var(--ink); }
 .sc-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
 .sc-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }

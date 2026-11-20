@@ -24,6 +24,7 @@ export function unlockedUntil(saved: string | null, pin: string | undefined, now
   const [fp, until] = saved.split(':');
   const end = Number(until);
   if (fp !== pinFingerprint('manager:' + pin) || !Number.isFinite(end) || end <= now) return 0;
-  // A phone clock far ahead must not keep it open for hours.
-  return Math.min(end, now + UNLOCK_MS);
+  // Unlocked while the phone clock was far ahead, then the clock was put right: lock, don't stay open for hours.
+  if (end - now > UNLOCK_MS + 60_000) return 0;
+  return end;
 }

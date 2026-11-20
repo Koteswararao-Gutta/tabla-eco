@@ -37,7 +37,6 @@ export default function Kitchen() {
     setDeviceValue(UNLOCK_KEY, value);
     setSaved(value);
   };
-  const [prep, setPrep] = useState(false);
 
   // Browsers keep sound muted until the screen is touched: any tap wakes it for the chime.
   useEffect(() => {
@@ -67,10 +66,8 @@ export default function Kitchen() {
     // ScreenSurface keeps the screen awake; .k-root turns it into a light page.
     <ScreenSurface testId="kitchen">
       <div className="k-root">
-        {pin === undefined ? null : unlocked && prep ? (
-          <PrepView orders={orders} now={now} banner={banner} onBack={() => setPrep(false)} />
-        ) : unlocked ? (
-          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} onPrep={() => setPrep(true)} />
+        {pin === undefined ? null : unlocked ? (
+          <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} />
         ) : (
           <div className={'k-lock' + (reminders.length ? ' has-remind' : '')}>
             {reminders.length > 0 && <div className="k-remind-over">{banner}</div>}
@@ -178,15 +175,24 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 
 // ---------- orders ----------
 
-function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void; onPrep: () => void }) {
+function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
   const [showAll, setShowAll] = useState(false);
-  const [view, setView] = useState<'list' | 'calendar'>('list');
-  const away = showAll || view === 'calendar';
+  const [view, setView] = useState<'list' | 'calendar' | 'prep'>('list');
+  const away = showAll || view !== 'list';
   const backToList = () => {
     setShowAll(false);
     setView('list');
   };
   const board = useRef<HTMLDivElement>(null);
+  // The top bar's height, for views that keep something stuck just under it (Prep's day picker).
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => board.current?.style.setProperty('--k-bar-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Each view opens at its top, not at the other view's scroll position.
   useEffect(() => {
     const root = board.current?.closest('.k-root');
@@ -222,9 +228,11 @@ function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] 
     setUndo({ id: o.id, name: o.customerName });
     timer.current = setTimeout(() => setUndo(null), UNDO_MS);
   };
-  const complete = async (o: Order) => {
-    await setStatus(o, 'completed');
+  // Undo shows at once: offline on the live app the save only confirms when the internet is back, but the
+  // card is already gone from the list, so waiting would hide Undo until then.
+  const complete = (o: Order) => {
     showUndo(o);
+    setStatus(o, 'completed').catch(() => setUndo(null));
   };
 
   // "Edit" on a card: the order is read from the live list, so a change made elsewhere shows at once;
@@ -240,17 +248,17 @@ function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] 
     const o = undo && orders?.find((x) => x.id === undo.id);
     clearTimeout(timer.current);
     setUndo(null);
-    if (o) await setStatus(o, 'open');
+    if (o) setStatus(o, 'open').catch(() => {});
   };
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
   return (
     <div className="k-board" ref={board}>
-      <header className="k-bar">
+      <header className="k-bar" ref={bar}>
         <div className="k-bar-title">
           <Logo className="k-logo" />
-          <h1>{showAll ? 'All orders' : view === 'calendar' ? 'Calendar' : 'Open orders'}</h1>
+          <h1>{showAll ? 'All orders' : view === 'calendar' ? 'Calendar' : view === 'prep' ? 'Prep' : 'Open orders'}</h1>
           {!showAll && view === 'list' && orders && <span className="k-count">{open.length}</span>}
           {note}
         </div>
@@ -262,6 +270,7 @@ function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] 
             options={[
               { value: 'list', label: 'List' },
               { value: 'calendar', label: 'Calendar' },
+              { value: 'prep', label: 'Prep' },
             ]}
             onChange={setView}
           />
@@ -275,11 +284,6 @@ function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] 
             Show all orders
           </button>
         )}
-        {!showAll && (
-          <button className="t-btn k-bar-btn" onClick={onPrep}>
-            Prep
-          </button>
-        )}
         <button className="t-btn k-bar-btn" onClick={onLock}>
           Lock
         </button>
@@ -288,6 +292,8 @@ function Board({ orders, now, banner, note, onLock, onPrep }: { orders: Order[] 
 
       {!orders ? null : showAll ? (
         <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />
+      ) : view === 'prep' ? (
+        <PrepView orders={orders} now={now} />
       ) : view === 'calendar' ? (
         <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor(o.id)} />
       ) : open.length === 0 ? (

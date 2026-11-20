@@ -1,11 +1,14 @@
 // Payments list (pure): the catering orders on one day, with amount and Paid / Unpaid, and the day's totals.
 import type { CateringOrder, OrderAmount, WithId } from '@shared/data';
 import { dayStart } from '../catering/orders';
+import { balance, depositTotal, payFrom } from '../catering/pay';
 
 export interface PayRow {
   order: WithId<CateringOrder>;
   amount: number | null;
   paid: boolean;
+  /** 'part' when deposits were taken but it isn't paid in full yet. */
+  status: 'paid' | 'part' | 'unpaid';
 }
 
 export interface PayDay {
@@ -23,17 +26,21 @@ export function paymentsOn(orders: WithId<CateringOrder>[], amounts: WithId<Orde
     .filter((o) => o.dueAt >= from && o.dueAt < to)
     .sort((a, b) => a.dueAt - b.dueAt)
     .map((order) => {
-      const a = byId.get(order.id);
-      const amount = typeof a?.amount === 'number' && Number.isFinite(a.amount) ? a.amount : null;
-      return { order, amount, paid: a?.paid === true };
+      const pay = payFrom(byId.get(order.id));
+      const status: PayRow['status'] = pay.paid ? 'paid' : depositTotal(pay) > 0 ? 'part' : 'unpaid';
+      return { order, amount: pay.amount, paid: pay.paid, status, pay };
     });
+  // Deposits count as paid, and only what is still owed as unpaid (the same as Statistics).
   let paidTotal = 0;
   let unpaidTotal = 0;
   for (const r of rows) {
-    if (r.paid) paidTotal += r.amount ?? 0;
-    else unpaidTotal += r.amount ?? 0;
+    if (r.pay.paid) paidTotal += r.pay.amount ?? depositTotal(r.pay);
+    else {
+      paidTotal += depositTotal(r.pay);
+      unpaidTotal += balance(r.pay) ?? 0;
+    }
   }
-  return { rows, paidTotal: round(paidTotal), unpaidTotal: round(unpaidTotal) };
+  return { rows: rows.map(({ pay: _pay, ...r }) => r), paidTotal: round(paidTotal), unpaidTotal: round(unpaidTotal) };
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;

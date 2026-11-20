@@ -1,9 +1,9 @@
 // Front menu TV (#/tv/1 … #/tv/4). Shows this TV's picture for the current slot of the shared loop.
 // All four TVs compute the slot from the same shared clock, slot list and loop anchor, and wake
 // with a timer aimed at the exact end of the slot, so they switch together without talking to each other.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Idle, ScreenSurface } from '@shared/ui';
-import { store, useCollection, useHeartbeat, useSingleton, type ScreenId, type Transition } from '@shared/data';
+import { store, useCollection, useHeartbeat, useSingleton, type ScreenId, type Slot, type Transition } from '@shared/data';
 import { msUntilNextChange, targetFor, type Target } from './schedule';
 import './tv-menu.css';
 
@@ -58,7 +58,9 @@ function usePictures(ids: (string | null)[], retry: number) {
 
 export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   useHeartbeat(screenId);
-  const slots = useCollection('slots');
+  // A half-saved slot (no pictures or seconds) is skipped, never allowed to break the TV.
+  const allSlots = useCollection('slots');
+  const slots = useMemo(() => allSlots && allSlots.filter((s: Partial<Slot>) => !!s.pictures && typeof s.pictures === 'object' && typeof s.seconds === 'number' && typeof s.order === 'number'), [allSlots]);
   const screens = useCollection('screens');
   const loop = useSingleton('loop');
   const settings = useSingleton('settings');

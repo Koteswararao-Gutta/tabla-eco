@@ -26,6 +26,8 @@ describe('manager PIN', () => {
 
   it('never stays open longer than 10 minutes from now', () => {
     const saved = unlockValue('5678', 1000 + 10 * UNLOCK_MS);
-    expect(unlockedUntil(saved, '5678', 1000)).toBe(1000 + UNLOCK_MS);
+    // Saved with the clock far ahead (then put right): locked, not open for hours.
+    expect(unlockedUntil(saved, '5678', 1000)).toBe(0);
+    expect(unlockedUntil(saved, '5678', 1000 + 9 * UNLOCK_MS)).toBe(1000 + 10 * UNLOCK_MS);
   });
 });

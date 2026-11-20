@@ -59,6 +59,10 @@ export function staffedSpans(staff: unknown, day0: number): Span[] | null {
   return brk ? [[at(start), at(brk[0])], [at(brk[1]), at(h.close)]] : [[at(start), at(h.close)]];
 }
 
+/** Coming back this long before an order is due still leaves time to get it ready; any later (a 5:05 PM order
+ *  when the break ends at 5) and the heads-up goes out before they leave instead. */
+export const BACK_ENOUGH_MS = 20 * MIN;
+
 /** When the tablet should show an order's heads-up. Without staff hours: exactly 1 hour before. */
 export function ringAt(dueAt: number, staff?: unknown): number {
   const target = dueAt - REMIND_MS;
@@ -72,9 +76,10 @@ export function ringAt(dueAt: number, staff?: unknown): number {
     spans.push(...s);
   }
   if (spans.some(([a, b]) => target >= a && target < b)) return target;
-  const back = spans.find(([a]) => a > target && a < dueAt); // people come back before it's due
+  // People come back before it's due, with enough time left to get it ready: ring when they arrive.
+  const back = spans.find(([a]) => a > target && dueAt - a >= BACK_ENOUGH_MS);
   if (back) return back[0];
-  const before = spans.filter(([, b]) => b <= target && b > target - 12 * 60 * MIN).pop(); // last chance before they leave
+  const before = spans.filter(([, b]) => b <= target && b >= target - 14 * 60 * MIN).pop(); // last chance before they leave (the night before, too)
   if (before) return Math.max(before[0], before[1] - 15 * MIN);
   const next = spans.find(([a]) => a > target); // nobody there before it's due: ring when they arrive
   if (next) return next[0];

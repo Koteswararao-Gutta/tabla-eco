@@ -21,7 +21,7 @@ export function Alarm({ reminders, now, on }: { reminders: KitchenOrder[]; now: 
   if (!on) return null;
   const stop = () => {
     stopAlarm();
-    reminders.forEach((o) => store.updateDoc('orders', o.id, ackPatch(o)));
+    reminders.forEach((o) => store.updateDoc('orders', o.id, ackPatch(o)).catch(() => {})); // an order deleted meanwhile just goes
   };
   return (
     <div className="k-alarm" role="alertdialog" aria-label="Catering order alarm" data-testid="kitchen-alarm" onClick={stop}>

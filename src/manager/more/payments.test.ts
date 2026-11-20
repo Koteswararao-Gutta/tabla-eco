@@ -22,4 +22,11 @@ describe('paymentsOn', () => {
     expect(paymentsOn(orders, [], at(20, 9))).toMatchObject({ paidTotal: 0, unpaidTotal: 0 });
     expect(paymentsOn([], amounts, at(20, 9)).rows).toEqual([]);
   });
+
+  it('counts deposits as paid and only what is still owed as unpaid', () => {
+    const dep = { id: 'early', amount: 500, paid: false, updatedAt: 0, deposits: [{ amount: 200, method: 'zelle', takenBy: 'Siri', at: 0 }] } as unknown as WithId<OrderAmount>;
+    const day = paymentsOn(orders, [dep], at(20, 9));
+    expect(day.rows.find((r) => r.order.id === 'early')!.status).toBe('part');
+    expect(day).toMatchObject({ paidTotal: 200, unpaidTotal: 300 });
+  });
 });

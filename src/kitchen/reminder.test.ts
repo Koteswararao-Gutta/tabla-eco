@@ -48,6 +48,11 @@ describe('ringAt: only while the kitchen is staffed', () => {
   it('if people are back only after it is due, rings just before the break', () => {
     expect(ringAt(at(18, 16), staff)).toBe(at(18, 13, 45)); // 4:00 order, during the break
   });
+  it('back only minutes before it is due: rings before they leave instead', () => {
+    expect(ringAt(at(18, 17, 5), staff)).toBe(at(18, 13, 45)); // 5:05 order: not at 5:00 with 5 minutes left
+    expect(ringAt(at(19, 10, 15), staff)).toBe(at(18, 20, 45)); // 10:15 AM order: the night before
+    expect(ringAt(at(19, 10, 0), staff)).toBe(at(18, 20, 45)); // 10:00 AM, closing exactly 12 hours back counts
+  });
   it('early morning orders ring when prep starts', () => {
     expect(ringAt(at(18, 10, 30), staff)).toBe(at(18, 10));
   });
