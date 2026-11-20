@@ -81,6 +81,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .t-tabbar nav { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; max-width: 560px; }
 .t-tabbar a { display: flex; align-items: center; justify-content: center; min-height: 60px; text-decoration: none; color: var(--muted); font-weight: 600; font-size: 0.95rem; }
 .t-tabbar a.active { color: var(--accent); }
+.t-tabbar a.t-tab-icon { font-size: 1.4rem; }
 
 /* sheet (bottom sheet on phones, dialog on wide screens) */
 .t-sheet-back { position: fixed; inset: 0; background: rgba(20, 18, 15, 0.45); display: flex; align-items: flex-end; justify-content: center; z-index: 50; overscroll-behavior: contain; animation: t-fade 0.18s ease; }
