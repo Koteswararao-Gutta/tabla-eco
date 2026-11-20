@@ -241,12 +241,14 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
   );
 }
 
-export function TabBar({ tabs }: { tabs: { to: string; label: string }[] }) {
+/** Manager tab bar. A `narrow` tab (e.g. the ☰ More button) takes a small fixed width; `name` is its spoken name. */
+export function TabBar({ tabs }: { tabs: { to: string; label: string; name?: string; narrow?: boolean }[] }) {
+  const columns = tabs.map((t) => (t.narrow ? '64px' : '1fr')).join(' ');
   return (
     <div className="t-tabbar">
-      <nav>
+      <nav style={{ gridTemplateColumns: columns }}>
         {tabs.map((t) => (
-          <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? 'active' : '')}>
+          <NavLink key={t.to} to={t.to} aria-label={t.name} className={({ isActive }) => (isActive ? 'active' : '') + (t.narrow ? ' t-tab-icon' : '')}>
             {t.label}
           </NavLink>
         ))}
