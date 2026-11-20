@@ -108,6 +108,11 @@ export function countdown(dueAt: number, now: number): { text: string; late: boo
   return diff > 0 ? { text: `in ${duration(diff)}`, late: false } : { text: `${duration(diff)} late`, late: true };
 }
 
+/** The countdown shows only in the last hour before an order, and once its time has passed (in red).
+ *  Before that, the time and day are enough. */
+export const COUNTDOWN_MS = 60 * MIN;
+export const showsCountdown = (dueAt: number, now: number) => dueAt - now <= COUNTDOWN_MS;
+
 /** Open and due within two hours (or already late). */
 export const isSoon = (o: Order, now: number) => o.status === 'open' && o.dueAt - now <= SOON_MS;
 
