@@ -127,3 +127,25 @@
 .c-hist-who { color: var(--muted); }
 .c-hist-who b { color: var(--ink); font-weight: 650; }
 .c-hist-changes { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+
+/* Order items: one row per dish (dish, then quantity, unit and note). */
+.c-lines { display: flex; flex-direction: column; gap: 10px; }
+.c-line { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.c-line.check { border-color: var(--warn); }
+.c-line-top { display: flex; gap: 6px; align-items: center; }
+.c-line-top .c-dish { flex: 1; min-width: 0; font-weight: 600; }
+.c-line-x { flex: none; width: var(--tap); padding: 0; color: var(--muted); }
+.c-line-qty { display: grid; grid-template-columns: 64px minmax(0, 1.1fr) minmax(0, 1fr); gap: 6px; }
+.c-line-qty .t-input, .c-line-qty .t-select { padding-left: 10px; padding-right: 8px; min-width: 0; }
+.c-qty { text-align: center; }
+.c-dish-list { scroll-margin: 8px 0 104px; list-style: none; margin: -4px 0 0; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.c-dish-opt { width: 100%; min-height: var(--tap); padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center; color: var(--ink); }
+.c-dish-opt.hi, .c-dish-opt:hover { background: var(--accent-soft); }
+.c-dish-name { font-weight: 600; }
+.c-dish-group { font-size: 0.8rem; color: var(--muted); }
+.c-line-add { color: var(--accent); border-style: dashed; border-color: var(--accent); background: var(--bg); }
+
+/* Items when reading an order: quantity first, in bold. */
+.c-qty-text { font-weight: 700; }
+.c-item-note { color: var(--muted); font-style: italic; }
+.c-check-badge { background: var(--accent-soft); color: var(--warn); font-size: 0.72rem; vertical-align: middle; }

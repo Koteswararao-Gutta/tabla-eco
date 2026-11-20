@@ -1,12 +1,14 @@
 // Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useCollection, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type ScannedOrder, type WithId } from '@shared/data';
+import { store, useCollection, useDoc, useNow, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type ScannedOrder, type WithId } from '@shared/data';
 import {
   amountError, amountInput, amountLabel, payLabel, dayLabel, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
+import { ItemsEditor, lastUnit } from './ItemsEditor';
+import { menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
 import './catering.css';
 
@@ -57,6 +59,8 @@ export default function Catering() {
     return { amount: a?.amount ?? null, paid: a?.paid === true };
   };
   const now = useNow(30_000);
+  const menu = useDoc('toastMenu', 'current');
+  useStructureOldOrders(orders, menu === undefined ? undefined : menuDishes(menu));
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -237,6 +241,54 @@ export default function Catering() {
   );
 }
 
+/**
+ * Once per order: an order saved before items were structured gets its `lines`, read from its text and
+ * matched to the menu. Only `lines` is added: the text, the times and the history stay as they are, and
+ * each line keeps its text as typed, so nothing people see changes. A line read by a guess is marked to check.
+ * Waits for the orders and the menu to load; without a menu yet, it waits for one.
+ */
+function useStructureOldOrders(orders: Order[] | null | undefined, dishes: Dish[] | undefined) {
+  const done = useRef(new Set<string>());
+  useEffect(() => {
+    if (!orders || !dishes || dishes.length === 0) return;
+    for (const o of orders) {
+      if (Array.isArray(o.lines) || done.current.has(o.id) || typeof o.items !== 'string') continue;
+      done.current.add(o.id);
+      const lines = orderLines({ items: o.items }, dishes);
+      store.updateDoc('orders', o.id, { lines }).catch(() => done.current.delete(o.id));
+    }
+  }, [orders, dishes]);
+}
+
+/** The order's items for reading: quantity first, then the dish and its note. A line kept as typed reads as typed. */
+export function ItemList({ lines, className, showChecks }: { lines: OrderLine[]; className: string; showChecks?: boolean }) {
+  return (
+    <ul className={className}>
+      {lines.map((l, i) => {
+        const check = showChecks && l.check ? <span className="t-badge c-check-badge">Check</span> : null;
+        if (l.text) {
+          return (
+            <li key={i}>
+              {l.text}
+              {check && <> {check}</>}
+            </li>
+          );
+        }
+        const q = qtyText(l);
+        return (
+          <li key={i}>
+            {q && <b className="c-qty-text">{q}</b>}
+            {q && ' '}
+            {l.name}
+            {l.note.trim() && <span className="c-item-note"> · {l.note.trim()}</span>}
+            {check && <> {check}</>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** Offers the 1-hour phone alerts on this device, or says why it can't. */
 function AlertsCard() {
   const [state, setState] = useState<AlertState | null>(null);
@@ -368,7 +420,8 @@ function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
 
 function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPrintTags, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
   const { busy, error, run } = useSaver();
-  const items = itemLines(o.items);
+  const lines = orderLines(o);
+  const toCheck = lines.filter((l) => l.check).length;
   const open = o.status === 'open';
   const setStatus = (status: CateringOrder['status']) =>
     run(async () => {
@@ -416,11 +469,12 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
       </dl>
       <div>
         <h3 className="c-sum-h">Items</h3>
-        <ul className="c-sum-items">
-          {items.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
+        <ItemList lines={lines} className="c-sum-items" showChecks />
+        {toCheck > 0 && (
+          <p className="c-check" data-testid="items-to-check">
+            {toCheck === 1 ? '1 item was' : `${toCheck} items were`} read automatically. Tap Edit to check {toCheck === 1 ? 'it' : 'them'}, then Save.
+          </p>
+        )}
       </div>
       {o.notes?.trim() && (
         <div>
@@ -509,7 +563,13 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     first.scrollIntoView({ block: 'center', behavior: 'smooth' });
     first.focus({ preventScroll: true });
   }, [attempt]);
-  const [start] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now(), props.day)));
+  const menu = useDoc('toastMenu', 'current');
+  const dishes = menuDishes(menu);
+  const [start] = useState<OrderForm>(() => {
+    if (order) return formFromOrder(order, dishes);
+    const f = emptyForm(store.now(), props.day);
+    return { ...f, lines: [{ ...f.lines[0], unit: lastUnit() }] };
+  });
   const [f, setF] = useState<OrderForm>(start);
   const allOrders = useCollection('orders');
   const [errors, setErrors] = useState<FormErrors>({});
@@ -562,7 +622,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         const message = from === 'photo' ? "This photo doesn't look like an order. Please try another photo." : "This message doesn't look like an order. Please check what you pasted.";
         return setScan({ state: 'failed', from, message });
       }
-      const filled = formFromScan(got, f);
+      const filled = formFromScan(got, f, dishes);
       setF(filled.form);
       setUnsure(filled.unsure);
       if (tried) setErrors(validate(filled.form));
@@ -770,10 +830,11 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         <input className="t-input c-people" inputMode="numeric" value={f.people} onChange={(e) => set('people', e.target.value)} aria-invalid={!!errors.people} />
         {err('people')}
       </Field>
-      <Field label="Order items (one per line)">
-        <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'e.g. Chicken biryani, 2 large trays'} />
-        {err('items')}
-      </Field>
+      <div className="t-field">
+        <span>Order items</span>
+        <ItemsEditor lines={f.lines} dishes={dishes} onChange={(lines) => set('lines', lines)} invalid={!!errors.lines} />
+        {err('lines')}
+      </div>
       <Field label="Notes (optional)">
         <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
         {err('notes')}

@@ -66,8 +66,12 @@ export interface CateringOrder {
   type: 'pickup' | 'delivery';
   address?: string;
   people?: number | null;
-  /** One item per line. */
+  /** One item per line, as text. Always saved, made from `lines` when the order has them, so the
+   *  kitchen, alerts and older app versions keep working from it. */
   items: string;
+  /** The same items, structured: dish, quantity, unit and note. Missing on orders saved before this was
+   *  added (read them with orderLines() from the catering helpers, which falls back to the text). */
+  lines?: OrderLine[];
   notes?: string;
   status: 'open' | 'completed';
   completedAt?: number | null;
@@ -75,6 +79,25 @@ export interface CateringOrder {
   updatedAt: number;
   /** Every saved edit, oldest first (the last 50 are kept). */
   history?: OrderEdit[];
+}
+
+/** One item of a catering order. */
+export interface OrderLine {
+  /** The Toast menu item's id when the dish was picked from the menu; null for a dish typed in. */
+  dishId: string | null;
+  /** "Chicken Dum Biryani": the menu name, or what was typed. */
+  name: string;
+  /** How many, or null when not given. */
+  qty: number | null;
+  /** "Full tray", "Pieces", ... (see UNITS in the catering helpers), any other unit as typed, or ''. */
+  unit: string;
+  /** "extra spicy", "no onion", or ''. */
+  note: string;
+  /** The line exactly as it was typed, kept on orders made before items were structured (and on lines not
+   *  edited since), so the text people already saw doesn't change. Left out otherwise. */
+  text?: string;
+  /** true when the line was read by a guess (an old order, a scan or a paste) and nobody has checked it yet. */
+  check?: boolean;
 }
 
 /**
@@ -115,7 +138,10 @@ export interface ScannedOrder {
   address: string;
   /** Digits or '' */
   people: string;
-  items: string[];
+  /** Older server versions: one entry per item as text. */
+  items?: string[];
+  /** One entry per item. `qty` is digits or ''. `unsure` when the line was hard to read. */
+  lines?: { dish: string; qty: string; unit: string; note: string; unsure: boolean }[];
   notes: string;
   /** Form fields that were hard to read. */
   unsure: string[];
@@ -151,7 +177,7 @@ export interface LoopAnchor {
 /** The Toast online menu, saved by the server from the kitchen tablet's hourly read (toastMenu/current).
  *  Read only: the server writes it. Fields may be missing on an old or partial save. */
 export interface ToastMenu {
-  groups?: { id: string; name: string; items: { id: string; name: string; description?: string }[] }[];
+  groups?: { id: string; name: string; items: { id: string; name: string; description?: string; price?: number | null; soldOut?: boolean }[] }[];
   changedAt?: number;
 }
 

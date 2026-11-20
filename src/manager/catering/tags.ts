@@ -1,7 +1,9 @@
 // Catering name tags: one card per dish for the buffet table or the tray lid, printed on plain letter paper
 // (10 per sheet, cut along the marks). Pure helpers: no React, no store.
 import type { CateringOrder, ToastMenu } from '@shared/data';
-import { itemLines } from './orders';
+import { dishById, dishFromLine, findDish, menuDishes, orderLines, tidyCase, type Dish } from './lines';
+
+export { dishFromLine };
 
 export type Diet = 'veg' | 'nonveg';
 
@@ -16,19 +18,6 @@ export interface NameTag {
 export const TAGS_PER_SHEET = 10;
 export const TAG_SITE = 'tablausa.com/phoenix';
 
-const SIZE = '(?:(?:extra\\s+)?(?:large|small|medium|big|full|half|lg|sm|med)\\s+)?';
-const UNITS =
-  SIZE +
-  '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gal|lbs?|pounds?|pcs|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qt|liters?|litres?|ltrs?|servings?|people|ppl|pax)';
-const QTY = `\\d+(?:[.,/]\\d+)?`;
-// "6 FT", "15 gallons", "x2", "×3", "2 x"
-const LEAD_QTY = new RegExp(`^(?:${QTY}\\s*(?:x|×|\\*)\\s*|${QTY}\\s*(?:${UNITS})\\b\\.?\\s*(?:of\\s+)?|${QTY}\\s+(?=[a-z]))`, 'i');
-const TAIL_QTY = new RegExp(
-  `(?:\\s*[-–—:,=]\\s*${QTY}\\s*(?:${UNITS})?\\.?|\\s*(?:x|×|\\*)\\s*${QTY}|\\s+${QTY}\\s*(?:${UNITS})\\.?)\\s*$`,
-  'i',
-);
-const QTY_ONLY = new RegExp(`^\\s*(?:x|×)?\\s*${QTY}\\s*(?:${UNITS})?\\.?\\s*$`, 'i');
-
 const NON_VEG = [
   'chicken', 'kodi', 'mutton', 'goat', 'lamb', 'keema', 'kheema', 'fish', 'chepa', 'chapa', 'apollo', 'shrimp', 'shrimps',
   'prawn', 'prawns', 'royyala', 'royya', 'egg', 'eggs', 'guddu', 'kodiguddu', 'beef', 'pork', 'meat', 'seafood', 'crab', 'haleem',
@@ -36,70 +25,7 @@ const NON_VEG = [
 ];
 const NON_VEG_RE = new RegExp(`\\b(?:${NON_VEG.join('|')})\\b`, 'i');
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
-
-const SMALL_WORDS = new Set(['and', 'with', 'the', 'for', 'of', 'in', 'on', 'or', 'no']);
-
-/** Capitalises words like a menu: "chicken dum biryani with raita" → "Chicken Dum Biryani with Raita". */
-function tidyCase(s: string): string {
-  let first = true;
-  return s.replace(/[A-Za-z][A-Za-z']*/g, (w) => {
-    const keep = !first && SMALL_WORDS.has(w.toLowerCase());
-    first = false;
-    if (keep || w[0] !== w[0].toLowerCase()) return w;
-    return w[0].toUpperCase() + w.slice(1);
-  });
-}
-
-/** The dish name (and small line) from one order line: quantities and tray counts dropped. */
-export function dishFromLine(line: string): { name: string; sub: string } {
-  let s = line.trim().replace(/^(?:[-*•·]+|\d+[.)])\s+/, '');
-  // Bracketed bits: quantities are dropped, anything else ("Bone-in", "no onion") becomes the small line.
-  const subs: string[] = [];
-  s = s.replace(/\s*[([]([^)\]]*)[)\]]/g, (_, inner: string) => {
-    const t = inner.trim();
-    if (t && !QTY_ONLY.test(t)) subs.push(t);
-    return ' ';
-  });
-  s = s.replace(/\s+/g, ' ').trim();
-  for (let i = 0; i < 3; i++) {
-    const before = s;
-    s = s.replace(TAIL_QTY, '').trim();
-    s = s.replace(LEAD_QTY, '').trim();
-    if (s === before) break;
-  }
-  s = s.replace(/^[-–—:,\s]+|[-–—:,\s]+$/g, '');
-  return { name: tidyCase(s), sub: tidyCase(subs.join(', ')) };
-}
-
-type ToastItem = { name: string; description: string; group: string };
-
-/** Toast menu items by their squashed name, for looking up a dish's group and description. */
-export function toastIndex(menu: ToastMenu | null | undefined): Map<string, ToastItem> {
-  const map = new Map<string, ToastItem>();
-  for (const g of Array.isArray(menu?.groups) ? menu!.groups : []) {
-    for (const i of Array.isArray(g?.items) ? g.items : []) {
-      if (typeof i?.name !== 'string' || !i.name.trim()) continue;
-      const key = norm(i.name);
-      if (key && !map.has(key)) map.set(key, { name: i.name.trim(), description: i.description ?? '', group: g.name ?? '' });
-    }
-  }
-  return map;
-}
-
-function findToast(name: string, index: Map<string, ToastItem>): ToastItem | null {
-  const key = norm(name);
-  if (!key) return null;
-  const exact = index.get(key);
-  if (exact) return exact;
-  // "Chicken Dum Biryani" on the order vs "Chicken Dum Biryani (Serves 2)" on Toast, or the other way round.
-  let best: ToastItem | null = null;
-  for (const [k, v] of index) {
-    if (k.length < 5 || key.length < 5) continue;
-    if ((k.startsWith(key) || key.startsWith(k)) && (!best || Math.abs(norm(best.name).length - key.length) > Math.abs(k.length - key.length))) best = v;
-  }
-  return best;
-}
+type ToastItem = Pick<Dish, 'name' | 'description' | 'group'>;
 
 /** Veg or non-veg: from the Toast menu group ("Non-Veg Starters"), else from the words in the dish. Veg when nothing says meat. */
 export function guessDiet(name: string, toast: ToastItem | null): Diet {
@@ -109,18 +35,20 @@ export function guessDiet(name: string, toast: ToastItem | null): Diet {
   return 'veg';
 }
 
-/** One tag per dish line of the order, in order, without repeats. */
-export function tagsForOrder(order: Pick<CateringOrder, 'items'>, menu?: ToastMenu | null): NameTag[] {
-  const index = toastIndex(menu);
+/** One tag per dish of the order, in order, without repeats. The menu dish (when the line was picked
+ *  from the menu) gives the name and veg or non-veg; the note gives the small line. */
+export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines'>>, menu?: ToastMenu | null): NameTag[] {
+  const dishes = menuDishes(menu);
   const seen = new Set<string>();
   const tags: NameTag[] = [];
-  for (const line of itemLines(order.items ?? '')) {
-    const { name, sub } = dishFromLine(line);
-    const key = norm(name + sub);
+  for (const line of orderLines(order, dishes)) {
+    // A line kept as typed (an old order) reads its name and small line from the text, as before.
+    const { name, sub } = line.text ? dishFromLine(line.text) : { name: line.dishId ? line.name.trim() : tidyCase(line.name.trim()), sub: tidyCase(line.note.trim()) };
+    const key = (name + sub).toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (!name || seen.has(key)) continue;
     seen.add(key);
-    const toast = findToast(name, index);
-    tags.push({ name, sub, diet: guessDiet(name, toast) });
+    const dish = dishById(line.dishId, dishes) ?? findDish(name, dishes);
+    tags.push({ name, sub, diet: guessDiet(name, dish) });
   }
   return tags;
 }

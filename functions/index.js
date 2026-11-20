@@ -10,7 +10,7 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { editAlertFor, kitchenEdit } from './edits.js';
-import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
+import { checkRequest, menuNames, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
 import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
 
@@ -26,7 +26,13 @@ export const readOrder = onCall(
     if (problem) throw new HttpsError('invalid-argument', problem);
     try {
       const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value(), maxRetries: 2 });
-      return await readOrderPhoto(client, req.data);
+      // The menu's dish names, so items come back with the same names the order form picks from.
+      // Without it (no menu saved yet, or a read error) items come back as written.
+      const menu = await getFirestore()
+        .doc('toastMenu/current')
+        .get()
+        .then((s) => menuNames(s.data()), () => []);
+      return await readOrderPhoto(client, req.data, menu);
     } catch (e) {
       const kind = readError(e);
       if (kind === 'setup') logger.error(`readOrder: the request was refused, check the model and settings: ${e?.message ?? e}`, e);

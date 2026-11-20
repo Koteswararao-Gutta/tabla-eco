@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContextOptions, type Locator, type Page } from '@playwright/test';
 import { openScreen, readCollection } from './helpers';
 import type { CateringOrder } from '../src/shared/data/types';
 
@@ -14,6 +14,26 @@ async function typePin(kitchen: Page, pin: string) {
 async function kitchenOption(kitchen: Page, customer: string, option: 'Mark completed' | 'Edit order' | 'Print name tags') {
   await kitchen.getByRole('article', { name: `Order for ${customer}` }).click({ position: { x: 20, y: 20 } });
   await kitchen.getByRole('dialog', { name: customer }).getByRole('button', { name: new RegExp(option) }).click();
+}
+
+/** One item row of the order form. `pick` taps that dish in the menu suggestions after typing `dish`. */
+type Row = { dish: string; pick?: string; qty?: string; unit?: string; note?: string };
+
+/** Fills the order form's item rows, adding or removing rows to match. */
+async function fillItems(sheet: Locator, rows: Row[]) {
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    if ((await sheet.getByTestId('item-row').count()) < n) await sheet.getByRole('button', { name: '+ Add item' }).click();
+    const r = rows[i];
+    await sheet.getByLabel(`Item ${n} dish`).fill(r.dish);
+    if (r.pick) await sheet.getByRole('listbox', { name: 'Dishes on the menu' }).getByRole('option', { name: new RegExp('^' + r.pick) }).click();
+    await sheet.getByLabel(`Item ${n} quantity`).fill(r.qty ?? '');
+    await sheet.getByLabel(`Item ${n} unit`).selectOption(r.unit ?? '');
+    await sheet.getByLabel(`Item ${n} note`).fill(r.note ?? '');
+  }
+  while ((await sheet.getByTestId('item-row').count()) > rows.length) {
+    await sheet.getByRole('button', { name: `Remove item ${await sheet.getByTestId('item-row').count()}` }).click();
+  }
 }
 
 test.setTimeout(60_000);
@@ -42,6 +62,7 @@ async function setHours(page: Page, hours: 'open' | 'closed') {
 }
 
 test('manager adds an order, kitchen sees it live, completes, undoes and reopens', async ({ browser }) => {
+  test.setTimeout(90_000); // a long walk through the whole flow
   const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
   await manager.setViewportSize({ width: 390, height: 844 });
@@ -83,7 +104,11 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await sheet.getByLabel('Time').fill('13:30');
   await sheet.getByRole('button', { name: 'Delivery' }).click();
   await sheet.getByLabel('Number of people (optional)').fill('120');
-  await sheet.getByLabel('Order items (one per line)').fill('Chicken dum biryani, 4 large trays\nPaneer butter masala, 2 trays\nGarlic naan, 150');
+  await fillItems(sheet, [
+    { dish: 'chick bir', pick: 'Chicken Dum Biryani', qty: '4', unit: 'Full tray', note: 'medium spicy' },
+    { dish: 'Paneer butter masala', qty: '2', unit: 'Half tray' },
+    { dish: 'garlic', pick: 'Garlic Naan', qty: '150', unit: 'Pieces' },
+  ]);
   await sheet.getByLabel('Notes (optional)').fill('Set up by 1 PM');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet.getByText('Please enter the delivery address.')).toBeVisible();
@@ -96,7 +121,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   const savedSheet = manager.getByRole('dialog', { name: 'Order saved' });
   const message = savedSheet.getByLabel('Message');
   await expect(message).toContainText('*New catering order*\nAnika Wedding');
-  await expect(message).toContainText('Delivery: 48 Lake View Rd, Hall B\n120 people\n\n*Items*\n• Chicken dum biryani, 4 large trays');
+  await expect(message).toContainText('Delivery: 48 Lake View Rd, Hall B\n120 people\n\n*Items*\n• Chicken Dum Biryani, 4 Full trays (medium spicy)\n• Paneer Butter Masala, 2 Half trays\n• Garlic Naan, 150 pieces');
   await expect(message).not.toContainText('555'); // no customer phone for the staff group
   const share = savedSheet.getByRole('link', { name: 'Share to WhatsApp' });
   const href = (await share.getAttribute('href'))!;
@@ -112,12 +137,19 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Anika Wedding')!;
   expect(saved).toMatchObject({ status: 'open', type: 'delivery', address: '48 Lake View Rd, Hall B', people: 120, notes: 'Set up by 1 PM' });
   expect(saved.items.split('\n')).toHaveLength(3);
+  // Saved structured too: the menu dish, quantity, unit and note.
+  expect(saved.lines).toEqual([
+    { dishId: 'biryani-2', name: 'Chicken Dum Biryani', qty: 4, unit: 'Full tray', note: 'medium spicy' },
+    { dishId: 'veg-curries-1', name: 'Paneer Butter Masala', qty: 2, unit: 'Half tray', note: '' },
+    { dishId: 'rice-breads-4', name: 'Garlic Naan', qty: 150, unit: 'Pieces', note: '' },
+  ]);
 
   // Kitchen picks it up by itself.
   const card = kitchen.getByRole('article', { name: 'Order for Anika Wedding' });
   await expect(card).toBeVisible();
   await expect(card.getByText('48 Lake View Rd, Hall B')).toBeVisible();
-  await expect(card.getByText('Garlic naan, 150')).toBeVisible();
+  await expect(card.getByText('150 pieces')).toBeVisible();
+  await expect(card.getByText('Garlic Naan')).toBeVisible();
   await expect(card.getByText(/^in /)).toBeVisible();
   await shot(kitchen, 'kitchen-open-orders');
 
@@ -157,7 +189,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   const summary = manager.getByRole('dialog', { name: 'Order details' });
   await expect(summary.getByText('Tomorrow, 1:30 PM')).toBeVisible();
   await expect(summary.getByText('48 Lake View Rd, Hall B')).toBeVisible();
-  await expect(summary.getByRole('listitem')).toHaveText(['Chicken dum biryani, 4 large trays', 'Paneer butter masala, 2 trays', 'Garlic naan, 150']);
+  await expect(summary.getByRole('listitem')).toHaveText(['4 Full trays Chicken Dum Biryani · medium spicy', '2 Half trays Paneer Butter Masala', '150 pieces Garlic Naan']);
   await shot(manager, 'manager-order-summary');
   // An open order can be shared again from its summary.
   const again = decodeURIComponent((await summary.getByRole('link', { name: 'Share to WhatsApp' }).getAttribute('href'))!);
@@ -527,16 +559,26 @@ test('scan paper order fills the new order form for checking, then saves', async
   await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
   await expect(sheet.getByLabel('Time')).toHaveValue('18:30');
-  await expect(sheet.getByLabel('Order items (one per line)')).toHaveValue('Veg biryani, 2 large trays\nGulab jamun, 50');
-  await expect(sheet.getByText('Please check this')).toHaveCount(1); // the phone number
+  await expect(sheet.getByLabel('Item 1 dish')).toHaveValue('Veg Dum Biryani');
+  await expect(sheet.getByLabel('Item 1 quantity')).toHaveValue('2');
+  await expect(sheet.getByLabel('Item 1 unit')).toHaveValue('Full tray');
+  await expect(sheet.getByLabel('Item 2 dish')).toHaveValue('Gulab Jamun');
+  await expect(sheet.getByLabel('Item 3 dish')).toHaveValue('Mirchi Bajji'); // matched to the menu
+  await expect(sheet.getByLabel('Item 3 note')).toHaveValue('extra chutney');
+  await expect(sheet.getByText('Please check this item.')).toHaveCount(1); // the AI was unsure of item 3
+  await expect(sheet.getByText('Please check this:')).toHaveCount(1); // the phone number
   await shot(manager, 'manager-scan-filled');
   await sheet.getByLabel('Phone').fill('555 404 1213');
-  await expect(sheet.getByText('Please check this')).toHaveCount(0);
+  await sheet.getByLabel('Item 3 quantity').fill('25');
+  await expect(sheet.getByText(/Please check this/)).toHaveCount(0);
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet).toHaveCount(0);
   await manager.getByRole('dialog', { name: 'Order saved' }).getByRole('button', { name: 'Done' }).click();
   const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Meera Iyer')!;
   expect(saved).toMatchObject({ phone: '555 404 1213', people: 40, notes: 'Less spicy', status: 'open' });
+  expect(saved.items).toBe('Veg Dum Biryani, 2 Full trays\nGulab Jamun, 50 pieces\nMirchi Bajji, 25 pieces (extra chutney)');
+  expect(saved.lines!.map((l) => l.dishId)).toEqual(['biryani-1', 'desserts-1', 'veg-starters-3']);
+  expect(saved.lines!.some((l) => l.check)).toBe(false);
   await context.close();
 });
 
@@ -559,7 +601,9 @@ test('paste a customer message fills the new order form, then saves', async ({ b
   await expect(sheet.getByText('Filled in from the message.')).toBeVisible();
   await expect(box).toHaveCount(0);
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
-  await expect(sheet.getByLabel('Order items (one per line)')).toHaveValue('Veg biryani, 2 large trays\nGulab jamun, 50');
+  await expect(sheet.getByLabel('Item 1 dish')).toHaveValue('Veg Dum Biryani');
+  await expect(sheet.getByLabel('Item 2 quantity')).toHaveValue('50');
+  await expect(sheet.getByLabel('Item 2 unit')).toHaveValue('Pieces');
   await shot(manager, 'manager-paste-filled');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet).toHaveCount(0);
@@ -774,7 +818,16 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Delete' })).toHaveCount(0);
   await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
-  await edit.getByLabel('Order items (one per line)').fill('Chicken dum biryani, 3 large trays\nVeg dum biryani, 1 large tray\nRaita, 2 quarts\nGulab jamun, 40 pcs\nSamosa, 25');
+  // Change one quantity and add a dish; the untouched rows stay exactly as they were typed.
+  await expect(edit.getByTestId('item-row')).toHaveCount(4);
+  await edit.getByLabel('Item 1 quantity').fill('3');
+  await edit.getByRole('button', { name: '+ Add item' }).click();
+  await expect(edit.getByLabel('Item 5 dish')).toBeFocused();
+  await edit.getByLabel('Item 5 dish').fill('samosa');
+  await edit.getByRole('listbox', { name: 'Dishes on the menu' }).getByRole('option', { name: /^Samosa \(2\)/ }).click();
+  await expect(edit.getByLabel('Item 5 quantity')).toBeFocused();
+  await edit.getByLabel('Item 5 quantity').fill('25');
+  await edit.getByLabel('Item 5 unit').selectOption('Pieces');
   await edit.getByLabel('Number of people (optional)').fill('50');
   await kitchen.waitForTimeout(400);
   await shot(kitchen, 'kitchen-edit-form');
@@ -787,7 +840,7 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   expect(o.history).toHaveLength(1);
   expect(o.history![0]).toMatchObject({
     by: 'kitchen',
-    changes: ['People: 40 → 50', 'Items: Chicken dum biryani, 2 large trays → Chicken dum biryani, 3 large trays', 'Item added: Samosa, 25'],
+    changes: ['People: 40 → 50', 'Items: Chicken dum biryani, 2 large trays → Chicken Dum Biryani, 3 Full trays', 'Item added: Samosa (2), 25 pieces'],
   });
 
   // Tablet card: "Changed by Kitchen", tap to see what changed.
@@ -801,7 +854,7 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
   const details = manager.getByRole('dialog', { name: 'Order details' });
   await expect(details.getByTestId('edit-history')).toContainText('Kitchen');
-  await expect(details.getByTestId('edit-history')).toContainText('Item added: Samosa, 25');
+  await expect(details.getByTestId('edit-history')).toContainText('Item added: Samosa (2), 25 pieces');
   await details.getByRole('button', { name: 'Edit' }).click();
   const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
   await mEdit.getByLabel('Time').fill('18:00');
@@ -825,6 +878,88 @@ test('kitchen edits an order: history shows who changed what, on the tablet and 
   await expect(mEdit).toHaveCount(0);
   const again = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.customerName === 'Priya Sharma')!;
   expect(again.history).toHaveLength(2);
+  await context.close();
+});
+
+test('order items: old orders get structured once, unclear lines ask to be checked, units are remembered', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  const desert = async () => (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Desert Tech office')!;
+  // The sample orders were saved as text only. The Catering tab adds structured lines once, leaving the text alone.
+  await expect.poll(async () => (await readCollection<CateringOrder>(manager, 'orders')).filter((o) => Array.isArray(o.lines)).length).toBe(3);
+  const old = await desert();
+  expect(old.items).toBe('Paneer butter masala, 1 tray\nButter chicken, 1 tray\nJeera rice, 2 trays\nGarlic naan, 30');
+  expect(old.history).toBeUndefined();
+  expect(old.lines![0]).toEqual({ dishId: 'veg-curries-1', name: 'Paneer Butter Masala', qty: 1, unit: 'Full tray', note: '', text: 'Paneer butter masala, 1 tray', check: true });
+  expect(old.lines![3]).toEqual({ dishId: 'rice-breads-4', name: 'Garlic Naan', qty: 30, unit: '', note: '', text: 'Garlic naan, 30' });
+
+  // The summary reads as before, with the guessed lines marked.
+  await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(details.getByRole('listitem').first()).toHaveText('Paneer butter masala, 1 tray Check');
+  await expect(details.getByTestId('items-to-check')).toHaveText('3 items were read automatically. Tap Edit to check them, then Save.');
+  await manager.waitForTimeout(400);
+  await details.getByTestId('items-to-check').scrollIntoViewIfNeeded();
+  await shot(manager, 'manager-old-order-check');
+
+  // Edit: each guessed row says how it was typed. Fixing it clears the mark; saving checks the rest.
+  await details.getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await expect(edit.getByLabel('Item 1 unit')).toHaveValue('Full tray');
+  await expect(edit.getByText('Please check this item: it was typed as “Paneer butter masala, 1 tray”.')).toBeVisible();
+  await edit.getByLabel('Item 1 unit').selectOption('Half tray');
+  await expect(edit.getByText(/typed as “Paneer butter masala/)).toHaveCount(0);
+  await edit.getByLabel('Item 3 dish').scrollIntoViewIfNeeded();
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-edit-old-order');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+  const fixed = await desert();
+  expect(fixed.items).toBe('Paneer Butter Masala, 1 Half tray\nButter chicken, 1 tray\nJeera rice, 2 trays\nGarlic naan, 30');
+  expect(fixed.history![0].changes).toEqual(['Items: Paneer butter masala, 1 tray → Paneer Butter Masala, 1 Half tray']);
+  expect(fixed.lines!.some((l) => l.check)).toBe(false);
+  await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  await expect(details.getByTestId('items-to-check')).toHaveCount(0);
+  await manager.keyboard.press('Escape');
+
+  // A new order: the unit picked last is the first row's unit. Suggestions come from the menu as you type.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await expect(sheet.getByLabel('Item 1 unit')).toHaveValue('Half tray');
+  await sheet.getByLabel('Item 1 dish').fill('chick');
+  const suggestions = sheet.getByRole('listbox', { name: 'Dishes on the menu' }).getByRole('option');
+  await expect(suggestions).toHaveText([/^Chicken 65/, /^Chicken Tikka/, /^Chicken Dum Biryani/, /^Chicken Tikka Masala/, /^Butter Chicken/, /^Chilli Chicken/]);
+  await sheet.getByLabel('Item 1 dish').fill('chick tik');
+  await expect(suggestions).toHaveText([/^Chicken Tikka(Non-Veg Starters)$/, /^Chicken Tikka Masala/]);
+  await manager.waitForTimeout(400);
+  await shot(manager, 'manager-new-order-suggestions');
+  await sheet.getByLabel('Item 1 dish').press('ArrowDown');
+  await sheet.getByLabel('Item 1 dish').press('Enter');
+  await expect(sheet.getByLabel('Item 1 dish')).toHaveValue('Chicken Tikka Masala');
+  await expect(sheet.getByLabel('Item 1 quantity')).toBeFocused();
+  await sheet.getByLabel('Item 1 quantity').fill('2');
+  await sheet.getByLabel('Item 1 note').fill('mild');
+  await sheet.getByLabel('Item 1 note').press('Enter'); // Enter in the last note starts the next item
+  await expect(sheet.getByLabel('Item 2 dish')).toBeFocused();
+  await sheet.getByLabel('Item 2 dish').fill('Kaju katli');
+  await sheet.getByLabel('Item 2 quantity').fill('two');
+  await expect(sheet.getByText('Not on the menu: saved as typed.')).toBeVisible();
+  await sheet.getByLabel('Customer name').fill('Iyer Party');
+  await sheet.getByLabel('Phone').fill('555 101 2020');
+  await sheet.getByLabel('Time').fill('19:00');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(sheet.getByText('Please check the quantity of item 2: enter a number like 2 or 1.5.')).toBeVisible();
+  await expect(sheet.getByLabel('Item 2 quantity')).toBeFocused();
+  await sheet.getByLabel('Item 2 quantity').fill('3');
+  await sheet.getByLabel('Item 2 unit').selectOption('Lbs');
+  await shot(manager, 'manager-new-order-items');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(manager.getByRole('dialog', { name: 'Order saved' }).getByLabel('Message')).toContainText('• Chicken Tikka Masala, 2 Half trays (mild)\n• Kaju katli, 3 lbs');
+  const saved = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Iyer Party')!;
+  expect(saved.lines).toEqual([
+    { dishId: 'nonveg-curries-1', name: 'Chicken Tikka Masala', qty: 2, unit: 'Half tray', note: 'mild' },
+    { dishId: null, name: 'Kaju katli', qty: 3, unit: 'Lbs', note: '' },
+  ]);
   await context.close();
 });
 
@@ -892,8 +1027,12 @@ test('kitchen: Print tags on an order card uses the tablet app bridge, 2 sheets 
   // Give Priya's order 12 dishes.
   await kitchenOption(kitchen, 'Priya Sharma', 'Edit order');
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
-  const dishes = ['Rose Milk - 15 Gallons', 'Reshampatti Chicken - 6 FT', 'Kodi Vepudu - 5 FT', 'Baby Corn Chilli - 4 FT', 'Veg Hakka Noodles - 4 FT', 'Mango Mudda Pappu Rice - 6 FT', 'Donne Chicken Biryani - 6 FT', 'Andhra Chicken Curry (Bone-in) - 4 FT', 'Phool Makhana Masala - 3 FT', 'Madupu Karakam Podi', 'Curd Rice - 4 FT', 'Semiya Kheer - 4 FT'];
-  await edit.getByLabel('Order items (one per line)').fill(dishes.join('\n'));
+  const dishes = [
+    ['Rose Milk', '15', 'Gallons'], ['Reshampatti Chicken', '6', 'Full tray'], ['Kodi Vepudu', '5', 'Full tray'], ['Baby Corn Chilli', '4', 'Full tray'],
+    ['Veg Hakka Noodles', '4', 'Full tray'], ['Mango Mudda Pappu Rice', '6', 'Full tray'], ['Donne Chicken Biryani', '6', 'Full tray'],
+    ['Andhra Chicken Curry', '4', 'Full tray', 'Bone-in'], ['Phool Makhana Masala', '3', 'Half tray'], ['Madupu Karakam Podi'], ['Curd Rice', '4', 'Full tray'], ['Semiya Kheer', '4', 'Full tray'],
+  ];
+  await fillItems(edit, dishes.map(([dish, qty, unit, note]) => ({ dish, qty, unit, note })));
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await expect(edit).toBeHidden();
   await kitchenOption(kitchen, 'Priya Sharma', 'Print name tags');
@@ -933,7 +1072,7 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await sheet.getByLabel('Phone').fill('555 444 1212');
   await sheet.getByLabel('Date').fill(tomorrow);
   await sheet.getByLabel('Time').fill('12:30');
-  await sheet.getByLabel('Order items (one per line)').fill('Veg biryani, 2 trays\nSamosa, 40');
+  await fillItems(sheet, [{ dish: 'Veg biryani', qty: '2', unit: 'Full tray' }, { dish: 'Samosa', qty: '40', unit: 'Pieces' }]);
   const amount = sheet.getByLabel('Amount $ (optional, manager only)');
   await amount.fill('two hundred');
   await sheet.getByRole('button', { name: 'Save order' }).click();
@@ -978,14 +1117,14 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await expect(kEdit.getByTestId('amount-input')).toHaveCount(0);
   await expect(kEdit).not.toContainText('Amount');
   // A kitchen edit keeps the amount.
-  await kEdit.getByLabel('Order items (one per line)').fill('Veg biryani, 3 trays\nSamosa, 40');
+  await kEdit.getByLabel('Item 1 quantity').fill('3');
   await kEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(kEdit).toHaveCount(0);
   await expect(kitchen.locator('body')).not.toContainText('1,250');
   const afterKitchen = await readCollection<{ id: string; amount: number | null }>(manager, 'orderAmounts');
   expect(afterKitchen.find((a) => a.id === o.id)?.amount).toBe(1250.5);
   await expect(details.getByTestId('order-amount')).toContainText('$1,250.50');
-  await expect(details.getByTestId('edit-history')).toContainText('Veg biryani, 3 trays');
+  await expect(details.getByTestId('edit-history')).toContainText('Veg biryani, 3 Full trays');
   await expect(details.getByTestId('edit-history')).not.toContainText('$');
 
   // Manager changes the amount: no history entry (the kitchen sees the history), and the tablet still shows nothing.
