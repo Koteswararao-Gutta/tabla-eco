@@ -26,6 +26,8 @@ async function inspect() {
   out('amounts.json', amounts);
   console.log(`menu groups: ${menu?.groups?.length ?? 0}, items: ${menu?.groups?.reduce((n, g) => n + g.items.length, 0) ?? 0}`);
   console.log(`orders: ${orders.length}, orderAmounts: ${amounts.length}`);
+  for (const g of menu?.groups ?? []) for (const i of g.items) console.log(`MENU ${g.name} | ${i.id} | ${i.name} | ${i.price ?? ''}`);
+  for (const a of amounts) console.log(`AMOUNT ${JSON.stringify(a)}`);
   for (const o of orders.sort((a, b) => a.dueAt - b.dueAt)) console.log(`${o.id} | ${o.due} | ${o.status} | ${o.customerName} | ${o.phone} | ${String(o.items).split('\n')[0]}`);
 }
 
