@@ -56,11 +56,9 @@
 .k-tappable { cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; transition: transform 0.08s ease, box-shadow 0.08s ease; }
 .k-tappable:active { transform: scale(0.99); }
 .k-tappable:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-.k-tap-hint { margin: auto 0 0; padding-top: 4px; color: var(--muted); font-size: 0.95rem; text-align: center; }
+.k-hint { margin: 0 0 12px; color: var(--muted); font-size: 1rem; }
 .k-opt-when { margin: 0; color: var(--muted); font-size: 1.1rem; }
 .k-opt { min-height: 64px; font-size: 1.15rem; }
-/* "Changed by Manager, 5:42 PM": tap to see what changed. */
-.k-card .c-hist { font-size: 1.05rem; }
 .k-empty { margin-top: 40px; font-size: 1.2rem; line-height: 1.6; padding: 48px 16px; }
 
 /* undo bar */
@@ -68,9 +66,7 @@
 .k-undo-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .k-undo .t-btn { flex: none; min-height: 56px; padding: 0 32px; font-size: 1.1rem; }
 
-/* all orders */
-.k-all { display: flex; flex-direction: column; gap: 28px; }
-.k-day-group h2 { margin: 0 0 10px; font-size: 1rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+/* calendar day rows */
 .k-rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .k-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: center; gap: 20px; padding: 14px 20px; min-height: 76px; border-top: 1px solid var(--line); }
 .k-row:first-child { border-top: 0; }
@@ -84,7 +80,6 @@
 .k-row-side { display: flex; align-items: center; justify-content: flex-end; gap: 20px; }
 .k-row-status { font-weight: 600; color: var(--muted); white-space: nowrap; }
 .k-row-status.good { color: var(--good); }
-.k-row-btn { min-height: 56px; min-width: 130px; }
 
 /* Portrait tablet: time on the left, name + badge, then items (wrapping), then status and Reopen. */
 @media (max-width: 900px) {

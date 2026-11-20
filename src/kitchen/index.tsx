@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, showsCountdown, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, isSoon, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
@@ -20,8 +20,8 @@ type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
 /** Two taps on an order card this close together complete it; one tap opens its options. */
 export const DOUBLE_TAP_MS = 350;
-/** "Show all orders" goes back to the open orders after this long with no touch. */
-export const ALL_ORDERS_IDLE_MS = 3 * 60_000;
+/** The Calendar or Prep view goes back to the open orders list after this long with no touch. */
+export const IDLE_BACK_MS = 3 * 60_000;
 /** Remembered on this tablet only (not synced): a fingerprint of the PIN it was unlocked with. */
 const UNLOCK_KEY = 'kitchenUnlock';
 
@@ -176,13 +176,9 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 // ---------- orders ----------
 
 function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
-  const [showAll, setShowAll] = useState(false);
   const [view, setView] = useState<'list' | 'calendar' | 'prep'>('list');
-  const away = showAll || view !== 'list';
-  const backToList = () => {
-    setShowAll(false);
-    setView('list');
-  };
+  const away = view !== 'list';
+  const backToList = () => setView('list');
   const board = useRef<HTMLDivElement>(null);
   // The top bar's height, for views that keep something stuck just under it (Prep's day picker).
   const bar = useRef<HTMLElement>(null);
@@ -197,14 +193,14 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   useEffect(() => {
     const root = board.current?.closest('.k-root');
     if (root) root.scrollTop = 0;
-  }, [showAll, view]);
-  // Left on "Show all orders" or the calendar? After 3 minutes with no touch, back to the open orders list.
+  }, [view]);
+  // Left on the Calendar or Prep? After 3 minutes with no touch, back to the open orders list.
   useEffect(() => {
     if (!away) return;
-    let t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
+    let t = setTimeout(backToList, IDLE_BACK_MS);
     const touched = () => {
       clearTimeout(t);
-      t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
+      t = setTimeout(backToList, IDLE_BACK_MS);
     };
     const events = ['pointerdown', 'keydown', 'wheel', 'scroll'];
     events.forEach((e) => window.addEventListener(e, touched, true));
@@ -259,41 +255,28 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       <header className="k-bar" ref={bar}>
         <div className="k-bar-title">
           <Logo className="k-logo" />
-          <h1>{showAll ? 'All orders' : view === 'calendar' ? 'Calendar' : view === 'prep' ? 'Prep' : 'Open orders'}</h1>
-          {!showAll && view === 'list' && orders && <span className="k-count">{open.length}</span>}
+          <h1>{view === 'calendar' ? 'Calendar' : view === 'prep' ? 'Prep' : 'Open orders'}</h1>
+          {view === 'list' && orders && <span className="k-count">{open.length}</span>}
           {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
-        {!showAll && (
-          <Segmented
-            label="View"
-            value={view}
-            options={[
-              { value: 'list', label: 'List' },
-              { value: 'calendar', label: 'Calendar' },
-              { value: 'prep', label: 'Prep' },
-            ]}
-            onChange={setView}
-          />
-        )}
-        {showAll ? (
-          <button className="t-btn primary k-bar-btn" onClick={() => setShowAll(false)}>
-            ← Back to open orders
-          </button>
-        ) : (
-          <button className="t-btn k-bar-btn" onClick={() => setShowAll(true)}>
-            Show all orders
-          </button>
-        )}
+        <Segmented
+          label="View"
+          value={view}
+          options={[
+            { value: 'list', label: 'List' },
+            { value: 'calendar', label: 'Calendar' },
+            { value: 'prep', label: 'Prep' },
+          ]}
+          onChange={setView}
+        />
         <button className="t-btn k-bar-btn" onClick={onLock}>
           Lock
         </button>
       </header>
       {banner}
 
-      {!orders ? null : showAll ? (
-        <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />
-      ) : view === 'prep' ? (
+      {!orders ? null : view === 'prep' ? (
         <PrepView orders={orders} now={now} />
       ) : view === 'calendar' ? (
         <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor({ id: o.id, full: true })} />
@@ -304,7 +287,15 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           New orders from the manager show up here by themselves.
         </div>
       ) : (
-        <DayGroups orders={open} now={now} card={(o) => <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor({ id: o.id })} onDoubleTap={() => complete(o)} />} />
+        <>
+          {/* Said once here, not on every card. */}
+          <p className="k-hint">Tap an order for options. Double-tap to mark it completed.</p>
+          <DayGroups
+            orders={open}
+            now={now}
+            card={(o, showDay) => <OrderCard key={o.id} order={o} now={now} showDay={showDay} onTap={() => setOptionsFor({ id: o.id })} onDoubleTap={() => complete(o)} />}
+          />
+        </>
       )}
 
       {optionsOrder && (
@@ -352,7 +343,7 @@ function useTaps(onTap: () => void, onDoubleTap: () => void) {
   taps.current = { onTap, onDoubleTap };
   useEffect(() => () => clearTimeout(timer.current), []);
   return (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button, a')) return; // "Changed by…" has its own tap
+    if ((e.target as HTMLElement).closest('button, a')) return;
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = undefined;
@@ -366,9 +357,9 @@ function useTaps(onTap: () => void, onDoubleTap: () => void) {
   };
 }
 
-function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: number; onTap: () => void; onDoubleTap: () => void }) {
+/** `showDay`: the card's day, for groups whose heading doesn't already name it (Later, earlier days). */
+function OrderCard({ order: o, now, showDay, onTap, onDoubleTap }: { order: Order; now: number; showDay: boolean; onTap: () => void; onDoubleTap: () => void }) {
   const cd = countdown(o.dueAt, now);
-  const day = dayLabel(o.dueAt, now);
   const tap = useTaps(onTap, onDoubleTap);
   return (
     <article
@@ -387,7 +378,7 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
       <div className="k-card-top">
         <div>
           <div className="k-due">{timeLabel(o.dueAt)}</div>
-          <div className="k-day">{day}</div>
+          {showDay && <div className="k-day">{dayLabel(o.dueAt, now)}</div>}
         </div>
         <div className="k-card-right">
           {showsCountdown(o.dueAt, now) && <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>}
@@ -397,7 +388,6 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
 
       <div className="k-who">
         <div className="k-name">{o.customerName}</div>
-        <div className="k-phone">{o.phone}</div>
         {o.type === 'delivery' && o.address && <div className="k-address">{o.address}</div>}
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
@@ -406,8 +396,8 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
 
       {o.notes && <p className="k-notes">{o.notes}</p>}
 
-      {/* The tablet shows only the current order; the change history is in the manager app. */}
-      <p className="k-tap-hint">Tap for options · Double-tap to complete</p>
+      {/* The tablet shows only the current order; the change history is in the manager app. The phone
+          number is in the full order (Calendar), not on the card. */}
     </article>
   );
 }
@@ -442,49 +432,5 @@ function OrderOptions(props: { order: Order; now: number; full?: boolean; onClos
         Close
       </button>
     </Sheet>
-  );
-}
-
-function AllOrders({ orders, now, onReopen }: { orders: Order[]; now: number; onReopen: (o: Order) => void }) {
-  if (orders.length === 0) return <div className="t-empty k-empty">No orders yet.</div>;
-  return (
-    <div className="k-all">
-      {groupByDayUpcomingFirst(orders, now).map((g) => (
-        <section key={g.label} className="k-day-group" aria-label={g.label}>
-          <h2>{g.label}</h2>
-          <div className="k-rows">
-            {g.orders.map((o) => (
-              <div key={o.id} className={'k-row' + (o.status === 'completed' ? ' done' : '')} data-testid="kitchen-row">
-                <span className="k-row-time">{timeLabel(o.dueAt)}</span>
-                <span className="k-row-main">
-                  <span className="k-row-head">
-                    <span className="k-row-name">{o.customerName}</span>
-                    <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
-                  </span>
-                  <span className="k-row-items">
-                    {o.people ? `${o.people} people · ` : ''}
-                    {itemLines(o.items).join(' · ')}
-                  </span>
-                </span>
-                <span className="k-row-side">
-                  {o.status === 'completed' ? (
-                    <>
-                      <span className="k-row-status good">
-                        ✓ Completed{o.completedAt ? ` ${timeLabel(o.completedAt)}` : ''}
-                      </span>
-                      <button className="t-btn k-row-btn" onClick={() => onReopen(o)}>
-                        Reopen
-                      </button>
-                    </>
-                  ) : (
-                    <span className="k-row-status">Open</span>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
   );
 }

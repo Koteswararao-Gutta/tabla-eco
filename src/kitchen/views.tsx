@@ -12,17 +12,16 @@ type Order = WithId<CateringOrder>;
 const RELATIVE = ['Today', 'Tomorrow', 'Yesterday'];
 const count = (n: number) => `${n} order${n === 1 ? '' : 's'}`;
 
-/** Open orders under Today (big), Tomorrow, this week's day names, and Later. Empty groups are hidden. */
-export function DayGroups({ orders, now, card }: { orders: Order[]; now: number; card: (o: Order) => ReactNode }) {
+/** Open orders under Today (big), Tomorrow, this week's day names, and Later. Empty groups are hidden.
+ *  No count per group: the total is next to "Open orders" at the top. */
+export function DayGroups({ orders, now, card }: { orders: Order[]; now: number; card: (o: Order, showDay: boolean) => ReactNode }) {
   return (
     <div className="k-groups">
       {kitchenGroups(orders, now).map((g) => (
         <section key={g.id} className={'k-group k-group-' + g.kind} aria-label={g.label} data-testid="kitchen-group">
-          <h2>
-            {g.label}
-            <span className="k-group-count">{count(g.orders.length)}</span>
-          </h2>
-          <div className="k-grid">{g.orders.map(card)}</div>
+          <h2>{g.label}</h2>
+          {/* Today, Tomorrow and the weekday groups already name the day in the heading. */}
+          <div className="k-grid">{g.orders.map((o) => card(o, g.kind === 'earlier' || g.kind === 'later'))}</div>
         </section>
       ))}
     </div>
