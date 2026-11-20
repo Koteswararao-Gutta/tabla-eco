@@ -1,1 +1,5 @@
-{"mode":"inspect","run":3}
+{
+ "mode": "delete",
+ "deleteIds": ["mwojrtq9ispatv","mwmke59oyo9qg1","mwmke54fmyd6cc","mwmreraq9q5knm","mwmlugqf5nq6js","mwmke5731n28bd","mwmn8pd9yo9gsq","mwo7dyfglrmcii","mwo7ee86s7689z","mwnyqap47z5rbw"],
+ "expectNames": {"mwojrtq9ispatv":"Mamtha","mwmke59oyo9qg1":"Rahul Verma","mwmke54fmyd6cc":"Priya Sharma","mwmreraq9q5knm":"Sudhira","mwmlugqf5nq6js":"Kanna","mwmke5731n28bd":"Desert Tech office","mwmn8pd9yo9gsq":"Suketh","mwo7dyfglrmcii":"Yhv","mwo7ee86s7689z":"Yhv","mwnyqap47z5rbw":"pavan"}
+}
