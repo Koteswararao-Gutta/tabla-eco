@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineText, menuDishes, normalizeUnit, orderLines, parseLine, qtyText, searchDishes } from './lines';
+import { lineText, menuDishes, normalizeUnit, orderLines, parseLine, qtyText, qtyValue, searchDishes, tidyQty } from './lines';
 
 const menu = {
   groups: [
@@ -95,5 +95,44 @@ describe('orderLines', () => {
     expect(orderLines(stale, dishes)[0].qty).toBe(3);
     expect(orderLines({ items: '' })).toEqual([]);
     expect(orderLines({ items: 'Rice', lines: [{ bad: true } as never] })[0].name).toBe('Rice');
+  });
+});
+
+describe('mixed quantities (1½ trays)', () => {
+  it('shows them with a dash so 1½ never reads as eleven halves', () => {
+    expect(qtyText({ qty: 1.5, unit: 'Full tray' })).toBe('1-1/2 Full trays');
+    expect(qtyText({ qty: 0.5, unit: 'Full tray' })).toBe('1/2 Full tray');
+    expect(qtyText({ qty: 2.75, unit: 'Half tray' })).toBe('2-3/4 Half trays');
+    expect(qtyText({ qty: 0.25, unit: '' })).toBe('1/4');
+    expect(qtyText({ qty: 1.3, unit: 'Lbs' })).toBe('1.3 lbs');
+  });
+
+  it('tidies typed text: "1 1/2", "1½" and "11/2" all become "1-1/2"', () => {
+    expect(tidyQty('Chicken biryani 1 1/2 trays')).toBe('Chicken biryani 1-1/2 trays');
+    expect(tidyQty('Chicken biryani 11/2 trays')).toBe('Chicken biryani 1-1/2 trays');
+    expect(tidyQty('Veg biryani 1½ FT')).toBe('Veg biryani 1-1/2 FT');
+    expect(tidyQty('Raita ½ tray')).toBe('Raita 1/2 tray');
+    expect(tidyQty('Pulao 21/2 trays, Dal 13/4')).toBe('Pulao 2-1/2 trays, Dal 1-3/4');
+    expect(tidyQty('Paneer 1-1/2 tray, Naan 1/2, 12 pcs, Chicken 65 1/2 tray')).toBe('Paneer 1-1/2 tray, Naan 1/2, 12 pcs, Chicken 65 1/2 tray');
+  });
+
+  it.each(['Chicken dum biryani 1-1/2 FT', 'Chicken dum biryani 1 1/2 FT', 'Chicken dum biryani 11/2 FT', 'Chicken dum biryani, 1½ full trays'])('reads %s as 1.5 Full tray', (t) => {
+    const r = parseLine(t, dishes);
+    expect(r.line).toMatchObject({ dishId: 'b1', name: 'Chicken Dum Biryani', qty: 1.5, unit: 'Full tray' });
+    expect(r.sure).toBe(true);
+  });
+
+  it('reads "Chicken 65 1/2 tray" as half of a tray of Chicken 65', () => {
+    expect(parseLine('Chicken 65 1/2 FT', dishes).line).toMatchObject({ dishId: 's1', qty: 0.5, unit: 'Full tray' });
+  });
+
+  it('shows old typed lines and items text the clear way', () => {
+    expect(lineText({ dishId: null, name: 'Biryani', qty: 5.5, unit: '', note: '', text: 'Biryani 11/2 trays' })).toBe('Biryani 1-1/2 trays');
+    expect(orderLines({ items: 'Chicken dum biryani 11/2 FT' }, dishes)[0]).toMatchObject({ qty: 1.5, text: 'Chicken dum biryani 1-1/2 FT' });
+  });
+
+  it('qtyValue reads every way of writing it', () => {
+    expect(['1.5', '1,5', '3/2', '1-1/2', '1 1/2', '11/2', '1½'].map(qtyValue)).toEqual([1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    expect(qtyValue('abc')).toBeNaN();
   });
 });

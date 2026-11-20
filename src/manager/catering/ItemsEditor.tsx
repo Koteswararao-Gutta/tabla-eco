@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { deviceValue, setDeviceValue } from '@shared/data';
 import { norm, searchDishes, UNITS, type Dish } from './lines';
-import { blankLine, type LineDraft } from './orders';
+import { blankLine, parseQty, type LineDraft } from './orders';
 
 /** Remembered on this device: the unit picked last, for the next new row. */
 const UNIT_KEY = 'cateringUnit';
@@ -148,7 +148,7 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
                 inputMode="decimal"
                 autoComplete="off"
                 value={l.qty}
-                aria-invalid={!!invalid && !!l.qty.trim() && !/^\s*\d*[.,]?\d+\s*$/.test(l.qty)}
+                aria-invalid={!!invalid && !!l.qty.trim() && Number.isNaN(parseQty(l.qty))}
                 onChange={(e) => edit(i, { qty: e.target.value })}
               />
               <select

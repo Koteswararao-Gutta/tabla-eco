@@ -58,15 +58,35 @@ export function normalizeUnit(word: string): { unit: string; sure: boolean } {
 export function qtyText(l: Pick<OrderLine, 'qty' | 'unit'>): string {
   const u = unitByLabel(l.unit);
   const qty = typeof l.qty === 'number' && Number.isFinite(l.qty) ? l.qty : null;
-  const unit = (u ? (qty === 1 ? u.one : u.many) : l.unit.trim()) || '';
+  const unit = (u ? (qty !== null && qty <= 1 ? u.one : u.many) : l.unit.trim()) || '';
   if (qty === null) return u ? u.label : unit;
   return unit ? `${qtyNumber(qty)} ${unit}` : qtyNumber(qty);
 }
-const qtyNumber = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+const FRACTIONS: [number, string][] = [[0.25, '1/4'], [0.5, '1/2'], [0.75, '3/4']];
+
+/** A quantity as people write it, with a dash between the whole and the part so it can't read as
+ *  eleven halves: 1.5 → "1-1/2", 0.5 → "1/2", 2.75 → "2-3/4", 2 → "2", 1.3 → "1.3". */
+export function qtyNumber(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  const whole = Math.floor(r);
+  const part = FRACTIONS.find(([f]) => Math.abs(r - whole - f) < 0.001);
+  if (!part) return String(r);
+  return whole ? `${whole}-${part[1]}` : part[1];
+}
+
+/** Mixed numbers in typed text written the clear way: "1 1/2", "1½" and "11/2" (how 1½ trays was
+ *  often written in the old WhatsApp orders) all become "1-1/2". Other numbers are left alone. */
+export function tidyQty(s: string): string {
+  return s
+    .replace(/(?<![\d./])(?:(\d)\s*)?([½¼¾])/g, (_, w: string | undefined, f: string) => `${w ? `${w}-` : ''}${f === '½' ? '1/2' : f === '¼' ? '1/4' : '3/4'}`)
+    .replace(/(?<![\d./-])(\d)\s+([13])\/([24])(?![\d/])/g, (m, w: string, a: string, b: string) => (+a < +b ? `${w}-${a}/${b}` : m))
+    .replace(/(?<![\d./-])([1-9])([13])\/([24])(?![\d/])/g, (m, w: string, a: string, b: string) => (+a < +b ? `${w}-${a}/${b}` : m));
+}
 
 /** The line as text: "Chicken Dum Biryani, 2 Full trays (extra spicy)". A line kept from an old order reads as typed. */
 export function lineText(l: OrderLine): string {
-  if (typeof l.text === 'string' && l.text.trim()) return l.text.trim();
+  if (typeof l.text === 'string' && l.text.trim()) return tidyQty(l.text.trim());
   const q = qtyText(l);
   const note = l.note.trim();
   return `${l.name.trim()}${q ? `, ${q}` : ''}${note ? ` (${note})` : ''}`;
@@ -76,7 +96,7 @@ export function lineText(l: OrderLine): string {
 export const linesText = (lines: OrderLine[]) => lines.map(lineText).filter(Boolean).join('\n');
 
 export const itemLines = (items: string) =>
-  (typeof items === 'string' ? items : '').split('\n').map((l) => l.trim()).filter(Boolean);
+  (typeof items === 'string' ? items : '').split('\n').map((l) => tidyQty(l.trim())).filter(Boolean);
 
 // ---------- the Toast menu ----------
 
@@ -171,7 +191,8 @@ const UNIT_SRC =
   SIZE +
   '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gals?|lbs?|pounds?|pcs?|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qts?|liters?|litres?|ltrs?|servings?|people|persons?|ppl|pax|guests?)';
 const UNITS_RE = UNIT_SRC;
-const QTY = `\\d+(?:[.,/]\\d+)?`;
+// "2", "1.5", "1/2" and "1-1/2" (mixed numbers are made that way by tidyQty first).
+const QTY = `(?:\\d-\\d/\\d|\\d+(?:[.,/]\\d+)?)`;
 // "6 FT", "15 gallons", "x2", "×3", "2 x"
 const LEAD_QTY = new RegExp(`^(?:${QTY}\\s*(?:x|×|\\*)\\s*|${QTY}\\s*(?:${UNITS_RE})\\b\\.?\\s*(?:of\\s+)?|${QTY}\\s+(?=[a-z]))`, 'i');
 const TAIL_QTY = new RegExp(
@@ -225,13 +246,8 @@ function qtyFromLine(line: string): { qty: number | null; unit: string; sure: bo
   const m = QTY_PARTS.exec(rest);
   if (!m) return { qty: null, unit: '', sure: false };
   // "1 FT + 1 HT", "2 ft and veg biryani 1 ft": more than one amount on a line can't be read as one.
-  const several = (rest.match(/\d+(?:[.,/]\d+)?/g) ?? []).length > 1;
-  const raw = m[1].replace(',', '.');
-  let qty: number;
-  if (raw.includes('/')) {
-    const [a, b] = raw.split('/').map(Number);
-    qty = b ? a / b : NaN;
-  } else qty = parseFloat(raw);
+  const several = (rest.match(new RegExp(QTY, 'g')) ?? []).length > 1;
+  let qty = qtyValue(m[1]);
   if (!Number.isFinite(qty) || qty <= 0) return { qty: null, unit: '', sure: false };
   const word = (m[2] ?? '').trim();
   const { unit, sure } = normalizeUnit(word);
@@ -239,10 +255,18 @@ function qtyFromLine(line: string): { qty: number | null; unit: string; sure: bo
   return { qty: Math.round(qty * 100) / 100, unit, sure: sure && !several };
 }
 
+/** "2", "1.5", "1,5", "1/2", "1-1/2" or "1 1/2" as a number; NaN when it isn't one of those. */
+export function qtyValue(raw: string): number {
+  const t = tidyQty(raw.trim()).replace(',', '.');
+  const m = /^(?:(\d+)-)?(\d+)\/(\d+)$/.exec(t);
+  if (m) return +m[3] ? (m[1] ? +m[1] : 0) + +m[2] / +m[3] : NaN;
+  return /^\d*\.?\d+$/.test(t) ? parseFloat(t) : NaN;
+}
+
 /** One typed line as a structured line. `sure` is false when the dish isn't on the menu or the quantity
  *  or unit was a guess. `text` keeps the line as typed. */
 export function parseLine(line: string, dishes: Dish[] = []): { line: OrderLine; sure: boolean } {
-  const text = line.trim();
+  const text = tidyQty(line.trim());
   const { name: typed, sub } = dishFromLine(text);
   const dish = findDish(typed, dishes);
   const q = qtyFromLine(text);
