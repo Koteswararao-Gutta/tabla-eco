@@ -5,7 +5,7 @@ on:
     branches: [claude/project-thread-vznwhy]
     paths: [tools/whatsapp-import/**]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: whatsapp-import
   cancel-in-progress: false
@@ -21,7 +21,13 @@ jobs:
       - run: mkdir -p out && node tools/whatsapp-import/run.mjs
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: out
-          path: out/
+      - name: Save the menu to the branch (inspect only)
+        run: |
+          if [ -f out/menu.json ]; then
+            cp out/menu.json tools/whatsapp-import/menu.json
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add tools/whatsapp-import/menu.json
+            git commit -m "Toast menu snapshot [skip ci]" || true
+            git push
+          fi
