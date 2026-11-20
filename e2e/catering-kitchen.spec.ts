@@ -1328,16 +1328,21 @@ test('kitchen list groups open orders by day, and Calendar shows the month with 
   await expect(page.getByRole('dialog', { name: 'Desert Tech office' }).getByRole('button', { name: /Mark completed/ })).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // Portrait: month above the day's orders, nothing runs off the side.
-  await page.setViewportSize({ width: 800, height: 1280 });
-  const fits = () => page.evaluate(() => [...document.querySelectorAll('.k-root *')].every((el) => el.getBoundingClientRect().right <= window.innerWidth + 1));
+  // Portrait: month above the day's orders, nothing runs off the side. In a fresh page: the kitchen goes
+  // full screen once touched, and a full-screen window can't be resized.
+  const tall = await context.newPage();
+  await tall.setViewportSize({ width: 800, height: 1280 });
+  await tall.goto('/#/kitchen');
+  await tall.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(tall.getByRole('heading', { name: 'Calendar' })).toBeVisible();
+  const fits = () => tall.evaluate(() => [...document.querySelectorAll('.k-root *')].every((el) => el.getBoundingClientRect().right <= window.innerWidth + 1));
   expect(await fits()).toBe(true);
-  await shot(page, 'kitchen-calendar-portrait');
+  await shot(tall, 'kitchen-calendar-portrait');
 
-  await page.getByRole('button', { name: 'List', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await tall.getByRole('button', { name: 'List', exact: true }).click();
+  await expect(tall.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   expect(await fits()).toBe(true);
-  await shot(page, 'kitchen-by-day-portrait');
+  await shot(tall, 'kitchen-by-day-portrait');
   await context.close();
 });
 
