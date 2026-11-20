@@ -27,7 +27,7 @@ test('catering is open; Screens, Staff and More ask for the manager PIN', async 
   await page.getByRole('link', { name: 'Staff', exact: true }).click();
   await expect(page.getByTestId('staff-planner')).toBeVisible();
   const other = await openScreen(context, '/manager/more');
-  await expect(other.getByTestId('statistics')).toContainText('Coming soon');
+  await expect(other.getByTestId('statistics')).toBeVisible();
   await other.screenshot({ path: `${SHOTS}/manager-more.png` });
 
   // Lock now locks every manager tab again.
@@ -116,4 +116,60 @@ test('More > Payments: one day of orders with Paid / Unpaid and totals; a row op
 
   await rows.first().getByRole('link').click();
   await expect(page.getByTestId('order-summary')).toContainText('Ravi');
+});
+
+test('More > Statistics: this week Monday to Sunday, with the week total and paid / unpaid', async ({ context }) => {
+  const page = await openScreen(context, '/manager/more');
+  await page.getByTestId('manager-lock').waitFor();
+  await page.keyboard.type('5678');
+  // This week: Monday (paid), Sunday (part paid), Wednesday (no amount). Last week: one order. Next Monday: one order.
+  await page.evaluate(() => {
+    const monday = new Date();
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const at = (days: number, h: number) => {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + days);
+      d.setHours(h, 0, 0, 0);
+      return d.getTime();
+    };
+    const o = (id: string, name: string, dueAt: number) => ({ id, customerName: name, phone: '', dueAt, type: 'pickup', items: 'Biryani', status: 'completed', createdAt: 0, updatedAt: 0 });
+    localStorage.setItem('tabla:orders', JSON.stringify({ s1: o('s1', 'Asha', at(0, 12)), s2: o('s2', 'Ravi', at(6, 19)), s3: o('s3', 'Meena', at(2, 13)), s4: o('s4', 'Old', at(-1, 18)), s5: o('s5', 'Next', at(7, 11)) }));
+    localStorage.setItem('tabla:orderAmounts', JSON.stringify({
+      s1: { id: 's1', amount: 250.5, paid: true, updatedAt: 0 },
+      s2: { id: 's2', amount: 400, paid: false, deposits: [{ amount: 100, method: 'cash', takenBy: 'Ravi', at: 0 }], updatedAt: 0 },
+      s4: { id: 's4', amount: 75, paid: true, updatedAt: 0 },
+      s5: { id: 's5', amount: 999, paid: false, updatedAt: 0 },
+    }));
+  });
+  await page.reload();
+  await page.getByTestId('statistics').click();
+  await expect(page.getByTestId('week-label')).toHaveText('This week');
+  const rows = page.getByTestId('week-orders').getByRole('listitem');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText('Asha');
+  await expect(rows.nth(0)).toContainText('Paid');
+  await expect(rows.nth(1)).toContainText('Meena');
+  await expect(rows.nth(1)).toContainText('No amount');
+  await expect(rows.nth(2)).toContainText('$400');
+  await expect(rows.nth(2)).toContainText('Part paid');
+  await expect(page.getByTestId('week-total')).toContainText('$650.50');
+  await expect(page.getByTestId('week-total')).toContainText('3 orders');
+  await expect(page.getByTestId('week-paid-unpaid')).toContainText('Paid$350.50');
+  await expect(page.getByTestId('week-paid-unpaid')).toContainText('Unpaid$300');
+  await expect(page.getByText('1 order has no amount yet')).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/manager-statistics.png`, fullPage: true });
+
+  await page.getByRole('button', { name: 'Week before' }).click();
+  await expect(page.getByTestId('week-label')).toHaveText('Last week');
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByTestId('week-total')).toContainText('$75');
+  await page.getByRole('button', { name: 'Week after' }).click();
+  await page.getByRole('button', { name: 'Week after' }).click();
+  await expect(page.getByTestId('week-label')).toHaveText('Next week');
+  await expect(rows.first()).toContainText('Next');
+  await page.getByRole('button', { name: 'Week before' }).click();
+
+  await rows.first().getByRole('link').click();
+  await expect(page.getByTestId('order-summary')).toContainText('Asha');
 });

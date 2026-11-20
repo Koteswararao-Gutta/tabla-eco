@@ -133,3 +133,38 @@
 /* small red notice at the top while something is wrong (no internet, orders not loading, Toast reader) */
 .k-notice { position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); left: 0; right: 0; z-index: 40; display: flex; justify-content: center; padding: 0 12px; pointer-events: none; }
 .k-notice span { max-width: 640px; padding: 6px 14px; border-radius: 999px; background: var(--bad); color: var(--accent-ink); font-size: 0.85rem; font-weight: 600; line-height: 1.3; text-align: center; box-shadow: var(--shadow); }
+
+/* List / Calendar switch in the top bar */
+.k-bar .t-seg button { min-height: 56px; padding: 0 22px; font-size: 1.05rem; }
+
+/* open orders by day: Today big and highlighted, then Tomorrow, this week's days, Later */
+.k-groups { display: flex; flex-direction: column; gap: 28px; }
+.k-group h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 12px; font-size: 1.35rem; font-weight: 700; color: var(--ink); }
+.k-group-count { font-size: 1rem; font-weight: 600; color: var(--muted); }
+.k-group-today { padding: 18px; margin: 0 -18px; border-radius: var(--radius); background: var(--accent-soft); }
+.k-group-today > h2 { font-size: 2rem; }
+.k-group-earlier > h2 { color: var(--bad); }
+
+/* Calendar view: the month on the left, the picked day's orders on the right (stacked on portrait) */
+.k-cal { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.k-cal-month { gap: 14px; }
+.k-cal .cal-nav { min-width: 56px; min-height: 56px; font-size: 1.7rem; }
+.k-cal .cal-title b { font-size: 1.4rem; }
+.k-cal .cal-title span, .k-cal .cal-key { font-size: 1rem; }
+.k-cal .cal-today { min-height: 48px; font-size: 1rem; }
+.k-cal .cal-wd { font-size: 0.95rem; }
+.k-cal .cal-day { min-height: 68px; }
+.k-cal .cal-num { font-size: 1.2rem; }
+.k-cal .cal-count { font-size: 1.05rem; }
+.k-cal .cal-dot { width: 16px; height: 16px; }
+.k-cal-day h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 12px; font-size: 1.5rem; font-weight: 700; }
+.k-cal-row { width: 100%; background: var(--bg); color: var(--ink); font: inherit; text-align: left; border: 0; border-top: 1px solid var(--line); cursor: pointer; }
+.k-cal-row:disabled { cursor: default; opacity: 1; }
+@media (max-width: 900px) {
+  .k-cal { grid-template-columns: minmax(0, 1fr); }
+}
+/* Portrait: the title gets its own line, the clock and buttons go on the next. */
+@media (max-width: 900px) {
+  .k-bar-title { flex-basis: 100%; }
+  .k-clock { margin-right: auto; }
+}
