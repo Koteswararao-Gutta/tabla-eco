@@ -13,7 +13,7 @@ import { KitchenNotice } from './notice';
 import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
 import { Alarm } from './Alarm';
 import { PrepView } from './Prep';
-import { CalendarView, DayGroups } from './views';
+import { CalendarView, DayGroups, OrderDetails } from './views';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
@@ -241,8 +241,9 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   const editOrder = editing ? orders?.find((o) => o.id === editing) ?? null : null;
   const [tagsFor, setTagsFor] = useState<Order | null>(null);
   // One tap on a card: its options (complete, edit, print tags). Read live, so it closes if the order goes.
-  const [optionsFor, setOptionsFor] = useState<string | null>(null);
-  const optionsOrder = optionsFor ? orders?.find((o) => o.id === optionsFor && o.status === 'open') ?? null : null;
+  // From the calendar (`full`), the sheet also shows the whole order, and opens for completed orders too.
+  const [optionsFor, setOptionsFor] = useState<{ id: string; full?: boolean } | null>(null);
+  const optionsOrder = optionsFor ? orders?.find((o) => o.id === optionsFor.id && (optionsFor.full || o.status === 'open')) ?? null : null;
 
   const undoComplete = async () => {
     const o = undo && orders?.find((x) => x.id === undo.id);
@@ -295,7 +296,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       ) : view === 'prep' ? (
         <PrepView orders={orders} now={now} />
       ) : view === 'calendar' ? (
-        <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor(o.id)} />
+        <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor({ id: o.id, full: true })} />
       ) : open.length === 0 ? (
         <div className="t-empty k-empty">
           No open orders right now.
@@ -303,14 +304,16 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           New orders from the manager show up here by themselves.
         </div>
       ) : (
-        <DayGroups orders={open} now={now} card={(o) => <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor(o.id)} onDoubleTap={() => complete(o)} />} />
+        <DayGroups orders={open} now={now} card={(o) => <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor({ id: o.id })} onDoubleTap={() => complete(o)} />} />
       )}
 
       {optionsOrder && (
         <OrderOptions
           order={optionsOrder}
           now={now}
+          full={optionsFor?.full}
           onClose={() => setOptionsFor(null)}
+          onReopen={() => setStatus(optionsOrder, 'open')}
           onComplete={() => {
             setOptionsFor(null);
             complete(optionsOrder);
@@ -419,16 +422,26 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
   );
 }
 
-function OrderOptions(props: { order: Order; now: number; onClose: () => void; onComplete: () => void; onEdit: () => void; onTags: () => void }) {
+function OrderOptions(props: { order: Order; now: number; full?: boolean; onClose: () => void; onComplete: () => void; onReopen: () => void; onEdit: () => void; onTags: () => void }) {
   const o = props.order;
   return (
     <Sheet open title={o.customerName} onClose={props.onClose}>
-      <p className="k-opt-when">
-        {dayLabel(o.dueAt, props.now)}, {timeLabel(o.dueAt)} · {o.type === 'delivery' ? 'Delivery' : 'Pickup'}
-      </p>
-      <button type="button" className="t-btn primary block k-opt" onClick={props.onComplete}>
-        ✓ Mark completed
-      </button>
+      {props.full ? (
+        <OrderDetails order={o} now={props.now} />
+      ) : (
+        <p className="k-opt-when">
+          {dayLabel(o.dueAt, props.now)}, {timeLabel(o.dueAt)} · {o.type === 'delivery' ? 'Delivery' : 'Pickup'}
+        </p>
+      )}
+      {o.status === 'completed' ? (
+        <button type="button" className="t-btn primary block k-opt" onClick={props.onReopen}>
+          ↺ Reopen order
+        </button>
+      ) : (
+        <button type="button" className="t-btn primary block k-opt" onClick={props.onComplete}>
+          ✓ Mark completed
+        </button>
+      )}
       <button type="button" className="t-btn block k-opt" onClick={props.onEdit}>
         Edit order
       </button>

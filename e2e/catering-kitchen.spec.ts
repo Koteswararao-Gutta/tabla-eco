@@ -1325,7 +1325,26 @@ test('kitchen list groups open orders by day, and Calendar shows the month with 
   if (tomorrow.getMonth() !== today.getMonth()) await cal.getByRole('button', { name: 'Next month' }).click();
   await cal.getByRole('button', { name: `${long(tomorrow)}: 1 order` }).click();
   await cal.getByTestId('kitchen-cal-row').filter({ hasText: 'Desert Tech office' }).click();
-  await expect(page.getByRole('dialog', { name: 'Desert Tech office' }).getByRole('button', { name: /Mark completed/ })).toBeVisible();
+  // The whole order shows above the same options as a list card: items, Mark completed, Edit, name tags.
+  const sheet = page.getByRole('dialog', { name: 'Desert Tech office' });
+  const details = sheet.getByTestId('kitchen-order-details');
+  await expect(details).toBeVisible();
+  await expect(details.locator('.k-items li').first()).toBeVisible();
+  await expect(details).not.toContainText('$');
+  await expect(sheet.getByRole('button', { name: 'Edit order' })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: /Print name tags/ })).toBeVisible();
+  await page.waitForTimeout(500); // let the sheet finish sliding in
+  await shot(page, 'kitchen-calendar-order');
+  await sheet.getByRole('button', { name: /Mark completed/ }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = cal.getByTestId('kitchen-cal-row').filter({ hasText: 'Desert Tech office' });
+  await expect(row).toContainText('Completed');
+  // A completed order opens too, with Reopen in place of Mark completed.
+  await row.click();
+  await expect(details).toContainText('Completed');
+  await sheet.getByRole('button', { name: /Reopen order/ }).click();
+  await expect(sheet.getByRole('button', { name: /Mark completed/ })).toBeVisible();
+  await expect(row).toContainText('Open');
   await page.keyboard.press('Escape');
 
   // Portrait: month above the day's orders, nothing runs off the side. In a fresh page: the kitchen goes

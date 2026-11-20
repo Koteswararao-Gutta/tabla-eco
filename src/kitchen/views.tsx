@@ -1,8 +1,10 @@
 // Kitchen list grouped by day (Today first), and the Calendar view: a month with order counts per day.
 import { useState, type ReactNode } from 'react';
 import type { CateringOrder, WithId } from '@shared/data';
-import { dayLabel, dayStart, itemLines, ordersByDay, timeLabel } from '../manager/catering/orders';
+import { countdown, dayLabel, dayStart, itemLines, ordersByDay, timeLabel } from '../manager/catering/orders';
 import { MonthCalendar } from '../manager/catering/calendar';
+import { ItemList } from '../manager/catering';
+import { orderLines } from '../manager/catering/lines';
 import { kitchenGroups, weekdayLabel } from './days';
 
 type Order = WithId<CateringOrder>;
@@ -27,7 +29,7 @@ export function DayGroups({ orders, now, card }: { orders: Order[]; now: number;
   );
 }
 
-/** A month at a glance; tap a day to see its orders. Open orders open their options. */
+/** A month at a glance; tap a day to see its orders, tap an order to see all of it with its options. */
 export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: number; onOpen: (o: Order) => void }) {
   const [picked, setPicked] = useState(() => dayStart(now));
   const dayOrders = ordersByDay(orders).get(picked) ?? [];
@@ -47,7 +49,7 @@ export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: nu
             {dayOrders.map((o) => {
               const done = o.status === 'completed';
               return (
-                <button key={o.id} type="button" className={'k-row k-cal-row' + (done ? ' done' : '')} disabled={done} onClick={() => onOpen(o)} data-testid="kitchen-cal-row">
+                <button key={o.id} type="button" className={'k-row k-cal-row' + (done ? ' done' : '')} onClick={() => onOpen(o)} data-testid="kitchen-cal-row">
                   <span className="k-row-time">{timeLabel(o.dueAt)}</span>
                   <span className="k-row-main">
                     <span className="k-row-head">
@@ -60,7 +62,7 @@ export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: nu
                     </span>
                   </span>
                   <span className="k-row-side">
-                    <span className={'k-row-status' + (done ? ' good' : '')}>{done ? '✓ Completed' : 'Open ›'}</span>
+                    <span className={'k-row-status' + (done ? ' good' : '')}>{done ? '✓ Completed ›' : 'Open ›'}</span>
                   </span>
                 </button>
               );
@@ -68,6 +70,37 @@ export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: nu
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+/** The whole order, as on a kitchen card (never amounts or payments, which the kitchen doesn't load). */
+export function OrderDetails({ order: o, now }: { order: Order; now: number }) {
+  const done = o.status === 'completed';
+  const cd = countdown(o.dueAt, now);
+  return (
+    <div className="k-details" data-testid="kitchen-order-details">
+      <div className="k-card-top">
+        <div>
+          <div className="k-due">{timeLabel(o.dueAt)}</div>
+          <div className="k-day">{RELATIVE.includes(dayLabel(o.dueAt, now)) ? `${dayLabel(o.dueAt, now)}, ${weekdayLabel(dayStart(o.dueAt))}` : weekdayLabel(dayStart(o.dueAt))}</div>
+        </div>
+        <div className="k-card-right">
+          {done ? (
+            <span className="k-row-status good">✓ Completed{o.completedAt ? ` ${timeLabel(o.completedAt)}` : ''}</span>
+          ) : (
+            <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>
+          )}
+          <span className={'t-badge k-type' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+        </div>
+      </div>
+      <div className="k-who">
+        <div className="k-phone">{o.phone}</div>
+        {o.type === 'delivery' && o.address && <div className="k-address">{o.address}</div>}
+        {!!o.people && <div className="k-people">{o.people} people</div>}
+      </div>
+      <ItemList lines={orderLines(o)} className="k-items" />
+      {o.notes && <p className="k-notes">{o.notes}</p>}
     </div>
   );
 }
