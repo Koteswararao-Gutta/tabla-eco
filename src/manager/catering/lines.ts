@@ -224,6 +224,8 @@ function qtyFromLine(line: string): { qty: number | null; unit: string; sure: bo
   const rest = nameAt >= 0 ? s.slice(0, nameAt) + ' ' + s.slice(nameAt + name.length) : s;
   const m = QTY_PARTS.exec(rest);
   if (!m) return { qty: null, unit: '', sure: false };
+  // "1 FT + 1 HT", "2 ft and veg biryani 1 ft": more than one amount on a line can't be read as one.
+  const several = (rest.match(/\d+(?:[.,/]\d+)?/g) ?? []).length > 1;
   const raw = m[1].replace(',', '.');
   let qty: number;
   if (raw.includes('/')) {
@@ -234,7 +236,7 @@ function qtyFromLine(line: string): { qty: number | null; unit: string; sure: bo
   const word = (m[2] ?? '').trim();
   const { unit, sure } = normalizeUnit(word);
   if (/^(?:dozen|doz)$/i.test(word)) qty *= 12;
-  return { qty: Math.round(qty * 100) / 100, unit, sure };
+  return { qty: Math.round(qty * 100) / 100, unit, sure: sure && !several };
 }
 
 /** One typed line as a structured line. `sure` is false when the dish isn't on the menu or the quantity
@@ -245,7 +247,8 @@ export function parseLine(line: string, dishes: Dish[] = []): { line: OrderLine;
   const dish = findDish(typed, dishes);
   const q = qtyFromLine(text);
   const name = dish?.name ?? typed;
-  const sure = !!dish && q.qty !== null && q.sure;
+  // A dish matched only by the start of its name ("Chicken 65 Biryani" -> "Chicken 65") is a guess.
+  const sure = !!dish && norm(dish.name) === norm(typed) && q.qty !== null && q.sure;
   return { line: { dishId: dish?.id ?? null, name, qty: q.qty, unit: q.unit, note: sub ? sub.charAt(0).toLowerCase() + sub.slice(1) : '', text, ...(sure ? {} : { check: true }) }, sure };
 }
 
