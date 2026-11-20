@@ -1,0 +1,27 @@
+name: WhatsApp import (one-off)
+# Runs tools/whatsapp-import on pushes to this branch only. Never merged to main.
+on:
+  push:
+    branches: [claude/project-thread-vznwhy]
+    paths: [tools/whatsapp-import/**]
+permissions:
+  contents: read
+concurrency:
+  group: whatsapp-import
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save --prefix tools/whatsapp-import firebase-admin@14.5.1
+      - run: mkdir -p out && node tools/whatsapp-import/run.mjs
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
