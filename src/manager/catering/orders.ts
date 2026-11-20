@@ -1,7 +1,7 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
 import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
-import { cleanLine, findDish, itemLines, linesText, normalizeUnit, orderLines, type Dish } from './lines';
+import { cleanLine, findDish, itemLines, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
 
 export { itemLines };
 
@@ -191,10 +191,9 @@ const filled = (d: LineDraft) => d.name.trim() !== '';
 
 /** A quantity box's text as a number: null when empty, NaN when it isn't a positive number. */
 export function parseQty(text: string): number | null {
-  const t = text.trim().replace(',', '.');
-  if (!t) return null;
-  if (!/^\d*\.?\d+$/.test(t)) return NaN;
-  const n = parseFloat(t);
+  if (!text.trim()) return null;
+  const n = qtyValue(text);
+  if (Number.isNaN(n)) return NaN;
   return n > 0 && n <= 100_000 ? Math.round(n * 100) / 100 : NaN;
 }
 
@@ -302,7 +301,7 @@ export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes:
       .filter((l) => l && text(l.dish))
       .map((l) => {
         const dish = findDish(text(l.dish), dishes);
-        const qty = parseQty(text(l.qty).replace(/[^\d.,]/g, ''));
+        const qty = parseQty(text(l.qty).replace(/[^\d.,/\s½¼¾-]/g, ''));
         const unit = normalizeUnit(text(l.unit));
         const d: LineDraft = { dishId: dish?.id ?? null, name: dish?.name ?? text(l.dish), qty: qty === null || Number.isNaN(qty) ? '' : String(qty), unit: unit.unit, note: text(l.note) };
         if (l.unsure === true || !dish || !d.qty || !unit.sure) d.check = true;

@@ -327,3 +327,15 @@ describe('order amount (manager only)', () => {
     expect(Object.keys(orderFields(formFromOrder(withExtra)))).not.toContain('amount');
   });
 });
+
+describe('1½ trays in the share text and a scan', () => {
+  it('shares old typed "11/2" lines as "1-1/2"', () => {
+    const o = order(at(20, 12), { items: 'Chicken biryani 11/2 trays\nNaan, 1-1/2 Full trays' });
+    expect(shareText(o)).toContain('• Chicken biryani 1-1/2 trays\n• Naan, 1-1/2 Full trays');
+  });
+
+  it('reads a scanned "1 1/2" as 1.5, not 112', () => {
+    const scan = { lines: [{ dish: 'Chicken biryani', qty: '1 1/2', unit: 'full tray', note: '', unsure: false }] } as unknown as ScannedOrder;
+    expect(formFromScan(scan, emptyForm(at(20, 12))).form.lines[0].qty).toBe('1.5');
+  });
+});

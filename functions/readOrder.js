@@ -30,7 +30,7 @@ export const ScannedOrder = z.object({
     .array(
       z.object({
         dish: z.string().describe('The dish: the exact name from the menu list when it clearly is that dish, otherwise as written'),
-        qty: z.string().describe('How many, as digits (e.g. "2" or "1.5"), or empty'),
+        qty: z.string().describe('How many, as digits (e.g. "2" or "1.5"), or empty. A tray and a half, written "1 1/2", "1-1/2", "1½" or "11/2", is "1.5"'),
         unit: z.string().describe(`One of: ${UNITS.join(', ')}. FT means Full tray and HT means Half tray. Use another word only when none fits, or empty when no unit is written`),
         note: z.string().describe('Anything written about this one dish, like "extra spicy" or "no onion", or empty'),
         unsure: z.boolean().describe('true when this item was hard to read or you had to guess the dish, quantity or unit'),
