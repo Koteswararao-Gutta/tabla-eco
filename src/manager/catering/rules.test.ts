@@ -9,6 +9,6 @@ describe('firestore.rules for orderAmounts', () => {
   it('allows every field the manager app saves, including the id the store adds', () => {
     const block = /match \/orderAmounts\/\{id\} \{([\s\S]*?)\n    \}/.exec(rules)?.[1] ?? '';
     const allowed = /hasOnly\(\[([^\]]*)\]\)/.exec(block)?.[1].split(',').map((s) => s.trim().replace(/'/g, '')) ?? [];
-    for (const field of ['amount', 'paid', 'updatedAt', 'id']) expect(allowed).toContain(field);
+    for (const field of ['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id']) expect(allowed).toContain(field);
   });
 });
