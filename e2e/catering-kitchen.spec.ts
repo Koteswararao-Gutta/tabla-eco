@@ -152,7 +152,7 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(card.getByText('48 Lake View Rd, Hall B')).toBeVisible();
   await expect(card.getByText('150 pieces')).toBeVisible();
   await expect(card.getByText('Garlic Naan')).toBeVisible();
-  await expect(card.getByText(/^in /)).toBeVisible();
+  await expect(card.getByText(/^in /)).toHaveCount(0); // tomorrow: no countdown until the last hour
   await shot(kitchen, 'kitchen-open-orders');
 
   // One tap shows the options; Mark completed: card goes, Undo brings it back.
@@ -1376,4 +1376,31 @@ test('kitchen: the Calendar view goes back to the open orders list after 3 minut
   await page.clock.runFor(181_000);
   await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
   await context.close();
+});
+
+test('kitchen: the countdown shows only in the last hour, and in red once the time has passed', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  const page = await openScreen(context, '/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem('tabla:orders') || '{}');
+    for (const o of Object.values(t) as { status: string }[]) o.status = 'completed';
+    const now = Date.now();
+    const add = (id: string, name: string, inMin: number) =>
+      (t[id] = { id, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: now, updatedAt: now, dueAt: now + inMin * 60_000, kitchenAckFor: now + inMin * 60_000 });
+    add('later', 'Two Hours Away', 120);
+    add('soon', 'Forty Away', 40);
+    add('late', 'Late Party', -25);
+    localStorage.setItem('tabla:orders', JSON.stringify(t));
+  });
+  await page.reload();
+  await typePin(page, '1234');
+  const card = (name: string) => page.getByRole('article', { name: `Order for ${name}` });
+  await expect(card('Two Hours Away')).toBeVisible();
+  await expect(card('Two Hours Away').locator('.k-countdown')).toHaveCount(0);
+  await expect(card('Forty Away').locator('.k-countdown')).toHaveText(/^in (39|40) min$/);
+  const late = card('Late Party').locator('.k-countdown');
+  await expect(late).toHaveText(/^2[56] min late$/);
+  await expect(late).toHaveClass(/late/);
+  await shot(page, 'kitchen-countdown-last-hour');
 });

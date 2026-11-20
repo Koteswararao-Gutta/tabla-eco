@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
@@ -390,7 +390,7 @@ function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: n
           <div className="k-day">{day}</div>
         </div>
         <div className="k-card-right">
-          <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>
+          {showsCountdown(o.dueAt, now) && <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>}
           <span className={'t-badge k-type' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
 import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, telHref, validate, whatsappHref, NAME_MAX } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -337,5 +337,16 @@ describe('1½ trays in the share text and a scan', () => {
   it('reads a scanned "1 1/2" as 1.5, not 112', () => {
     const scan = { lines: [{ dish: 'Chicken biryani', qty: '1 1/2', unit: 'full tray', note: '', unsure: false }] } as unknown as ScannedOrder;
     expect(formFromScan(scan, emptyForm(at(20, 12))).form.lines[0].qty).toBe('1.5');
+  });
+});
+
+describe('showsCountdown', () => {
+  it('shows only in the last hour and after the time', () => {
+    const NOW = new Date(2026, 10, 20, 12, 0).getTime();
+    expect(showsCountdown(NOW + 61 * 60_000, NOW)).toBe(false);
+    expect(showsCountdown(NOW + 3 * 86_400_000, NOW)).toBe(false);
+    expect(showsCountdown(NOW + 60 * 60_000, NOW)).toBe(true);
+    expect(showsCountdown(NOW + 5 * 60_000, NOW)).toBe(true);
+    expect(showsCountdown(NOW - 25 * 60_000, NOW)).toBe(true);
   });
 });

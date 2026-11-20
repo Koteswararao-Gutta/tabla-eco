@@ -1,7 +1,7 @@
 // Kitchen list grouped by day (Today first), and the Calendar view: a month with order counts per day.
 import { useState, type ReactNode } from 'react';
 import type { CateringOrder, WithId } from '@shared/data';
-import { countdown, dayLabel, dayStart, itemLines, ordersByDay, timeLabel } from '../manager/catering/orders';
+import { countdown, dayLabel, dayStart, itemLines, ordersByDay, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { MonthCalendar } from '../manager/catering/calendar';
 import { ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
@@ -89,7 +89,7 @@ export function OrderDetails({ order: o, now }: { order: Order; now: number }) {
           {done ? (
             <span className="k-row-status good">✓ Completed{o.completedAt ? ` ${timeLabel(o.completedAt)}` : ''}</span>
           ) : (
-            <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>
+            showsCountdown(o.dueAt, now) && <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>
           )}
           <span className={'t-badge k-type' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
         </div>
