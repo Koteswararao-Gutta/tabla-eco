@@ -92,4 +92,21 @@ async function seed(): Promise<void> {
     { customerName: 'Rahul Verma', phone: '555 444 0101', dueAt: at(-1, 19, 0), type: 'pickup', people: 15, items: 'Goat dum biryani, 1 large tray\nChicken 65, 1 tray', status: 'completed', completedAt: at(-1, 18, 50), createdAt: now, updatedAt: now },
   ];
   for (const o of orders) await store.addDoc('orders', o);
+
+  // The live app gets the menu from Toast (the server saves it); the local preview gets a small sample,
+  // so typing a dish in a catering order suggests something.
+  if (store.mode === 'local') await store.setDoc('toastMenu', 'current', { groups: SAMPLE_MENU, changedAt: now });
 }
+
+const menuGroup = (id: string, name: string, items: string[]) => ({ id, name, items: items.map((n, i) => ({ id: `${id}-${i + 1}`, name: n, description: '' })) });
+const SAMPLE_MENU = [
+  menuGroup('veg-starters', 'Veg Starters', ['Samosa (2)', 'Onion Pakora', 'Mirchi Bajji', 'Gobi Manchurian', 'Chilli Paneer', 'Paneer Tikka']),
+  menuGroup('nonveg-starters', 'Non-Veg Starters', ['Chicken 65', 'Apollo Fish', 'Chilli Chicken', 'Tandoori Chicken', 'Chicken Tikka']),
+  menuGroup('biryani', 'Biryani', ['Veg Dum Biryani', 'Chicken Dum Biryani', 'Goat Dum Biryani', 'Egg Biryani', 'Shrimp Biryani']),
+  menuGroup('veg-curries', 'Veg Curries', ['Paneer Butter Masala', 'Dal Tadka', 'Chana Masala', 'Bhindi Masala']),
+  menuGroup('nonveg-curries', 'Non-Veg Curries', ['Chicken Tikka Masala', 'Butter Chicken', 'Goat Curry', 'Andhra Chicken Curry']),
+  menuGroup('rice-breads', 'Rice & Breads', ['Jeera Rice', 'Plain Rice', 'Butter Naan', 'Garlic Naan', 'Chapati (2)']),
+  menuGroup('sides', 'Sides', ['Raita', 'Papad', 'Salad']),
+  menuGroup('desserts', 'Desserts', ['Gulab Jamun', 'Rasmalai', 'Double Ka Meetha']),
+  menuGroup('drinks', 'Drinks', ['Mango Lassi', 'Masala Chai', 'Rose Milk']),
+];

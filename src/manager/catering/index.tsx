@@ -1,12 +1,17 @@
 // Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useCollection, useNow, type AlertState, type CateringOrder, type ScannedOrder, type WithId } from '@shared/data';
+import { store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  dayLabel, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, telHref, timeLabel, validate,
+  amountError, amountInput, amountLabel, dayLabel, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
+import { ItemsEditor, lastUnit } from './ItemsEditor';
+import { menuDishes, orderLines, qtyText, type Dish } from './lines';
+import { TagsSheet } from './TagsSheet';
+import { balance, depositError, depositTotal, methodLabel, NO_PAY, PAY_METHODS, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 import './catering.css';
 
 type Order = WithId<CateringOrder>;
@@ -45,12 +50,32 @@ function useSaver() {
 
 export default function Catering() {
   const orders = useCollection('orders');
+  // Manager only: what each order costs (orderAmounts/{order id}). The kitchen never loads this.
+  const amounts = useCollection('orderAmounts');
+  const payOf = (id: string): Pay | undefined => {
+    if (!amounts) return undefined;
+    return payFrom(amounts.find((x) => x.id === id));
+  };
   const now = useNow(30_000);
+  const menu = useDoc('toastMenu', 'current');
+  useStructureOldOrders(orders, menu === undefined ? undefined : menuDishes(menu));
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
+  // "?order=<id>" (e.g. from More > Payments) opens that order.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const id = params.get('order');
+    if (!id) return;
+    setEditing(id);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  // "Orders" or "Unpaid" (finished by the kitchen, not yet paid).
+  const [view, setView] = useState<'orders' | 'unpaid'>('orders');
   const [calendar, setCalendar] = useState(false);
   const [newDay, setNewDay] = useState<number | undefined>(undefined);
+  // "Print tags": the order's tag sheet replaces its summary; closing it goes back to the order.
+  const [tagsFor, setTagsFor] = useState<Order | null>(null);
   // "Marked completed" toast with Undo, for a few seconds.
   const [done, setDone] = useState<{ id: string; name: string } | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -82,10 +107,14 @@ export default function Catering() {
   const sheetOpen = editing === 'new' || !!editOrder;
   const openOrder = (o: Order) => setEditing(o.id);
   const openCount = groups ? groups.overdue.length + groups.today.length + groups.tomorrow.length + groups.later.length : 0;
+  // A finished order stays in the list until it is paid.
+  const unpaid = orders && amounts ? unpaidDone(orders, payOf) ?? [] : [];
+  const owedTotal = unpaid.reduce((a, o) => a + (balance(payOf(o.id) ?? NO_PAY) ?? 0), 0);
 
   return (
     <main className="t-page c-page">
       <PageHeader
+        logo
         title="Catering"
         action={
           <div className="c-head-actions">
@@ -107,26 +136,58 @@ export default function Catering() {
 
       <AlertsCard />
 
-      {!groups ? null : (
+      <div className="c-filter" role="group" aria-label="Show">
+        <button type="button" aria-pressed={view === 'orders'} onClick={() => setView('orders')}>
+          Orders
+        </button>
+        <button type="button" aria-pressed={view === 'unpaid'} onClick={() => setView('unpaid')} data-testid="unpaid-filter">
+          Unpaid
+          {unpaid.length > 0 && (
+            <span className="c-count" aria-label={`${unpaid.length} not paid`}>
+              {unpaid.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {!groups ? null : view === 'unpaid' ? (
+        <div className="t-stack" data-testid="unpaid-list">
+          {unpaid.length === 0 ? (
+            <div className="t-empty c-empty">Nothing to collect. Every finished order is paid.</div>
+          ) : (
+            <p className="c-owed">
+              {unpaid.length === 1 ? '1 finished order' : `${unpaid.length} finished orders`} not paid
+              {owedTotal > 0 && (
+                <>
+                  {' '}
+                  · <b>{amountLabel(owedTotal)}</b> still owed
+                </>
+              )}
+            </p>
+          )}
+          <Group title="Done, not paid" orders={unpaid} now={now} payOf={payOf} showDate onOpen={openOrder} />
+        </div>
+      ) : (
         <div className="t-stack">
-          {openCount === 0 && (
+          {openCount === 0 && unpaid.length === 0 && (
             <div className="t-empty c-empty">
               No open orders.
               <br />
               Tap “+ New order” to add one.
             </div>
           )}
-          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} showDate onOpen={openOrder} late />
-          <Group title="Today" orders={groups.today} now={now} onOpen={openOrder} />
-          <Group title="Tomorrow" orders={groups.tomorrow} now={now} onOpen={openOrder} />
-          <Group title="Later" orders={groups.later} now={now} showDate onOpen={openOrder} />
+          <Group title="Not completed (earlier days)" orders={groups.overdue} now={now} payOf={payOf} showDate onOpen={openOrder} late />
+          <Group title="Today" orders={groups.today} now={now} payOf={payOf} onOpen={openOrder} />
+          <Group title="Tomorrow" orders={groups.tomorrow} now={now} payOf={payOf} onOpen={openOrder} />
+          <Group title="Later" orders={groups.later} now={now} payOf={payOf} showDate onOpen={openOrder} />
+          <Group title="Done, not paid" orders={unpaid} now={now} payOf={payOf} showDate onOpen={openOrder} />
 
           {past.length > 0 && (
             <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
               {showHistory ? 'Hide history' : `History (${past.length})`}
             </button>
           )}
-          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} showDate onOpen={openOrder} />}
+          {showHistory && past.length > 0 && <Group title="History" orders={past} now={now} payOf={payOf} showDate onOpen={openOrder} />}
         </div>
       )}
 
@@ -151,6 +212,7 @@ export default function Catering() {
         <OrderSheet
           key={editing!}
           order={editOrder}
+          pay={editOrder ? payOf(editOrder.id) : NO_PAY}
           day={newDay}
           now={now}
           onClose={() => setEditing(null)}
@@ -158,6 +220,21 @@ export default function Catering() {
           onDelete={(o) => {
             setEditing(null);
             setDeleting(o);
+          }}
+          onPrintTags={(o) => {
+            setEditing(null);
+            setTagsFor(o);
+          }}
+        />
+      )}
+
+      {tagsFor && (
+        <TagsSheet
+          order={tagsFor}
+          now={now}
+          onClose={() => {
+            if (orders?.some((o) => o.id === tagsFor.id)) setEditing(tagsFor.id);
+            setTagsFor(null);
           }}
         />
       )}
@@ -179,6 +256,7 @@ export default function Catering() {
               onClick={() =>
                 remove.run(async () => {
                   await store.deleteDoc('orders', deleting.id);
+                  await store.deleteDoc('orderAmounts', deleting.id).catch(() => {});
                   setDeleting(null);
                 }, DELETE_FAILED)
               }
@@ -203,6 +281,54 @@ export default function Catering() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * Once per order: an order saved before items were structured gets its `lines`, read from its text and
+ * matched to the menu. Only `lines` is added: the text, the times and the history stay as they are, and
+ * each line keeps its text as typed, so nothing people see changes. A line read by a guess is marked to check.
+ * Waits for the orders and the menu to load; without a menu yet, it waits for one.
+ */
+function useStructureOldOrders(orders: Order[] | null | undefined, dishes: Dish[] | undefined) {
+  const done = useRef(new Set<string>());
+  useEffect(() => {
+    if (!orders || !dishes || dishes.length === 0) return;
+    for (const o of orders) {
+      if (Array.isArray(o.lines) || done.current.has(o.id) || typeof o.items !== 'string') continue;
+      done.current.add(o.id);
+      const lines = orderLines({ items: o.items }, dishes);
+      store.updateDoc('orders', o.id, { lines }).catch(() => done.current.delete(o.id));
+    }
+  }, [orders, dishes]);
+}
+
+/** The order's items for reading: quantity first, then the dish and its note. A line kept as typed reads as typed. */
+export function ItemList({ lines, className, showChecks }: { lines: OrderLine[]; className: string; showChecks?: boolean }) {
+  return (
+    <ul className={className}>
+      {lines.map((l, i) => {
+        const check = showChecks && l.check ? <span className="t-badge c-check-badge">Check</span> : null;
+        if (l.text) {
+          return (
+            <li key={i}>
+              {l.text}
+              {check && <> {check}</>}
+            </li>
+          );
+        }
+        const q = qtyText(l);
+        return (
+          <li key={i}>
+            {q && <b className="c-qty-text">{q}</b>}
+            {q && ' '}
+            {l.name}
+            {l.note.trim() && <span className="c-item-note"> · {l.note.trim()}</span>}
+            {check && <> {check}</>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -246,23 +372,24 @@ function AlertsCard() {
   );
 }
 
-function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; onOpen: (o: Order) => void }) {
+function Group(props: { title: string; orders: Order[]; now: number; showDate?: boolean; late?: boolean; payOf: (id: string) => Pay | undefined; onOpen: (o: Order) => void }) {
   if (props.orders.length === 0) return null;
   return (
     <section className="c-group" aria-label={props.title}>
       <h2 className={'c-group-title' + (props.late ? ' late' : '')}>{props.title}</h2>
       <div className="t-stack">
         {props.orders.map((o) => (
-          <OrderCard key={o.id} order={o} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
+          <OrderCard key={o.id} order={o} pay={props.payOf(o.id)} now={props.now} showDate={props.showDate} onClick={() => props.onOpen(o)} />
         ))}
       </div>
     </section>
   );
 }
 
-function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: number; showDate?: boolean; onClick: () => void }) {
+/** Manager list card. The kitchen has its own cards (src/kitchen), which never show the amount. */
+function OrderCard({ order: o, pay, now, showDate, onClick }: { order: Order; pay?: Pay; now: number; showDate?: boolean; onClick: () => void }) {
   const n = itemLines(o.items).length;
-  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`].filter(Boolean);
+  const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, payLabel(pay) || null].filter(Boolean);
   return (
     <button className={'c-card' + (o.status === 'completed' ? ' done' : '')} onClick={onClick} data-testid="order-card">
       <span className="c-card-top">
@@ -271,7 +398,10 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
           {timeLabel(o.dueAt)}
         </span>
         {o.status === 'completed' ? (
-          <span className="t-badge good">✓ Completed</span>
+          <span className="c-badges">
+            <span className="t-badge good">✓ Completed</span>
+            {pay && !pay.paid && <span className="t-badge bad">Not paid</span>}
+          </span>
         ) : (
           <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
         )}
@@ -282,7 +412,9 @@ function OrderCard({ order: o, now, showDate, onClick }: { order: Order; now: nu
   );
 }
 
-type SheetProps = { order: Order | null; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete: (o: Order) => void };
+/** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager).
+ *  `pay` (manager only): the order's saved amount and paid, undefined while loading. Those boxes show only when `by` is Manager. */
+type SheetProps = { order: Order | null; pay?: Pay; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -292,18 +424,54 @@ function OrderSheet(props: SheetProps) {
   // Set by the form while it renders, and read by the Sheet at the moment of closing, so a key typed
   // just before Escape always counts.
   const dirty = useRef(false);
-  const title = !editing ? 'Order details' : order ? 'Edit order' : 'New order';
-  const confirm = () => (editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
+  // A new order, once saved: offer to send it to the front staff WhatsApp group.
+  const [saved, setSaved] = useState<string | null>(null);
+  // "Mark paid" (manager only) replaces the summary until it is saved or cancelled.
+  const [paying, setPaying] = useState(false);
+  const title = saved ? 'Order saved' : paying && order ? 'Mark paid' : !editing ? 'Order details' : order ? 'Edit order' : 'New order';
+  const confirm = () => (!saved && editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
   return (
     <Sheet open title={title} onClose={props.onClose} confirmClose={confirm}>
-      {!editing && order ? <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} /> : <OrderFormView {...props} dirty={dirty} />}
+      {saved ? (
+        <SavedView text={saved} onClose={props.onClose} />
+      ) : paying && order && props.pay ? (
+        <PayView order={order} pay={props.pay} now={props.now} onBack={() => setPaying(false)} />
+      ) : !editing && order ? (
+        <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} onPay={() => setPaying(true)} />
+      ) : (
+        <OrderFormView {...props} dirty={dirty} onSaved={setSaved} />
+      )}
     </Sheet>
   );
 }
 
-function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }: SheetProps & { order: Order; onEdit: () => void }) {
+/** Opens WhatsApp with the order typed in; the person picks the front staff group and sends. */
+function ShareLink({ text, primary }: { text: string; primary?: boolean }) {
+  return (
+    <a className={'t-btn block c-share' + (primary ? ' primary' : '')} href={whatsappHref(text)} target="_blank" rel="noopener noreferrer">
+      Share to WhatsApp
+    </a>
+  );
+}
+
+/** After a new order is saved. */
+function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div className="t-stack c-saved" data-testid="order-saved">
+      <p className="c-scan-note">✓ Saved. Send it to the front staff group so they can get the sides ready.</p>
+      <pre className="c-share-preview" aria-label="Message">{text}</pre>
+      <ShareLink text={text} primary />
+      <button type="button" className="t-btn ghost block" onClick={onClose}>
+        Done
+      </button>
+    </div>
+  );
+}
+
+function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPrintTags, onEdit, onPay }: SheetProps & { order: Order; onEdit: () => void; onPay: () => void }) {
   const { busy, error, run } = useSaver();
-  const items = itemLines(o.items);
+  const lines = orderLines(o);
+  const toCheck = lines.filter((l) => l.check).length;
   const open = o.status === 'open';
   const setStatus = (status: CateringOrder['status']) =>
     run(async () => {
@@ -340,14 +508,24 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
             <dd>{o.people}</dd>
           </div>
         )}
+        {pay && (
+          <div data-testid="order-amount">
+            <dt>Amount</dt>
+            <dd>
+              {amountLabel(pay.amount) || 'Not set'} <PayBadge pay={pay} />
+            </dd>
+          </div>
+        )}
       </dl>
+      {pay && <PaymentsList order={o} pay={pay} now={now} />}
       <div>
         <h3 className="c-sum-h">Items</h3>
-        <ul className="c-sum-items">
-          {items.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
+        <ItemList lines={lines} className="c-sum-items" showChecks />
+        {toCheck > 0 && (
+          <p className="c-check" data-testid="items-to-check">
+            {toCheck === 1 ? '1 item was' : `${toCheck} items were`} read automatically. Tap Edit to check {toCheck === 1 ? 'it' : 'them'}, then Save.
+          </p>
+        )}
       </div>
       {o.notes?.trim() && (
         <div>
@@ -363,14 +541,26 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
       <button type="button" className={'t-btn block ' + (open ? 'primary' : '')} disabled={busy} onClick={() => setStatus(open ? 'completed' : 'open')}>
         {open ? '✓ Mark completed' : 'Reopen'}
       </button>
+      {pay && !pay.paid && (
+        <button type="button" className={'t-btn block' + (open ? '' : ' primary')} onClick={onPay}>
+          💵 Mark paid
+        </button>
+      )}
+      {open && <ShareLink text={shareText(o)} />}
+      {onPrintTags && (
+        <button type="button" className="t-btn block" onClick={() => onPrintTags(o)}>
+          🏷️ Print name tags
+        </button>
+      )}
       <div className="t-grid2">
         <button type="button" className="t-btn" onClick={onEdit}>
           Edit
         </button>
-        <button type="button" className="t-btn danger" onClick={() => onDelete(o)}>
+        <button type="button" className="t-btn danger" onClick={() => onDelete?.(o)}>
           Delete
         </button>
       </div>
+      <EditHistory history={o.history} now={now} />
       <button type="button" className="t-btn ghost block" onClick={onClose}>
         Close
       </button>
@@ -378,8 +568,244 @@ function OrderSummary({ order: o, now, onClose, onCompleted, onDelete, onEdit }:
   );
 }
 
-function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
-  const { order, onClose, onCompleted, onDelete } = props;
+/** "✓ Paid", "$200 owed" or "Not paid". */
+function PayBadge({ pay }: { pay: Pay }) {
+  if (pay.paid) return <span className="t-badge good">✓ Paid</span>;
+  const owed = balance(pay);
+  if (depositTotal(pay) > 0 && owed != null) return <span className="t-badge bad">{amountLabel(owed)} owed</span>;
+  return <span className="t-badge bad">Not paid</span>;
+}
+
+const whenLabel = (at: number, now: number) => `${dayLabel(at, now)}, ${timeLabel(at)}`;
+
+/** Manager only: deposits taken so far, and the final payment once paid (how, who, when). Each can be undone. */
+function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number }) {
+  const { busy, error, run } = useSaver();
+  // A tap on Remove asks once more, on the same button.
+  const [confirm, setConfirm] = useState<string | null>(null);
+  if (!pay.paid && pay.deposits.length === 0) return null;
+  const removeDeposit = (i: number) =>
+    run(async () => {
+      await store.updateDoc('orderAmounts', order.id, { deposits: pay.deposits.filter((_, j) => j !== i), updatedAt: store.now() });
+      setConfirm(null);
+    });
+  const markNotPaid = () =>
+    run(async () => {
+      await store.updateDoc('orderAmounts', order.id, { paid: false, paidAt: null, method: null, takenBy: null, updatedAt: store.now() });
+      setConfirm(null);
+    });
+  const owed = balance(pay);
+  return (
+    <section className="c-pays" data-testid="payments" aria-label="Payments">
+      <h3 className="c-sum-h">Payments</h3>
+      <ul className="c-pay-list">
+        {pay.deposits.map((d, i) => (
+          <li key={`${d.at}-${i}`} className="c-pay-row">
+            <span className="c-pay-text">
+              <b>Deposit {amountLabel(d.amount)}</b> · {methodLabel(d.method)} · {d.takenBy}
+              <small>{whenLabel(d.at, now)}</small>
+            </span>
+            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === `d${i}` ? removeDeposit(i) : setConfirm(`d${i}`))}>
+              {confirm === `d${i}` ? 'Tap to remove' : 'Remove'}
+            </button>
+          </li>
+        ))}
+        {pay.paid && (
+          <li className="c-pay-row" data-testid="paid-row">
+            <span className="c-pay-text">
+              <b>✓ Paid in full</b>
+              {pay.method && <> · {methodLabel(pay.method)}</>}
+              {pay.takenBy && <> · {pay.takenBy}</>}
+              {pay.paidAt != null && <small>{whenLabel(pay.paidAt, now)}</small>}
+            </span>
+            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === 'paid' ? markNotPaid() : setConfirm('paid'))}>
+              {confirm === 'paid' ? 'Tap to undo' : 'Undo'}
+            </button>
+          </li>
+        )}
+      </ul>
+      {!pay.paid && owed != null && (
+        <p className="c-owed" data-testid="still-owed">
+          Paid so far {amountLabel(depositTotal(pay))} · <b>{amountLabel(owed)} still owed</b>
+        </p>
+      )}
+      {error && (
+        <p className="c-err" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Manager only: record a payment. "Paid in full" marks the order paid; "Deposit" records part of it.
+ *  How they paid and who took it are required; the date and time are saved automatically. */
+function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: number; onBack: () => void }) {
+  const staffConfig = useSingleton('staffConfig');
+  const names = staffConfig === undefined ? null : staffNames(staffConfig);
+  const [kind, setKind] = useState<'full' | 'deposit'>('full');
+  const [depositText, setDepositText] = useState('');
+  const [method, setMethod] = useState<Pay['method']>(null);
+  const [takenBy, setTakenBy] = useState('');
+  const [tried, setTried] = useState(false);
+  const { busy, error, run } = useSaver();
+  const owed = balance(pay);
+  const errs = {
+    deposit: kind === 'deposit' ? depositError(depositText, pay) : '',
+    method: method ? '' : 'Please choose how they paid.',
+    takenBy: takenBy ? '' : 'Please choose who took the payment.',
+  };
+  const save = () => {
+    setTried(true);
+    if (errs.deposit || errs.method || errs.takenBy || !method) return;
+    run(async () => {
+      const at = store.now();
+      if (kind === 'deposit') {
+        const amount = parseAmount(depositText)!;
+        await store.updateDoc('orderAmounts', order.id, { deposits: [...pay.deposits, { amount, method, takenBy, at }], updatedAt: at });
+      } else {
+        await store.updateDoc('orderAmounts', order.id, { paid: true, paidAt: at, method, takenBy, updatedAt: at });
+      }
+      onBack();
+    });
+  };
+  const show = (k: keyof typeof errs) => tried && errs[k] && <small className="c-err" role="alert">{errs[k]}</small>;
+  return (
+    <form
+      className="t-stack c-form c-pay"
+      data-testid="pay-view"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+    >
+      <div className="c-pay-head">
+        <div className="c-sum-name">{order.customerName}</div>
+        <div className="c-meta">
+          {dayLabel(order.dueAt, now)}, {timeLabel(order.dueAt)}
+        </div>
+      </div>
+      <dl className="c-sum-facts" data-testid="pay-totals">
+        <div>
+          <dt>Amount</dt>
+          <dd>{amountLabel(pay.amount) || 'Not set'}</dd>
+        </div>
+        {pay.deposits.length > 0 && (
+          <div>
+            <dt>Paid so far</dt>
+            <dd>{amountLabel(depositTotal(pay))}</dd>
+          </div>
+        )}
+        {owed != null && (
+          <div>
+            <dt>Still owed</dt>
+            <dd>{amountLabel(owed)}</dd>
+          </div>
+        )}
+      </dl>
+      <div className="t-field">
+        <span>Payment</span>
+        <Segmented
+          label="Payment"
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'full', label: owed ? `Paid in full (${amountLabel(owed)})` : 'Paid in full' },
+            { value: 'deposit', label: 'Deposit' },
+          ]}
+        />
+      </div>
+      {kind === 'deposit' && (
+        <Field label="Deposit amount $">
+          <input
+            className="t-input c-amount"
+            inputMode="decimal"
+            placeholder="e.g. 100"
+            value={depositText}
+            onChange={(e) => setDepositText(e.target.value)}
+            aria-invalid={tried && !!errs.deposit}
+            autoComplete="off"
+            data-testid="deposit-input"
+          />
+          {show('deposit')}
+        </Field>
+      )}
+      <div className="t-field">
+        <span>How they paid</span>
+        <div className="c-methods">
+          {/* Nothing is pressed until they choose. */}
+          <Segmented<PayMethod> label="How they paid" value={method as PayMethod} onChange={setMethod} options={PAY_METHODS} />
+        </div>
+        {show('method')}
+      </div>
+      <Field label="Taken by">
+        <select className="t-select" value={takenBy} onChange={(e) => setTakenBy(e.target.value)} aria-invalid={tried && !!errs.takenBy} disabled={!names}>
+          <option value="">Choose a person…</option>
+          {(names ?? []).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        {names && names.length === 0 ? <small className="c-hint">No staff yet. Add people in the Staff tab.</small> : show('takenBy')}
+      </Field>
+      <p className="c-hint">The date and time are saved automatically. Not shown on the kitchen tablet.</p>
+      {error && (
+        <p className="c-err" role="alert">
+          {error}
+        </p>
+      )}
+      <button className="t-btn primary block" type="submit" disabled={busy}>
+        {busy ? 'Saving…' : kind === 'deposit' ? 'Save deposit' : '✓ Mark paid'}
+      </button>
+      <button type="button" className="t-btn ghost block" onClick={onBack}>
+        Back
+      </button>
+    </form>
+  );
+}
+
+/** "Changes": who edited the order (Kitchen or Manager), when, and what changed. Newest first. Nothing when never edited. */
+export function EditHistory({ history, now }: { history?: OrderEdit[]; now: number }) {
+  const list = Array.isArray(history) ? [...history].reverse() : [];
+  if (list.length === 0) return null;
+  return (
+    <section className="c-hist" data-testid="edit-history" aria-label="Changes">
+      <h3 className="c-sum-h">Changes</h3>
+      <ol className="c-hist-list">
+        {list.map((e, i) => (
+          <li key={`${e.at}-${i}`} className="c-hist-entry">
+            <div className="c-hist-who">
+              <b>{EDITED_BY_LABEL[e.by] ?? 'Someone'}</b> · {dayLabel(e.at, now)}, {timeLabel(e.at)}
+            </div>
+            <ul className="c-hist-changes">
+              {(Array.isArray(e.changes) ? e.changes : []).map((c, j) => (
+                <li key={j}>{c}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** The edit form on its own, in a sheet: used by the kitchen tablet ("Edit" on an order). Saves as `by`, no Delete. */
+export function EditOrderSheet({ order, now, by, onClose, onCompleted }: { order: Order; now: number; by: EditedBy; onClose: () => void; onCompleted: (o: Order) => void }) {
+  const dirty = useRef(false);
+  return (
+    <Sheet open title="Edit order" onClose={onClose} confirmClose={() => (dirty.current ? 'Discard your changes?' : null)}>
+      <OrderFormView order={order} now={now} by={by} dirty={dirty} onClose={onClose} onCompleted={onCompleted} onSaved={() => onClose()} />
+    </Sheet>
+  );
+}
+
+function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSaved: (shareText: string) => void }) {
+  const { order, onClose, onCompleted, onDelete, by = 'manager' } = props;
+  // The amount box is for the manager app only. It is kept apart from the order form, so it never goes
+  // into the order, its change history, the WhatsApp message or the kitchen's edit form.
+  const showAmount = by === 'manager';
   const requestClose = useSheetClose();
   const form = useRef<HTMLFormElement>(null);
   const [attempt, setAttempt] = useState(0); // bumps on a save with errors
@@ -391,7 +817,13 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
     first.scrollIntoView({ block: 'center', behavior: 'smooth' });
     first.focus({ preventScroll: true });
   }, [attempt]);
-  const [start] = useState<OrderForm>(() => (order ? formFromOrder(order) : emptyForm(store.now(), props.day)));
+  const menu = useDoc('toastMenu', 'current');
+  const dishes = menuDishes(menu);
+  const [start] = useState<OrderForm>(() => {
+    if (order) return formFromOrder(order, dishes);
+    const f = emptyForm(store.now(), props.day);
+    return { ...f, lines: [{ ...f.lines[0], unit: lastUnit() }] };
+  });
   const [f, setF] = useState<OrderForm>(start);
   const allOrders = useCollection('orders');
   const [errors, setErrors] = useState<FormErrors>({});
@@ -402,8 +834,40 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
   const [pasted, setPasted] = useState('');
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
+  // The saved amount can arrive after the form opens: take it then, unless something was typed already.
+  // Paid / deposits are recorded with "Mark paid" on the order's summary, not here.
+  const loaded = (p: Pay | undefined) => (p === undefined && order ? undefined : { amount: amountInput(p?.amount) });
+  const [payStart, setPayStart] = useState(() => loaded(props.pay));
+  const [amount, setAmount] = useState(payStart?.amount ?? '');
+  const [amountErr, setAmountErr] = useState('');
+  useEffect(() => {
+    if (payStart !== undefined || props.pay === undefined) return;
+    const p = loaded(props.pay)!;
+    setPayStart(p);
+    setAmount((typed) => (typed ? typed : p.amount));
+  }, [props.pay, payStart]);
+  const amountChanged = showAmount && payStart !== undefined && parseAmount(amount) !== parseAmount(payStart.amount);
+  // The amount can't go below the deposits already taken (then "owed" and the week's totals stop adding up).
+  const amountProblem = (v: string) => {
+    const e = amountError(v);
+    if (e) return e;
+    const n = parseAmount(v), dep = props.pay ? depositTotal(props.pay) : 0;
+    return n !== null && dep > n ? `Deposits already add up to ${amountLabel(dep)}.` : '';
+  };
+  const typeAmount = (v: string) => {
+    setAmount(v);
+    if (tried) setAmountErr(amountProblem(v));
+  };
+  // A new order already added (its amount save failed): Save again retries the amount only, never a second order.
+  const created = useRef<string | null>(null);
+  /** Saves the amount for this order id (manager only), when it changed. A merge, so payments stay as they are. */
+  const saveAmount = async (id: string) => {
+    if (!amountChanged) return;
+    await store.updateDoc('orderAmounts', id, { amount: parseAmount(amount), updatedAt: store.now() });
+  };
+
   const changed = JSON.stringify(f) !== JSON.stringify(start);
-  props.dirty.current = changed || scan.state === 'done' || pasted.trim() !== '';
+  props.dirty.current = changed || amountChanged || scan.state === 'done' || pasted.trim() !== '';
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
@@ -420,7 +884,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
         const message = from === 'photo' ? "This photo doesn't look like an order. Please try another photo." : "This message doesn't look like an order. Please check what you pasted.";
         return setScan({ state: 'failed', from, message });
       }
-      const filled = formFromScan(got, f);
+      const filled = formFromScan(got, f, dishes);
       setF(filled.form);
       setUnsure(filled.unsure);
       if (tried) setErrors(validate(filled.form));
@@ -456,9 +920,11 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
   /** Checks the form; false (and the errors shown, first one focused) when something needs fixing. */
   const check = () => {
     const e = validate(f);
+    const ae = showAmount && (amountChanged || !order) ? amountProblem(amount) : '';
     setTried(true);
     setErrors(e);
-    if (Object.keys(e).length) {
+    setAmountErr(ae);
+    if (Object.keys(e).length || ae) {
       setAttempt((n) => n + 1);
       return false;
     }
@@ -466,27 +932,46 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
   };
   // Merge only the form's fields: status/completedAt are left alone, so completing the order in the
   // kitchen while this sheet is open is never undone by saving. Cleared optional fields become ''.
+  // What changed (compared with the order as saved right now) is added to its history, with who saved it.
+  // Only fields changed in this form are sent, so an edit made elsewhere while it was open (the kitchen
+  // adding an item or a note) is not written over with what the form loaded.
   const editFields = () => {
-    const fields = orderFields(f);
-    return { ...fields, address: fields.address ?? '', notes: fields.notes ?? '', updatedAt: store.now() };
+    const all = orderFields(f);
+    const was = orderFields(start);
+    const full = { ...all, address: all.address ?? '', notes: all.notes ?? '' };
+    const before = { ...was, address: was.address ?? '', notes: was.notes ?? '' };
+    const changed = Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k as keyof typeof before])));
+    // Items are saved twice (as text and as lines): they always go together.
+    if ('items' in changed || 'lines' in changed) Object.assign(changed, { items: full.items, lines: full.lines });
+    const at = store.now();
+    const next = { ...changed, updatedAt: at } as Partial<typeof full> & { updatedAt: number };
+    const changes = order ? describeChanges(order, { ...order, ...next }) : [];
+    return changes.length ? { ...next, history: withEdit(order!.history, { at, by, changes }) } : next;
   };
 
   const save = () => {
     if (!check()) return;
     run(async () => {
       const now = store.now();
-      if (order) await store.updateDoc('orders', order.id, editFields());
-      else await store.addDoc('orders', { ...orderFields(f), status: 'open', createdAt: now, updatedAt: now });
-      onClose();
+      if (order) {
+        await store.updateDoc('orders', order.id, editFields());
+        await saveAmount(order.id);
+        return onClose();
+      }
+      const fields = orderFields(f);
+      const id = created.current ?? (created.current = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now }));
+      await saveAmount(id);
+      props.onSaved(shareText(fields, 'New catering order'));
     });
   };
 
   // Mark completed / Reopen keeps what was typed: changed fields are checked and saved with the new status.
   const setStatus = (status: CateringOrder['status']) => {
     if (!order) return;
-    if (changed && !check()) return;
+    if ((changed || amountChanged) && !check()) return;
     run(async () => {
       await store.updateDoc('orders', order.id, changed ? { ...editFields(), ...statusPatch(status) } : statusPatch(status));
+      await saveAmount(order.id);
       if (status === 'completed') onCompleted(order);
       onClose();
     });
@@ -498,7 +983,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
     ) : (
       unsure.includes(k) && <small className="c-check">Please check this: it was {scan.from === 'message' ? 'unclear' : 'hard to read'}.</small>
     );
-  const count = Object.keys(errors).length;
+  const count = Object.keys(errors).length + (amountErr ? 1 : 0);
 
   return (
     <form
@@ -578,7 +1063,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
         {err('customerName')}
       </Field>
       <Field label="Phone">
-        <input className="t-input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
+        <input className="t-input" type="tel" inputMode="tel" maxLength={30} value={f.phone} onChange={(e) => set('phone', e.target.value)} aria-invalid={!!errors.phone} autoComplete="off" />
         {err('phone')}
       </Field>
       <div className="t-grid2">
@@ -615,17 +1100,34 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
         <input className="t-input c-people" inputMode="numeric" value={f.people} onChange={(e) => set('people', e.target.value)} aria-invalid={!!errors.people} />
         {err('people')}
       </Field>
-      <Field label="Order items (one per line)">
-        <textarea className="t-textarea" rows={5} value={f.items} onChange={(e) => set('items', e.target.value)} aria-invalid={!!errors.items} placeholder={'e.g. Chicken biryani, 2 large trays'} />
-        {err('items')}
-      </Field>
+      <div className="t-field">
+        <span>Order items</span>
+        <ItemsEditor lines={f.lines} dishes={dishes} onChange={(lines) => set('lines', lines)} invalid={!!errors.lines} />
+        {err('lines')}
+      </div>
       <Field label="Notes (optional)">
         <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
         {err('notes')}
       </Field>
+      {showAmount && (
+        <Field label="Amount $ (optional, manager only)">
+          <input
+            className="t-input c-amount"
+            inputMode="decimal"
+            placeholder="e.g. 200"
+            value={amount}
+            disabled={payStart === undefined}
+            onChange={(e) => typeAmount(e.target.value)}
+            aria-invalid={!!amountErr}
+            autoComplete="off"
+            data-testid="amount-input"
+          />
+          {amountErr ? <small className="c-err" role="alert">{amountErr}</small> : <small className="c-hint">Not shown on the kitchen tablet.</small>}
+        </Field>
+      )}
 
       {order && (
-        <div className="t-grid2">
+        <div className={onDelete ? 't-grid2' : 't-stack'}>
           {order.status === 'open' ? (
             <button type="button" className="t-btn" disabled={busy} onClick={() => setStatus('completed')}>
               Mark completed
@@ -635,9 +1137,11 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean } }) {
               Reopen
             </button>
           )}
-          <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
-            Delete
-          </button>
+          {onDelete && (
+            <button type="button" className="t-btn danger" onClick={() => onDelete(order)}>
+              Delete
+            </button>
+          )}
         </div>
       )}
       {/* Save stays in view at the bottom of the sheet while the form scrolls. */}

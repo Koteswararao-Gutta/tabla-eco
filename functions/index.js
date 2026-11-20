@@ -9,7 +9,8 @@ import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { checkRequest, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
+import { editAlertFor, kitchenEdit } from './edits.js';
+import { checkRequest, menuNames, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
 import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
 
@@ -25,7 +26,13 @@ export const readOrder = onCall(
     if (problem) throw new HttpsError('invalid-argument', problem);
     try {
       const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value(), maxRetries: 2 });
-      return await readOrderPhoto(client, req.data);
+      // The menu's dish names, so items come back with the same names the order form picks from.
+      // Without it (no menu saved yet, or a read error) items come back as written.
+      const menu = await getFirestore()
+        .doc('toastMenu/current')
+        .get()
+        .then((s) => menuNames(s.data()), () => []);
+      return await readOrderPhoto(client, req.data, menu);
     } catch (e) {
       const kind = readError(e);
       if (kind === 'setup') logger.error(`readOrder: the request was refused, check the model and settings: ${e?.message ?? e}`, e);
@@ -51,12 +58,23 @@ async function scheduleReminder(orderId, order) {
   }
 }
 
-/** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings). */
+/** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings),
+ *  and when the kitchen edited it, tell the phones what changed. */
 export const orderSaved = onDocumentWritten({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
   const after = event.data?.after?.data() ?? null;
   const before = event.data?.before?.data() ?? null;
+  const { orderId } = event.params;
+  const edit = kitchenEdit(before, after);
+  // Retries can repeat this; the tag makes a repeat replace the same alert on the phone.
+  if (edit) {
+    try {
+      await sendToAllDevices(editAlertFor(after, edit), `edit-${orderId}-${edit.at}`);
+    } catch (e) {
+      logger.error('kitchen edit alert failed', e); // never stops the 1-hour reminder below
+    }
+  }
   if (!shouldSchedule(before, after)) return; // nothing that moves the alarm (e.g. only remindedFor changed)
-  await scheduleReminder(event.params.orderId, after);
+  await scheduleReminder(orderId, after);
 });
 
 /** The alarm: re-reads the order and sends the alert to every device that turned alerts on. */

@@ -7,14 +7,15 @@ import { dayLabel, dayStart, monthGrid, ordersByDay, timeLabel } from './orders'
 type Order = WithId<CateringOrder>;
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-export function CalendarSheet(props: { orders: Order[]; now: number; onClose: () => void; onOpen: (o: Order) => void; onNew: (day: number) => void }) {
-  const { orders, now, onClose, onOpen, onNew } = props;
+/** A month of days with each day's order count. Tap a day to pick it. Shared by the manager's
+ *  Calendar sheet and the kitchen tablet's Calendar view. */
+export function MonthCalendar(props: { orders: Order[]; now: number; picked: number; onPick: (day: number) => void }) {
+  const { orders, now, picked, onPick } = props;
   const today = dayStart(now);
   const [month, setMonth] = useState(() => {
     const d = new Date(now);
     return { y: d.getFullYear(), m: d.getMonth() };
   });
-  const [picked, setPicked] = useState(today);
   const byDay = ordersByDay(orders);
   const weeks = monthGrid(month.y, month.m);
   const move = (by: number) => {
@@ -25,59 +26,70 @@ export function CalendarSheet(props: { orders: Order[]; now: number; onClose: ()
   const title = new Date(month.y, month.m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const monthCount = weeks.flat().reduce((n: number, d) => n + (d ? byDay.get(d)?.length ?? 0 : 0), 0);
 
-  const dayOrders = byDay.get(picked) ?? [];
+  return (
+    <>
+      <div className="cal-head">
+        <button className="t-btn cal-nav" aria-label="Previous month" onClick={() => move(-1)}>
+          ‹
+        </button>
+        <div className="cal-title">
+          <b>{title}</b>
+          <span>{monthCount === 0 ? 'No orders' : `${monthCount} order${monthCount === 1 ? '' : 's'}`}</span>
+        </div>
+        <button className="t-btn cal-nav" aria-label="Next month" onClick={() => move(1)}>
+          ›
+        </button>
+      </div>
+      {!thisMonth && (
+        <button
+          className="t-btn ghost cal-today"
+          onClick={() => {
+            const d = new Date(now);
+            setMonth({ y: d.getFullYear(), m: d.getMonth() });
+            onPick(today);
+          }}
+        >
+          Back to today
+        </button>
+      )}
+      <div className="cal-grid" role="grid" aria-label={title}>
+        {WEEKDAYS.map((w, i) => (
+          <span key={i} className="cal-wd" aria-hidden>
+            {w}
+          </span>
+        ))}
+        {weeks.flat().map((d, i) => {
+          if (!d) return <span key={i} />;
+          const list = byDay.get(d) ?? [];
+          const n = list.length;
+          const cls = ['cal-day', d < today ? 'past' : '', d === today ? 'today' : '', d === picked ? 'picked' : '', n >= 3 ? 'busy' : n > 0 ? 'some' : ''].filter(Boolean).join(' ');
+          const label = `${new Date(d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}: ${n === 0 ? 'no orders' : `${n} order${n === 1 ? '' : 's'}`}`;
+          return (
+            <button key={i} className={cls} aria-label={label} aria-pressed={d === picked} onClick={() => onPick(d)}>
+              <span className="cal-num">{new Date(d).getDate()}</span>
+              <span className="cal-count">{n > 0 ? n : ''}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="cal-key">
+        <span className="cal-dot some" /> 1–2 orders <span className="cal-dot busy" /> 3 or more
+      </p>
+    </>
+  );
+}
+
+export function CalendarSheet(props: { orders: Order[]; now: number; onClose: () => void; onOpen: (o: Order) => void; onNew: (day: number) => void }) {
+  const { orders, now, onClose, onOpen, onNew } = props;
+  const today = dayStart(now);
+  const [picked, setPicked] = useState(today);
+  const dayOrders = ordersByDay(orders).get(picked) ?? [];
   const people = dayOrders.reduce((n, o) => n + (o.people ?? 0), 0);
 
   return (
     <Sheet open title="Calendar" onClose={onClose}>
       <div className="cal" data-testid="calendar">
-        <div className="cal-head">
-          <button className="t-btn cal-nav" aria-label="Previous month" onClick={() => move(-1)}>
-            ‹
-          </button>
-          <div className="cal-title">
-            <b>{title}</b>
-            <span>{monthCount === 0 ? 'No orders' : `${monthCount} order${monthCount === 1 ? '' : 's'}`}</span>
-          </div>
-          <button className="t-btn cal-nav" aria-label="Next month" onClick={() => move(1)}>
-            ›
-          </button>
-        </div>
-        {!thisMonth && (
-          <button
-            className="t-btn ghost cal-today"
-            onClick={() => {
-              const d = new Date(now);
-              setMonth({ y: d.getFullYear(), m: d.getMonth() });
-              setPicked(today);
-            }}
-          >
-            Back to today
-          </button>
-        )}
-        <div className="cal-grid" role="grid" aria-label={title}>
-          {WEEKDAYS.map((w, i) => (
-            <span key={i} className="cal-wd" aria-hidden>
-              {w}
-            </span>
-          ))}
-          {weeks.flat().map((d, i) => {
-            if (!d) return <span key={i} />;
-            const list = byDay.get(d) ?? [];
-            const n = list.length;
-            const cls = ['cal-day', d < today ? 'past' : '', d === today ? 'today' : '', d === picked ? 'picked' : '', n >= 3 ? 'busy' : n > 0 ? 'some' : ''].filter(Boolean).join(' ');
-            const label = `${new Date(d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}: ${n === 0 ? 'no orders' : `${n} order${n === 1 ? '' : 's'}`}`;
-            return (
-              <button key={i} className={cls} aria-label={label} aria-pressed={d === picked} onClick={() => setPicked(d)}>
-                <span className="cal-num">{new Date(d).getDate()}</span>
-                <span className="cal-count">{n > 0 ? n : ''}</span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="cal-key">
-          <span className="cal-dot some" /> 1–2 orders <span className="cal-dot busy" /> 3 or more
-        </p>
+        <MonthCalendar orders={orders} now={now} picked={picked} onPick={setPicked} />
 
         <section className="cal-list" aria-label="Orders that day">
           <h3>

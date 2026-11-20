@@ -3,6 +3,7 @@ package com.tabla.tv;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.media.AudioManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -13,12 +14,17 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.print.PrintAttributes;
+import android.print.PrintManager;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -42,6 +48,7 @@ import java.util.regex.Pattern;
  * to pick up updates. Watchdog brings it back to the front if something else is showing.
  * Updater installs newer versions of this app by itself.
  * On the kitchen tablet it also reads the Toast menu once an hour (see ToastReader).
+ * Pages can print (catering name tags) through window.TablaPrint, since a web view has no window.print().
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
@@ -67,6 +74,8 @@ public class MainActivity extends Activity {
     private int backPresses;
     private long firstBackAt;
     private long lastLoadAt;
+    /** True while Android's print screen is open, so the watchdog leaves it alone. */
+    private boolean printing;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -75,6 +84,16 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
             | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 28) {
+            // Use the whole glass, even beside a camera notch, so no black strip shows where the bar was.
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        // Someone swiped the bars into view: hide them again after a moment (some tablets keep them otherwise).
+        getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(flags -> {
+            if ((flags & View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) rehideSoon();
+        });
         String screen = prefs.getString("screen", null);
         if (screen == null) showChooser();
         else showScreen(screen);
@@ -254,6 +273,8 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 21) CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
         web.setWebChromeClient(new WebChromeClient());
+        web.addJavascriptInterface(new PrintBridge(), "TablaPrint");
+        web.addJavascriptInterface(new AlarmBridge(), "TablaAlarm");
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
@@ -278,6 +299,53 @@ public class MainActivity extends Activity {
         if ("kitchen".equals(route)) {
             toast = new ToastReader(this, report -> deliverToast(report, 1));
             toast.start();
+        }
+    }
+
+    /** window.TablaPrint.print(name): opens Android's print screen for the page as it prints (letter paper). */
+    private class PrintBridge {
+        @JavascriptInterface
+        public void print(String jobName) {
+            handler.post(() -> {
+                if (web == null) return;
+                String name = jobName == null || jobName.trim().isEmpty() ? "Tabla" : jobName.trim();
+                try {
+                    PrintManager pm = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                    if (pm == null) return;
+                    printing = true;
+                    Watchdog.quiet(MainActivity.this, true); // the print screen is another app: don't pull Tabla back over it
+                    pm.print(name, web.createPrintDocumentAdapter(name),
+                        new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.NA_LETTER).build());
+                } catch (Exception e) {
+                    printing = false;
+                    Watchdog.quiet(MainActivity.this, false);
+                }
+            });
+        }
+    }
+
+    /** window.TablaAlarm.loud(on): the kitchen's 1-hour alarm turns the volume all the way up while it rings,
+     *  then puts it back to where it was. */
+    private class AlarmBridge {
+        private int before = -1;
+
+        @JavascriptInterface
+        public void loud(boolean on) {
+            handler.post(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am == null) return;
+                    if (on) {
+                        if (before < 0) before = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+                    } else if (before >= 0) {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, before, 0);
+                        before = -1;
+                    }
+                } catch (Exception ignored) {
+                    // Do Not Disturb or a locked volume: the alarm still plays at the current volume.
+                }
+            });
         }
     }
 
@@ -372,22 +440,47 @@ public class MainActivity extends Activity {
         if (hasFocus && web != null) hideBars();
     }
 
+    /** Full screen: no status bar and no navigation bar. A swipe from the edge shows them for a moment only. */
     private void hideBars() {
-        getWindow().getDecorView().setSystemUiVisibility(
+        if (web == null) return; // the screen chooser keeps the bars, so the owner can reach settings
+        handler.removeCallbacks(rehide);
+        View decor = getWindow().getDecorView();
+        decor.setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Android 11+ tablets ignore the old flags above in some cases; this is the current way.
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController c = decor.getWindowInsetsController();
+            if (c != null) {
+                c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        }
+    }
+
+    private final Runnable rehide = this::hideBars;
+
+    private void rehideSoon() {
+        handler.removeCallbacks(rehide);
+        handler.postDelayed(rehide, 2500);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         Watchdog.inFront = true;
+        if (printing) {
+            printing = false; // back from the print screen
+            Watchdog.quiet(this, false);
+        }
         String screen = prefs.getString("screen", null);
         if (web == null && screen != null && !Watchdog.isQuiet(this)) {
             // Chooser left open (e.g. the owner went into settings) and the quiet time is over: back to work.
             showScreen(screen);
         } else if (web != null) {
+            hideBars(); // back from another app, the lock screen or standby
             web.onResume();
             reloadIfStale(); // TV woke from standby after missing the 4 AM reload
         }

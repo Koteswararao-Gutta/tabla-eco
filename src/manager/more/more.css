@@ -1,0 +1,44 @@
+.mo-h2 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.mo-note { margin: 0; color: var(--muted); font-size: 0.92rem; }
+.mo-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
+.mo-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
+.mo-pin { font-size: 1.4rem; letter-spacing: 0.4em; max-width: 180px; }
+.mo-error { margin: 0; color: var(--bad); font-size: 0.92rem; font-weight: 600; }
+.mo-ok { margin: 0; color: var(--good); font-size: 0.92rem; font-weight: 600; }
+.mo-link { display: flex; align-items: center; gap: 12px; min-height: 72px; text-decoration: none; color: var(--ink); }
+.mo-link > span:first-child { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.mo-chev { font-size: 1.6rem; color: var(--muted); }
+.mo-back { display: inline-flex; align-items: center; min-height: var(--tap); color: var(--accent); font-weight: 600; text-decoration: none; }
+
+/* Payments */
+.mo-day { display: flex; align-items: center; gap: 8px; }
+.mo-arrow { width: var(--tap); padding: 0; font-size: 1.5rem; flex: none; }
+.mo-date { position: relative; flex: 1; min-height: var(--tap); display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; font-weight: 650; cursor: pointer; }
+.mo-date input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.mo-longdate { margin: 8px 0 16px; text-align: center; color: var(--muted); font-size: 0.92rem; }
+.mo-empty { color: var(--muted); text-align: center; margin: 32px 0; }
+.mo-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.mo-list li + li { border-top: 1px solid var(--line); }
+.mo-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 14px; text-decoration: none; color: var(--ink); }
+.mo-row:active { background: var(--surface); }
+.mo-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mo-row-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mo-row-time { color: var(--muted); font-size: 0.85rem; }
+.mo-row-amt { font-weight: 650; font-variant-numeric: tabular-nums; }
+.mo-row .t-badge { min-width: 64px; justify-content: center; }
+.mo-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+.mo-totals > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface); }
+.mo-totals span { color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.mo-totals b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.mo-good { color: var(--good); }
+.mo-bad { color: var(--bad); }
+
+/* Statistics */
+.mo-week { cursor: default; }
+.mo-total { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 16px; border-radius: var(--radius); background: var(--surface); }
+.mo-total span { color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.mo-total b { font-size: 2rem; font-variant-numeric: tabular-nums; }
+.mo-total small { color: var(--muted); font-size: 0.85rem; }
+.mo-noamount { margin-top: 12px; text-align: center; }
+.mo-week-list { margin-top: 16px; }
+.mo-row .t-badge { white-space: nowrap; }

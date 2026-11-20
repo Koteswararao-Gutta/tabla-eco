@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { store, updateSingleton, useCollection, useSingleton, type MusicSettings } from '@shared/data';
 import { Field, Segmented } from '@shared/ui';
 import { parseSeconds } from './logic';
+import { CLIP_SECONDS, EVERY_SECONDS } from '../../tv-music/schedule';
+import { parsePlaylistId } from '../../tv-music/playlist';
 import { deletePictureIfUnused, PictureInput, ScreenPage, StoredPicture } from './parts';
 
 const DEFAULTS: MusicSettings = {
@@ -101,8 +103,11 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
   const pictures = useRef(f.clipPictures);
   pictures.current = f.clipPictures;
 
-  const every = parseSeconds(f.everySeconds);
-  const clip = parseSeconds(f.clipSeconds);
+  // The same limits the TV uses, so what is saved is what plays.
+  const within = (n: number | null, r: { min: number; max: number }) => (n != null && n >= r.min && n <= r.max ? n : null);
+  const every = within(parseSeconds(f.everySeconds), { min: EVERY_SECONDS.min, max: 3600 });
+  const clip = within(parseSeconds(f.clipSeconds), CLIP_SECONDS);
+  const notPlaylist = f.playlist.trim() !== '' && !parsePlaylistId(f.playlist.trim());
 
   /** Changes the form and saves the matching stored fields. */
   const set = (patch: Partial<Form>, where: Section, stored: Partial<MusicSettings>, delay = 0) => {
@@ -181,8 +186,10 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
             value={f.playlist}
             onChange={(e) => typed({ playlist: e.target.value }, 'music', { playlist: e.target.value.trim() })}
             onBlur={flush}
+            aria-invalid={notPlaylist}
           />
         </Field>
+        {notPlaylist && <p className="sc-error" role="alert">This is not a playlist link, so no music will play. Open the playlist on YouTube and copy its link (it has "list=" in it).</p>}
         <div className="t-field" role="group" aria-label="Shuffle">
           <span>Shuffle</span>
           <Segmented label="Shuffle" value={f.shuffle ? 'on' : 'off'} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} onChange={(v) => set({ shuffle: v === 'on' }, 'music', { shuffle: v === 'on' })} />
@@ -229,7 +236,9 @@ function MusicForm({ initial }: { initial: MusicSettings }) {
           />
         </Field>
         {(clip == null || (f.clipMode === 'everySeconds' && every == null)) && (
-          <p className="sc-error" role="alert">Seconds must be a whole number from 1 to 3600. This is not saved yet.</p>
+          <p className="sc-error" role="alert">
+            Clip length must be {CLIP_SECONDS.min} to {CLIP_SECONDS.max} seconds{f.clipMode === 'everySeconds' ? `, and the timer ${EVERY_SECONDS.min} to 3600 seconds` : ''}. This is not saved yet.
+          </p>
         )}
         <Field label="Title">
           <input className="t-input" value={f.clipTitle} placeholder="We do catering" onChange={(e) => typed({ clipTitle: e.target.value }, 'clip', { clipTitle: e.target.value.trim() })} onBlur={flush} />

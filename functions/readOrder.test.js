@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildRequest, checkRequest, MODEL, readError, readOrderPhoto } from './readOrder.js';
+import { buildRequest, checkRequest, menuNames, MODEL, readError, readOrderPhoto, ScannedOrder } from './readOrder.js';
 
 const ok = { image: 'A'.repeat(200), mediaType: 'image/jpeg', today: '2026-11-18', weekday: 'Wednesday' };
 
@@ -38,6 +38,25 @@ test('buildRequest sends the photo, today and the form schema to the cheap model
   assert.equal(r.output_config.effort, 'low');
   assert.ok(r.max_tokens >= 8000); // room for thinking plus a long order
   assert.equal(r.temperature, undefined); // Haiku 5.5 refuses non-default sampling
+});
+
+test('buildRequest lists the menu dishes when there is a menu', () => {
+  assert.match(buildRequest(msg, ['Chicken Dum Biryani', 'Raita']).messages[0].content[0].text, /<menu>\nChicken Dum Biryani\nRaita\n<\/menu>/);
+  assert.match(buildRequest(ok, ['Raita']).messages[0].content[1].text, /<menu>\nRaita\n<\/menu>/);
+  assert.doesNotMatch(buildRequest(msg).messages[0].content[0].text, /<menu>/);
+});
+
+test('menuNames lists each dish once, and copes with no menu', () => {
+  const menu = { groups: [{ items: [{ name: 'Raita' }, { name: ' raita ' }, { name: '' }, null] }, { items: [{ name: 'Chicken 65' }] }, null] };
+  assert.deepEqual(menuNames(menu), ['Raita', 'Chicken 65']);
+  assert.deepEqual(menuNames(undefined), []);
+  assert.deepEqual(menuNames({ groups: 'x' }), []);
+});
+
+test('the form schema asks for dish, quantity, unit and note per item', () => {
+  const line = { dish: 'Raita', qty: '2', unit: 'Quarts', note: '', unsure: false };
+  const out = { isOrder: true, customerName: '', phone: '', date: '', time: '', type: 'unknown', address: '', people: '', lines: [line], notes: '', unsure: [] };
+  assert.deepEqual(ScannedOrder.parse(out).lines, [line]);
 });
 
 test('readOrderPhoto returns the parsed form, and fails when there is none', async () => {

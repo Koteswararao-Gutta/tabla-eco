@@ -12,6 +12,11 @@ const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 /** Longest pasted message accepted, in characters. */
 export const MAX_TEXT_CHARS = 8000;
 
+/** The units the order form offers. Keep in step with UNITS in src/manager/catering/lines.ts. */
+export const UNITS = ['Full tray', 'Half tray', 'Pieces', 'Servings', 'Lbs', 'Quarts', 'Gallons', 'Plates'];
+/** Most menu dish names sent along with an order (Tabla's menu has about 200). */
+export const MAX_MENU_NAMES = 400;
+
 export const ScannedOrder = z.object({
   isOrder: z.boolean().describe('false if the photo or message is not a food order at all'),
   customerName: z.string().describe("Customer's name, or empty"),
@@ -21,7 +26,17 @@ export const ScannedOrder = z.object({
   type: z.enum(['pickup', 'delivery', 'unknown']),
   address: z.string().describe('Delivery address, or empty'),
   people: z.string().describe('Number of people or guests as digits only, or empty'),
-  items: z.array(z.string()).describe('One entry per ordered item, with its quantity or size, e.g. "Chicken biryani, 2 large trays"'),
+  lines: z
+    .array(
+      z.object({
+        dish: z.string().describe('The dish: the exact name from the menu list when it clearly is that dish, otherwise as written'),
+        qty: z.string().describe('How many, as digits (e.g. "2" or "1.5"), or empty'),
+        unit: z.string().describe(`One of: ${UNITS.join(', ')}. FT means Full tray and HT means Half tray. Use another word only when none fits, or empty when no unit is written`),
+        note: z.string().describe('Anything written about this one dish, like "extra spicy" or "no onion", or empty'),
+        unsure: z.boolean().describe('true when this item was hard to read or you had to guess the dish, quantity or unit'),
+      }),
+    )
+    .describe('One entry per ordered item'),
   notes: z.string().describe('Anything else written that the kitchen should know, or empty'),
   unsure: z
     .array(z.enum(['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'items', 'notes']))
@@ -34,7 +49,8 @@ Rules:
 - A pasted message may hold a whole chat, greetings or signatures. Use only what describes the order; a name or phone number in a signature counts.
 - Work out relative dates ("tomorrow", "Sat", "12/5") from today's date given below. Dates are US style (month/day).
 - Times like "5", "5pm" or "17:00" become 24-hour HH:MM. A lunch or dinner time with no am/pm is pm unless it reads like a morning time.
-- Keep dish names as written, fixing only obvious spelling slips. Put each item on its own entry with its quantity.
+- Put each item on its own entry, split into dish, quantity, unit and note.
+- When a menu list is given and an item clearly is one of those dishes, use the menu name exactly. Otherwise keep the dish name as written, fixing only obvious spelling slips, and mark the item unsure.
 - Add a field to "unsure" whenever you had to guess or the writing is unclear.`;
 
 /** Checks what the app sent. Returns an error message, or null when it is fine. */
@@ -55,14 +71,31 @@ export function checkRequest(data) {
   return null;
 }
 
-/** The Messages API request for one photo or one pasted message. */
-export function buildRequest({ image, mediaType, text, today, weekday }) {
+/** Dish names from the saved Toast menu (toastMenu/current), once each, for matching what is ordered. */
+export function menuNames(menu) {
+  const seen = new Set();
+  const out = [];
+  for (const g of Array.isArray(menu?.groups) ? menu.groups : []) {
+    for (const i of Array.isArray(g?.items) ? g.items : []) {
+      const name = typeof i?.name === 'string' ? i.name.trim().slice(0, 120) : '';
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out.slice(0, MAX_MENU_NAMES);
+}
+
+/** The Messages API request for one photo or one pasted message. `menu` is the list of dish names (may be empty). */
+export function buildRequest({ image, mediaType, text, today, weekday }, menu = []) {
+  const dishes = menu.length ? `\n\nDishes on our menu:\n<menu>\n${menu.join('\n')}\n</menu>` : '';
   const content =
     typeof text === 'string'
-      ? [{ type: 'text', text: `Today is ${weekday}, ${today}. Copy this catering order message into the form.\n\n<message>\n${text.trim()}\n</message>` }]
+      ? [{ type: 'text', text: `Today is ${weekday}, ${today}. Copy this catering order message into the form.${dishes}\n\n<message>\n${text.trim()}\n</message>` }]
       : [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
-          { type: 'text', text: `Today is ${weekday}, ${today}. Copy this catering order into the form.` },
+          { type: 'text', text: `Today is ${weekday}, ${today}. Copy this catering order into the form.${dishes}` },
         ];
   return {
     model: MODEL,
@@ -74,9 +107,9 @@ export function buildRequest({ image, mediaType, text, today, weekday }) {
   };
 }
 
-/** Reads one photo or message. `client` is an Anthropic client. */
-export async function readOrderPhoto(client, data) {
-  const res = await client.messages.parse(buildRequest(data));
+/** Reads one photo or message. `client` is an Anthropic client; `menu` the dish names. */
+export async function readOrderPhoto(client, data, menu = []) {
+  const res = await client.messages.parse(buildRequest(data, menu));
   if (!res.parsed_output) {
     const e = new Error(`No order in the reply (stop reason ${res.stop_reason})`);
     e.unreadable = true;

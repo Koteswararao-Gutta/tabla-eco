@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, telHref, validate, NAME_MAX } from './orders';
+import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -74,7 +75,8 @@ describe('grouping', () => {
 });
 
 describe('form', () => {
-  const good = { ...emptyForm(NOW), customerName: ' Priya ', phone: '555 123 4567', time: '17:30', items: 'Biryani\n\n  Raita  \n', people: '40' };
+  const row = (name: string, qty = '', unit = '', note = '') => ({ dishId: null, name, qty, unit, note });
+  const good = { ...emptyForm(NOW), customerName: ' Priya ', phone: '555 123 4567', time: '17:30', lines: [row('Biryani'), row(''), row('  Raita  ')], people: '40' };
 
   it('turns date and time inputs into local ms', () => {
     expect(fromInputs('2026-11-18', '17:30')).toBe(at(18, 17, 30));
@@ -83,13 +85,35 @@ describe('form', () => {
   it('accepts a good form and builds clean fields', () => {
     expect(validate(good)).toEqual({});
     const f = orderFields(good);
-    expect(f).toEqual({ customerName: 'Priya', phone: '555 123 4567', dueAt: at(18, 17, 30), type: 'pickup', items: 'Biryani\nRaita', people: 40 });
+    expect(f).toEqual({
+      customerName: 'Priya', phone: '555 123 4567', dueAt: at(18, 17, 30), type: 'pickup', items: 'Biryani\nRaita', people: 40,
+      lines: [{ dishId: null, name: 'Biryani', qty: null, unit: '', note: '' }, { dishId: null, name: 'Raita', qty: null, unit: '', note: '' }],
+    });
     expect(Object.values(f)).not.toContain(undefined);
     expect('address' in f).toBe(false);
   });
   it('requires the main fields', () => {
     const e = validate(emptyForm(NOW));
-    expect(Object.keys(e).sort()).toEqual(['customerName', 'items', 'phone', 'time']);
+    expect(Object.keys(e).sort()).toEqual(['customerName', 'lines', 'phone', 'time']);
+  });
+  it('saves dish, quantity, unit and note, and the items as text', () => {
+    const f = orderFields({ ...good, lines: [{ ...row('Chicken Dum Biryani', '2', 'Full tray', 'extra spicy'), dishId: 'g1' }, row('Gulab Jamun', '40', 'Pieces'), row('Raita', '1', 'Quarts')] });
+    expect(f.lines[0]).toEqual({ dishId: 'g1', name: 'Chicken Dum Biryani', qty: 2, unit: 'Full tray', note: 'extra spicy' });
+    expect(f.items).toBe('Chicken Dum Biryani, 2 Full trays (extra spicy)\nGulab Jamun, 40 pieces\nRaita, 1 quart');
+  });
+  it('checks quantities and rows with no dish', () => {
+    expect(validate({ ...good, lines: [row('Rice', 'two')] }).lines).toMatch(/quantity of item 1/);
+    expect(validate({ ...good, lines: [row('Rice', '0')] }).lines).toMatch(/quantity/);
+    expect(validate({ ...good, lines: [row('Rice', '1.5')] }).lines).toBeUndefined();
+    expect(validate({ ...good, lines: [row('Rice'), row('', '3')] }).lines).toMatch(/Item 2 has no dish/);
+  });
+  it('keeps an untouched old line exactly as typed, so saving changes nothing', () => {
+    const o = order(at(19, 12, 0), { items: 'Chicken dum biryani, 2 large trays\nGarlic naan, 30' });
+    const form = formFromOrder(o);
+    expect(form.lines[0]).toMatchObject({ name: 'Chicken Dum Biryani', qty: '2', unit: 'Full tray', text: 'Chicken dum biryani, 2 large trays' });
+    const f = orderFields(form);
+    expect(f.items).toBe(o.items);
+    expect(describeChanges(o, { ...o, ...f })).toEqual([]);
   });
   it('requires an address for delivery only', () => {
     expect(validate({ ...good, type: 'delivery' }).address).toMatch(/address/);
@@ -106,7 +130,7 @@ describe('form', () => {
   });
   it('round-trips an order through the form', () => {
     const o = order(at(19, 12, 0), { type: 'delivery', address: 'X', people: 25, notes: 'N' });
-    expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N' });
+    expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N', lines: [{ dishId: null, name: 'Rice', qty: null, unit: '', note: '', text: 'Rice' }] });
   });
 });
 
@@ -119,7 +143,8 @@ describe('formFromScan', () => {
 
   it('fills every field it can and keeps the AI flags', () => {
     const { form, unsure } = formFromScan(scan, base);
-    expect(form).toMatchObject({ customerName: 'Meera Iyer', date: '2026-11-19', time: '18:30', type: 'delivery', address: '12 Palm St', people: '40', items: 'Veg biryani, 2 trays\nNaan, 30', notes: '' });
+    expect(form).toMatchObject({ customerName: 'Meera Iyer', date: '2026-11-19', time: '18:30', type: 'delivery', address: '12 Palm St', people: '40', notes: '' });
+    expect(form.lines.map((l) => [l.name, l.qty, l.unit])).toEqual([['Veg Biryani', '2', 'Full tray'], ['Naan', '30', '']]);
     expect(unsure).toEqual(['phone']);
     expect(validate(form)).toEqual({});
   });
@@ -130,8 +155,28 @@ describe('formFromScan', () => {
     expect(form.time).toBe('');
     expect(form.type).toBe('pickup');
     expect(form.people).toBe('');
-    expect(form.items).toBe('');
+    expect(form.lines).toEqual(base.lines);
     expect(unsure).toEqual(['phone', 'date', 'type']);
+  });
+});
+
+describe('formFromScan with structured lines', () => {
+  const dishes = [{ id: 'g1', name: 'Chicken Dum Biryani', group: 'Biryani', description: '' }, { id: 'g2', name: 'Gulab Jamun', group: 'Desserts', description: '' }];
+  const scan: ScannedOrder = {
+    isOrder: true, customerName: 'Meera', phone: '555 404 1212', date: '2026-11-19', time: '18:30', type: 'pickup', address: '', people: '', notes: '', unsure: [],
+    lines: [
+      { dish: 'Chicken Dum Biryani', qty: '2', unit: 'FT', note: 'mild', unsure: false },
+      { dish: 'gulab jamun', qty: '40', unit: 'pcs', note: '', unsure: true },
+      { dish: 'Kaju Katli', qty: '', unit: '', note: '', unsure: false },
+    ],
+  };
+  it('matches menu dishes, makes units standard and marks rows to check', () => {
+    const { form } = formFromScan(scan, emptyForm(NOW), dishes);
+    expect(form.lines).toEqual([
+      { dishId: 'g1', name: 'Chicken Dum Biryani', qty: '2', unit: 'Full tray', note: 'mild' },
+      { dishId: 'g2', name: 'Gulab Jamun', qty: '40', unit: 'Pieces', note: '', check: true },
+      { dishId: null, name: 'Kaju Katli', qty: '', unit: '', note: '', check: true },
+    ]);
   });
 });
 
@@ -186,5 +231,99 @@ describe('validate: name length', () => {
     const f = { ...emptyForm(at(18, 12), undefined), customerName: 'A'.repeat(NAME_MAX + 1) };
     expect(validate(f).customerName).toBe(`Please shorten the name to ${NAME_MAX} letters or fewer.`);
     expect(validate({ ...f, customerName: 'A'.repeat(NAME_MAX) }).customerName).toBeUndefined();
+  });
+});
+
+describe('shareText / whatsappHref', () => {
+  const due = new Date(2026, 10, 20, 17, 30).getTime(); // Fri, Nov 20, 5:30 PM
+  const base = { customerName: 'Anika Wedding', dueAt: due, items: 'Chicken biryani, 4 trays\n\n  Garlic naan, 150 ', people: 120 };
+
+  it('writes a delivery order with every part', () => {
+    const text = shareText({ ...base, type: 'delivery', address: '48 Lake View Rd', notes: 'Set up by 1 PM' }, 'New catering order');
+    expect(text).toBe(
+      '*New catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nDelivery: 48 Lake View Rd\n120 people\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Set up by 1 PM',
+    );
+  });
+
+  it('leaves out what is empty', () => {
+    const text = shareText({ ...base, type: 'pickup', people: null, notes: '  ' });
+    expect(text).toBe('*Catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nPickup\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150');
+  });
+
+  it('makes a wa.me link with the message encoded', () => {
+    expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
+  });
+});
+
+describe('edit history', () => {
+  const base = order(at(20, 17), { customerName: 'Sharma', items: '20 samosas\nChicken biryani, 2 trays', notes: '', people: 30 });
+  it('says what changed in plain words', () => {
+    const after = { ...base, dueAt: at(21, 18, 30), items: '25 samosas\nChicken biryani, 2 trays\nRaita', people: 40, notes: 'Extra spicy' };
+    expect(describeChanges(base, after)).toEqual([
+      'Date: Fri, Nov 20 → Sat, Nov 21',
+      'Time: 5:00 PM → 6:30 PM',
+      'People: 30 → 40',
+      'Items: 20 samosas → 25 samosas',
+      'Item added: Raita',
+      'Notes: (none) → Extra spicy',
+    ]);
+  });
+  it('is empty when nothing changed, and ignores spacing', () => {
+    expect(describeChanges(base, { ...base, items: ' 20 samosas \n\nChicken biryani, 2 trays', notes: '  ' })).toEqual([]);
+  });
+  it('covers pickup/delivery, address, name, phone and removed items', () => {
+    const after = { ...base, customerName: 'R Sharma', phone: '555 000 1111', type: 'delivery' as const, address: '1 Main St', items: '20 samosas' };
+    expect(describeChanges(base, after)).toEqual([
+      'Name: Sharma → R Sharma',
+      'Phone: 555 123 4567 → 555 000 1111',
+      'Pickup → Delivery',
+      'Address: (none) → 1 Main St',
+      'Item removed: Chicken biryani, 2 trays',
+    ]);
+  });
+  it('keeps the latest edits only', () => {
+    let h = withEdit(undefined, { at: 0, by: 'manager', changes: ['a'] });
+    for (let i = 1; i <= HISTORY_MAX + 5; i++) h = withEdit(h, { at: i, by: 'kitchen', changes: ['b'] });
+    expect(h).toHaveLength(HISTORY_MAX);
+    expect(lastEdit({ history: h })?.at).toBe(HISTORY_MAX + 5);
+    expect(lastEdit({})).toBeNull();
+  });
+});
+
+import { amountError, amountInput, amountLabel, parseAmount } from './orders';
+
+describe('order amount (manager only)', () => {
+  it('reads what was typed', () => {
+    expect(parseAmount('')).toBeNull();
+    expect(parseAmount('  ')).toBeNull();
+    expect(parseAmount('200')).toBe(200);
+    expect(parseAmount('$200')).toBe(200);
+    expect(parseAmount('1,250.50')).toBe(1250.5);
+    expect(parseAmount('$ 99.9')).toBe(99.9);
+    expect(parseAmount('.5')).toBe(0.5);
+    expect(parseAmount('0')).toBe(0);
+  });
+  it('rejects text that is not an amount', () => {
+    for (const bad of ['abc', '20 dollars', '-5', '1.234', '2e3', '1.2.3', '2000000']) expect(Number.isNaN(parseAmount(bad))).toBe(true);
+    expect(amountError('abc')).toMatch(/amount like 200/);
+    expect(amountError('')).toBe('');
+    expect(amountError('200')).toBe('');
+  });
+  it('shows it as dollars', () => {
+    expect(amountLabel(200)).toBe('$200');
+    expect(amountLabel(1250.5)).toBe('$1,250.50');
+    expect(amountLabel(null)).toBe('');
+    expect(amountLabel(undefined)).toBe('');
+    expect(amountInput(200)).toBe('200');
+    expect(amountInput(200.5)).toBe('200.50');
+    expect(amountInput(null)).toBe('');
+  });
+  it('never reaches the kitchen, the WhatsApp message or the change history', () => {
+    // The amount isn't an order field: an order with an amount stored elsewhere shares and diffs the same.
+    const o = order(NOW, { items: 'Rice' });
+    const withExtra = { ...o, amount: 200 } as CateringOrder;
+    expect(shareText(withExtra)).not.toMatch(/\$|200/);
+    expect(describeChanges(o, withExtra)).toEqual([]);
+    expect(Object.keys(orderFields(formFromOrder(withExtra)))).not.toContain('amount');
   });
 });

@@ -33,7 +33,7 @@ function Home() {
   ];
   return (
     <main className="t-page">
-      <PageHeader title="Tabla" sub="Open each screen in its own Chrome window. Changes in the manager app show on the others within seconds." />
+      <PageHeader logo title="Tabla" sub="Open each screen in its own Chrome window. Changes in the manager app show on the others within seconds." />
       <div className="t-stack">
         {links.map(([to, label]) => (
           <a key={to} className="t-btn block" href={'#' + to} target="_blank" rel="noreferrer">

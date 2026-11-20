@@ -32,7 +32,9 @@ service cloud.firestore {
         && (!('items' in d) || (d.items is string && d.items.size() <= 20000))
         && (!('type' in d) || d.type in ['pickup', 'delivery'])
         && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number)
-        && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number);
+        && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number)
+        && (!('history' in d) || (d.history is list && d.history.size() <= 50))
+        && (!('lines' in d) || (d.lines is list && d.lines.size() <= 300));
     }
     function orderHasMain(d) { return d.keys().hasAll(['customerName', 'dueAt', 'status', 'items']); }
     match /orders/{id} {
@@ -40,6 +42,25 @@ service cloud.firestore {
       allow create: if signedIn() && small() && orderHasMain(request.resource.data) && orderTypes(request.resource.data);
       allow update: if signedIn() && small() && orderTypes(request.resource.data);
       allow delete: if signedIn();
+    }
+    // What a catering order costs, by order id. Shown only in the manager app: the kitchen screen never
+    // loads this collection. (With anonymous sign-in the rules can't tell the two apps apart, so this keeps
+    // it off the kitchen tablet rather than locking it.) The app's store adds the doc `id` to every save.
+    match /orderAmounts/{id} {
+      allow read, delete: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id'])
+        && (!('paid' in request.resource.data) || request.resource.data.paid is bool)
+        && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is number)
+        && (!('method' in request.resource.data) || request.resource.data.method == null
+            || request.resource.data.method in ['cash', 'card', 'zelle', 'check'])
+        && (!('takenBy' in request.resource.data) || request.resource.data.takenBy == null
+            || (request.resource.data.takenBy is string && request.resource.data.takenBy.size() <= 80))
+        && (!('deposits' in request.resource.data)
+            || (request.resource.data.deposits is list && request.resource.data.deposits.size() <= 20))
+        && (!('amount' in request.resource.data) || request.resource.data.amount == null
+            || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
+        && request.resource.data.updatedAt is number;
     }
     match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }

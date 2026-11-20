@@ -1,15 +1,25 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ScreenSurface } from '@shared/ui';
+import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, groupByDayUpcomingFirst, isSoon, itemLines, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, EDITED_BY_LABEL, groupByDayUpcomingFirst, isSoon, itemLines, lastEdit, timeLabel } from '../manager/catering/orders';
+import { EditHistory, EditOrderSheet, ItemList } from '../manager/catering';
+import { orderLines } from '../manager/catering/lines';
+import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
-import { CHIME_REPEAT_MS, ackKey, ackPatch, chime, dueReminders, onSoundChange, soundIsOn, wakeAudio, type KitchenOrder } from './reminder';
+import { useBrowserFullscreen } from './fullscreen';
+import { KitchenNotice } from './notice';
+import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
+import { Alarm } from './Alarm';
+import { PrepView } from './Prep';
+import { CalendarView, DayGroups } from './views';
 import './kitchen.css';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
+/** Two taps on an order card this close together complete it; one tap opens its options. */
+export const DOUBLE_TAP_MS = 350;
 /** "Show all orders" goes back to the open orders after this long with no touch. */
 export const ALL_ORDERS_IDLE_MS = 3 * 60_000;
 /** Remembered on this tablet only (not synced): a fingerprint of the PIN it was unlocked with. */
@@ -17,7 +27,8 @@ const UNLOCK_KEY = 'kitchenUnlock';
 
 export default function Kitchen() {
   useHeartbeat('kitchen');
-  useToastBridge();
+  const toastError = useToastBridge();
+  useBrowserFullscreen();
   const pin = expectedPin(useSingleton('settings'));
   // Stays unlocked through reloads and restarts, until someone taps Lock or the manager changes the PIN.
   const [saved, setSaved] = useState(() => deviceValue(UNLOCK_KEY));
@@ -39,9 +50,11 @@ export default function Kitchen() {
 
   const orders = useCollection('orders');
   const now = useNow(15_000);
-  // The heads-up runs on every kitchen view, locked or not. Its chime lives here, so locking or
-  // unlocking never replays it or restarts the 45 s repeat.
-  const reminders = useHeadsUp(orders, now);
+  // The heads-up runs on every kitchen view, locked or not. Its alarm lives here, so locking or
+  // unlocking never restarts it. It rings only while the kitchen is staffed (staff schedule hours).
+  const staff = useSingleton('staffConfig');
+  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
+  const alarmOn = reminders.length > 0 && staffedAt(now, staff);
   const banner = <HeadsUp reminders={reminders} now={now} />;
   const soundNote = useSoundOn() ? null : (
     <span className="k-sound" role="status">
@@ -61,31 +74,14 @@ export default function Kitchen() {
             <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
           </div>
         )}
+        <KitchenNotice ordersLoaded={orders !== null} toastError={toastError} />
+        <Alarm reminders={reminders} now={now} on={alarmOn} />
       </div>
     </ScreenSurface>
   );
 }
 
 // ---------- 1-hour heads-up ----------
-
-/** Orders whose 1-hour heads-up is due, with a chime when a new one appears and again every 45 s
- *  until "Got it". Rings only while the kitchen is staffed (staff schedule hours); waits for those to load. */
-function useHeadsUp(orders: Order[] | null, now: number): KitchenOrder[] {
-  const staff = useSingleton('staffConfig');
-  const reminders = staff === undefined ? [] : dueReminders(orders ?? [], now, staff);
-  const remindIds = reminders.map(ackKey).join(',');
-  const chimed = useRef(new Set<string>());
-  useEffect(() => {
-    const fresh = reminders.filter((o) => !chimed.current.has(ackKey(o)));
-    fresh.forEach((o) => chimed.current.add(ackKey(o)));
-    if (fresh.length) chime();
-    if (!remindIds) return;
-    const t = setInterval(chime, CHIME_REPEAT_MS);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remindIds]);
-  return reminders;
-}
 
 /** False while the browser keeps sound off (until someone taps the screen). */
 function useSoundOn(): boolean {
@@ -99,7 +95,7 @@ function useSoundOn(): boolean {
   return on;
 }
 
-/** One banner row per due heads-up. "Got it" needs no PIN. */
+/** One banner row per due heads-up (under the alarm, and on its own after hours). "Got it" needs no PIN. */
 function HeadsUp({ reminders, now }: { reminders: KitchenOrder[]; now: number }) {
   // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet. No PIN needed.
   const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
@@ -179,37 +175,36 @@ function PinScreen({ pin, note, onUnlock }: { pin: string; note: ReactNode; onUn
 
 // ---------- orders ----------
 
-function useOnline(): boolean {
-  const [online, setOnline] = useState(() => navigator.onLine);
-  useEffect(() => {
-    const up = () => setOnline(true);
-    const down = () => setOnline(false);
-    window.addEventListener('online', up);
-    window.addEventListener('offline', down);
-    return () => {
-      window.removeEventListener('online', up);
-      window.removeEventListener('offline', down);
-    };
-  }, []);
-  return online;
-}
-
 function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; now: number; banner: ReactNode; note: ReactNode; onLock: () => void }) {
-  const online = useOnline();
   const [showAll, setShowAll] = useState(false);
+  const [view, setView] = useState<'list' | 'calendar' | 'prep'>('list');
+  const away = showAll || view !== 'list';
+  const backToList = () => {
+    setShowAll(false);
+    setView('list');
+  };
   const board = useRef<HTMLDivElement>(null);
+  // The top bar's height, for views that keep something stuck just under it (Prep's day picker).
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => board.current?.style.setProperty('--k-bar-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Each view opens at its top, not at the other view's scroll position.
   useEffect(() => {
     const root = board.current?.closest('.k-root');
     if (root) root.scrollTop = 0;
-  }, [showAll]);
-  // Left on "Show all orders"? After 3 minutes with no touch, back to the open orders.
+  }, [showAll, view]);
+  // Left on "Show all orders" or the calendar? After 3 minutes with no touch, back to the open orders list.
   useEffect(() => {
-    if (!showAll) return;
-    let t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+    if (!away) return;
+    let t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
     const touched = () => {
       clearTimeout(t);
-      t = setTimeout(() => setShowAll(false), ALL_ORDERS_IDLE_MS);
+      t = setTimeout(backToList, ALL_ORDERS_IDLE_MS);
     };
     const events = ['pointerdown', 'keydown', 'wheel', 'scroll'];
     events.forEach((e) => window.addEventListener(e, touched, true));
@@ -217,7 +212,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
       clearTimeout(t);
       events.forEach((e) => window.removeEventListener(e, touched, true));
     };
-  }, [showAll]);
+  }, [away]);
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -228,36 +223,58 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
     return store.updateDoc('orders', o.id, { status, completedAt: status === 'completed' ? t : null, updatedAt: t });
   };
 
-  const complete = async (o: Order) => {
-    await setStatus(o, 'completed');
+  const showUndo = (o: Order) => {
     clearTimeout(timer.current);
     setUndo({ id: o.id, name: o.customerName });
     timer.current = setTimeout(() => setUndo(null), UNDO_MS);
   };
+  // Undo shows at once: offline on the live app the save only confirms when the internet is back, but the
+  // card is already gone from the list, so waiting would hide Undo until then.
+  const complete = (o: Order) => {
+    showUndo(o);
+    setStatus(o, 'completed').catch(() => setUndo(null));
+  };
+
+  // "Edit" on a card: the order is read from the live list, so a change made elsewhere shows at once;
+  // if it is deleted elsewhere, the sheet closes.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editOrder = editing ? orders?.find((o) => o.id === editing) ?? null : null;
+  const [tagsFor, setTagsFor] = useState<Order | null>(null);
+  // One tap on a card: its options (complete, edit, print tags). Read live, so it closes if the order goes.
+  const [optionsFor, setOptionsFor] = useState<string | null>(null);
+  const optionsOrder = optionsFor ? orders?.find((o) => o.id === optionsFor && o.status === 'open') ?? null : null;
 
   const undoComplete = async () => {
     const o = undo && orders?.find((x) => x.id === undo.id);
     clearTimeout(timer.current);
     setUndo(null);
-    if (o) await setStatus(o, 'open');
+    if (o) setStatus(o, 'open').catch(() => {});
   };
 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
   return (
     <div className="k-board" ref={board}>
-      <header className="k-bar">
+      <header className="k-bar" ref={bar}>
         <div className="k-bar-title">
-          <h1>{showAll ? 'All orders' : 'Open orders'}</h1>
-          {!showAll && orders && <span className="k-count">{open.length}</span>}
-          {!online && (
-            <span className="t-badge bad k-offline" role="status">
-              Offline: showing the last saved orders
-            </span>
-          )}
+          <Logo className="k-logo" />
+          <h1>{showAll ? 'All orders' : view === 'calendar' ? 'Calendar' : view === 'prep' ? 'Prep' : 'Open orders'}</h1>
+          {!showAll && view === 'list' && orders && <span className="k-count">{open.length}</span>}
           {note}
         </div>
         <span className="k-clock">{timeLabel(now)}</span>
+        {!showAll && (
+          <Segmented
+            label="View"
+            value={view}
+            options={[
+              { value: 'list', label: 'List' },
+              { value: 'calendar', label: 'Calendar' },
+              { value: 'prep', label: 'Prep' },
+            ]}
+            onChange={setView}
+          />
+        )}
         {showAll ? (
           <button className="t-btn primary k-bar-btn" onClick={() => setShowAll(false)}>
             ← Back to open orders
@@ -275,6 +292,10 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
 
       {!orders ? null : showAll ? (
         <AllOrders orders={orders} now={now} onReopen={(o) => setStatus(o, 'open')} />
+      ) : view === 'prep' ? (
+        <PrepView orders={orders} now={now} />
+      ) : view === 'calendar' ? (
+        <CalendarView orders={orders} now={now} onOpen={(o) => setOptionsFor(o.id)} />
       ) : open.length === 0 ? (
         <div className="t-empty k-empty">
           No open orders right now.
@@ -282,12 +303,30 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           New orders from the manager show up here by themselves.
         </div>
       ) : (
-        <div className="k-grid">
-          {open.map((o) => (
-            <OrderCard key={o.id} order={o} now={now} onComplete={() => complete(o)} />
-          ))}
-        </div>
+        <DayGroups orders={open} now={now} card={(o) => <OrderCard key={o.id} order={o} now={now} onTap={() => setOptionsFor(o.id)} onDoubleTap={() => complete(o)} />} />
       )}
+
+      {optionsOrder && (
+        <OrderOptions
+          order={optionsOrder}
+          now={now}
+          onClose={() => setOptionsFor(null)}
+          onComplete={() => {
+            setOptionsFor(null);
+            complete(optionsOrder);
+          }}
+          onEdit={() => {
+            setOptionsFor(null);
+            setEditing(optionsOrder.id);
+          }}
+          onTags={() => {
+            setOptionsFor(null);
+            setTagsFor(optionsOrder);
+          }}
+        />
+      )}
+      {tagsFor && <TagsSheet order={tagsFor} now={now} onClose={() => setTagsFor(null)} />}
+      {editOrder && <EditOrderSheet key={editOrder.id} order={editOrder} now={now} by="kitchen" onClose={() => setEditing(null)} onCompleted={showUndo} />}
 
       {undo && (
         <div className="k-undo" role="status">
@@ -303,11 +342,47 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   );
 }
 
-function OrderCard({ order: o, now, onComplete }: { order: Order; now: number; onComplete: () => void }) {
+/** One tap opens the order's options; a double tap marks it completed (Undo shows after). */
+function useTaps(onTap: () => void, onDoubleTap: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const taps = useRef({ onTap, onDoubleTap });
+  taps.current = { onTap, onDoubleTap };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, a')) return; // "Changed by…" has its own tap
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      taps.current.onDoubleTap();
+      return;
+    }
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      taps.current.onTap();
+    }, DOUBLE_TAP_MS);
+  };
+}
+
+function OrderCard({ order: o, now, onTap, onDoubleTap }: { order: Order; now: number; onTap: () => void; onDoubleTap: () => void }) {
   const cd = countdown(o.dueAt, now);
   const day = dayLabel(o.dueAt, now);
+  const last = lastEdit(o);
+  const [showChanges, setShowChanges] = useState(false);
+  const tap = useTaps(onTap, onDoubleTap);
   return (
-    <article className={'k-card' + (isSoon(o, now) ? ' soon' : '')} data-testid="kitchen-order" aria-label={`Order for ${o.customerName}`}>
+    <article
+      className={'k-card k-tappable' + (isSoon(o, now) ? ' soon' : '')}
+      data-testid="kitchen-order"
+      aria-label={`Order for ${o.customerName}`}
+      tabIndex={0}
+      onClick={tap}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onTap();
+        }
+      }}
+    >
       <div className="k-card-top">
         <div>
           <div className="k-due">{timeLabel(o.dueAt)}</div>
@@ -326,18 +401,44 @@ function OrderCard({ order: o, now, onComplete }: { order: Order; now: number; o
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
 
-      <ul className="k-items">
-        {itemLines(o.items).map((l, i) => (
-          <li key={i}>{l}</li>
-        ))}
-      </ul>
+      <ItemList lines={orderLines(o)} className="k-items" />
 
       {o.notes && <p className="k-notes">{o.notes}</p>}
 
-      <button className="t-btn primary block k-done" onClick={onComplete}>
-        Mark completed
-      </button>
+      {last && (
+        <button className="k-changed" aria-expanded={showChanges} onClick={() => setShowChanges(!showChanges)}>
+          ✎ Changed by {EDITED_BY_LABEL[last.by] ?? 'someone'}, {dayLabel(last.at, now) === 'Today' ? '' : `${dayLabel(last.at, now)} `}
+          {timeLabel(last.at)}
+          <span className="k-changed-more">{showChanges ? 'Hide' : 'See changes'}</span>
+        </button>
+      )}
+      {last && showChanges && <EditHistory history={o.history} now={now} />}
+
+      <p className="k-tap-hint">Tap for options · Double-tap to complete</p>
     </article>
+  );
+}
+
+function OrderOptions(props: { order: Order; now: number; onClose: () => void; onComplete: () => void; onEdit: () => void; onTags: () => void }) {
+  const o = props.order;
+  return (
+    <Sheet open title={o.customerName} onClose={props.onClose}>
+      <p className="k-opt-when">
+        {dayLabel(o.dueAt, props.now)}, {timeLabel(o.dueAt)} · {o.type === 'delivery' ? 'Delivery' : 'Pickup'}
+      </p>
+      <button type="button" className="t-btn primary block k-opt" onClick={props.onComplete}>
+        ✓ Mark completed
+      </button>
+      <button type="button" className="t-btn block k-opt" onClick={props.onEdit}>
+        Edit order
+      </button>
+      <button type="button" className="t-btn block k-opt" onClick={props.onTags}>
+        🏷️ Print name tags
+      </button>
+      <button type="button" className="t-btn ghost block k-opt" onClick={props.onClose}>
+        Close
+      </button>
+    </Sheet>
   );
 }
 
