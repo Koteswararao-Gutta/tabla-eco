@@ -108,9 +108,30 @@ export interface OrderLine {
 export interface OrderAmount {
   /** US dollars, e.g. 200 or 1250.5. null when cleared. */
   amount: number | null;
-  /** Whether the customer has paid. Missing on amounts saved before this was added: treat as not paid. */
+  /** Whether the customer has paid in full. Missing on amounts saved before this was added: treat as not paid. */
   paid?: boolean;
+  /** When it was marked paid (store time). null or missing while not paid. */
+  paidAt?: number | null;
+  /** How the customer paid the rest. null or missing while not paid (and on older paid orders). */
+  method?: PayMethod | null;
+  /** Staff name of who took the payment, from the Staff tab. null or missing while not paid. */
+  takenBy?: string | null;
+  /** Part payments (advances) taken before the order is paid in full, oldest first. Missing when none. */
+  deposits?: Deposit[];
   updatedAt: number;
+}
+
+export type PayMethod = 'cash' | 'card' | 'zelle' | 'check';
+
+/** A part payment (advance) on a catering order. Manager only, kept in orderAmounts. */
+export interface Deposit {
+  /** US dollars, more than 0. */
+  amount: number;
+  method: PayMethod;
+  /** Staff name of who took it. */
+  takenBy: string;
+  /** When it was recorded (store time). */
+  at: number;
 }
 
 /** Which device saved an edit: the kitchen tablet or the manager phone app. */

@@ -458,11 +458,3 @@ export function amountLabel(amount: number | null | undefined): string {
   const cents = !Number.isInteger(amount);
   return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 });
 }
-
-/** For a manager order card: "$200 · Paid", "$200 · Not paid", "Paid"; '' when there's no amount and it isn't paid. */
-export function payLabel(pay: { amount: number | null; paid: boolean } | null | undefined): string {
-  if (!pay) return '';
-  const amount = amountLabel(pay.amount);
-  if (pay.paid) return amount ? `${amount} · Paid` : 'Paid';
-  return amount ? `${amount} · Not paid` : '';
-}

@@ -72,7 +72,9 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   // Manager list shows the sample orders.
   await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
   await expect(manager.getByText('Priya Sharma')).toBeVisible();
-  await expect(manager.getByText('Rahul Verma')).toHaveCount(0); // completed: only in History
+  // Completed but not paid: it stays, in "Done, not paid" only (and in History).
+  await expect(manager.getByText('Rahul Verma')).toHaveCount(1);
+  await expect(manager.getByRole('region', { name: 'Done, not paid' }).getByText('Rahul Verma')).toBeVisible();
   await shot(manager, 'manager-list');
 
   // Kitchen: PIN first. Wrong PIN is rejected, 1234 unlocks.
@@ -1131,19 +1133,23 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await details.getByRole('button', { name: 'Edit' }).click();
   const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
   await expect(mEdit.getByLabel('Amount $ (optional, manager only)')).toHaveValue('1250.50');
-  await expect(mEdit.getByRole('button', { name: 'Not paid' })).toHaveAttribute('aria-pressed', 'true');
   await mEdit.getByLabel('Amount $ (optional, manager only)').fill('200');
-  await mEdit.getByRole('button', { name: 'Paid', exact: true }).click();
-  await mEdit.getByRole('button', { name: 'Paid', exact: true }).scrollIntoViewIfNeeded();
-  await manager.waitForTimeout(300);
-  await shot(manager, 'manager-edit-paid');
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
+  await expect(mCard).toContainText('$200 · Not paid');
+  // Marked paid from the order's summary (how and who are asked for).
+  await mCard.click();
+  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  const pay = manager.getByRole('dialog', { name: 'Mark paid' });
+  await pay.getByRole('button', { name: 'Cash' }).click();
+  await pay.getByLabel('Taken by').selectOption('Siri');
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(details.getByTestId('order-amount')).toContainText('✓ Paid');
+  await details.getByRole('button', { name: 'Close' }).click();
   await expect(mCard).toContainText('$200 · Paid');
   const paidNow = await readCollection<{ id: string; amount: number | null; paid?: boolean }>(manager, 'orderAmounts');
-  expect(paidNow.find((a) => a.id === o.id)).toMatchObject({ amount: 200, paid: true });
+  expect(paidNow.find((a) => a.id === o.id)).toMatchObject({ amount: 200, paid: true, method: 'cash', takenBy: 'Siri' });
   await mCard.click();
-  await expect(details.getByTestId('order-amount')).toContainText('✓ Paid');
   await manager.waitForTimeout(400);
   await shot(manager, 'manager-order-paid-details');
   await details.getByRole('button', { name: 'Close' }).click();
@@ -1159,11 +1165,96 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await mCard.click();
   await details.getByRole('button', { name: 'Edit' }).click();
   await mEdit.getByLabel('Amount $ (optional, manager only)').fill('');
-  await mEdit.getByRole('button', { name: 'Not paid' }).click();
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
+  await mCard.click();
+  await details.getByTestId('paid-row').getByRole('button', { name: 'Undo' }).click();
+  await details.getByRole('button', { name: 'Tap to undo' }).click();
+  await expect(details.getByTestId('payments')).toHaveCount(0);
+  await details.getByRole('button', { name: 'Close' }).click();
   await expect(mCard).not.toContainText('$');
   await expect(mCard).not.toContainText('aid');
+  await context.close();
+});
+
+test('mark paid: finished orders stay until paid, Unpaid count, deposits and who took it', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.setViewportSize({ width: 390, height: 844 });
+  const kitchen = await openScreen(context, '/kitchen');
+  await kitchen.setViewportSize({ width: 1280, height: 800 });
+  await typePin(kitchen, '1234');
+
+  // The sample's finished order (Rahul Verma) isn't paid: it stays in the list, and Unpaid counts it.
+  const filter = manager.getByTestId('unpaid-filter');
+  await expect(filter).toContainText('Unpaid1');
+  const notPaid = manager.getByRole('region', { name: 'Done, not paid' });
+  const card = notPaid.getByRole('button', { name: /Rahul Verma/ });
+  await expect(card).toContainText('Not paid');
+  await shot(manager, 'manager-unpaid-in-list');
+
+  // Set the amount, then take a $100 deposit.
+  await card.click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await details.getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await edit.getByLabel('Amount $ (optional, manager only)').fill('300');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await card.click();
+  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  const pay = manager.getByRole('dialog', { name: 'Mark paid' });
+  await expect(pay.getByTestId('pay-totals')).toContainText('$300');
+  await pay.getByRole('button', { name: 'Deposit' }).click();
+  // Nothing chosen yet: each missing box says so.
+  await pay.getByRole('button', { name: 'Save deposit' }).click();
+  await expect(pay).toContainText('Please enter how much they paid.');
+  await expect(pay).toContainText('Please choose how they paid.');
+  await expect(pay).toContainText('Please choose who took the payment.');
+  await pay.getByTestId('deposit-input').fill('300');
+  await expect(pay).toContainText('whole balance');
+  await pay.getByTestId('deposit-input').fill('100');
+  await pay.getByRole('button', { name: 'Zelle' }).click();
+  await pay.getByLabel('Taken by').selectOption('Tarun');
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-mark-paid-deposit');
+  await pay.getByRole('button', { name: 'Save deposit' }).click();
+  await expect(details.getByTestId('payments')).toContainText('Deposit $100 · Zelle · Tarun');
+  await expect(details.getByTestId('still-owed')).toContainText('$200 still owed');
+  await expect(details.getByTestId('order-amount')).toContainText('$200 owed');
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-order-deposit-details');
+  await details.getByRole('button', { name: 'Close' }).click();
+  await expect(card).toContainText('$300 · $200 owed');
+
+  // The Unpaid view lists it with what's owed.
+  await filter.click();
+  await expect(manager.getByTestId('unpaid-list')).toContainText('1 finished order not paid · $200 still owed');
+  await shot(manager, 'manager-unpaid-filter');
+
+  // Paid in full: card, Siri took it. Saved with the time; it leaves the Unpaid list and the count goes.
+  await manager.getByTestId('unpaid-list').getByRole('button', { name: /Rahul Verma/ }).click();
+  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  await expect(pay.getByRole('button', { name: 'Paid in full ($200)' })).toHaveAttribute('aria-pressed', 'true');
+  await pay.getByRole('button', { name: 'Card' }).click();
+  await pay.getByLabel('Taken by').selectOption('Siri');
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(details.getByTestId('paid-row')).toContainText('✓ Paid in full · Card · Siri');
+  await expect(details.getByRole('button', { name: '💵 Mark paid' })).toHaveCount(0);
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-order-paid-full');
+  await details.getByRole('button', { name: 'Close' }).click();
+  await expect(manager.getByTestId('unpaid-list')).toContainText('Nothing to collect');
+  await expect(filter).toHaveText('Unpaid');
+  const saved = (await readCollection<Record<string, unknown>>(manager, 'orderAmounts'))[0];
+  expect(saved).toMatchObject({ amount: 300, paid: true, method: 'card', takenBy: 'Siri', deposits: [{ amount: 100, method: 'zelle', takenBy: 'Tarun' }] });
+  expect(typeof saved.paidAt).toBe('number');
+  // Nothing about payments is on the order (the kitchen loads orders only).
+  for (const o of await readCollection<CateringOrder>(manager, 'orders')) expect(JSON.stringify(o)).not.toMatch(/Zelle|zelle|paid|Siri|Tarun/);
+  await kitchen.getByRole('button', { name: /Show all orders/ }).click();
+  await expect(kitchen.getByText('Rahul Verma').first()).toBeVisible();
+  await expect(kitchen.locator('body')).not.toContainText('Zelle');
+  await expect(kitchen.locator('body')).not.toContainText('owed');
+  await expect(kitchen.locator('body')).not.toContainText('paid');
   await context.close();
 });
 

@@ -49,9 +49,16 @@ service cloud.firestore {
     match /orderAmounts/{id} {
       allow read, delete: if signedIn();
       allow create, update: if signedIn()
-        && request.resource.data.keys().hasOnly(['amount', 'paid', 'updatedAt', 'id'])
+        && request.resource.data.keys().hasOnly(['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id'])
         && (!('paid' in request.resource.data) || request.resource.data.paid is bool)
-        && (request.resource.data.amount == null
+        && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is number)
+        && (!('method' in request.resource.data) || request.resource.data.method == null
+            || request.resource.data.method in ['cash', 'card', 'zelle', 'check'])
+        && (!('takenBy' in request.resource.data) || request.resource.data.takenBy == null
+            || (request.resource.data.takenBy is string && request.resource.data.takenBy.size() <= 80))
+        && (!('deposits' in request.resource.data)
+            || (request.resource.data.deposits is list && request.resource.data.deposits.size() <= 20))
+        && (!('amount' in request.resource.data) || request.resource.data.amount == null
             || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
         && request.resource.data.updatedAt is number;
     }
