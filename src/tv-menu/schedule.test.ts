@@ -38,6 +38,18 @@ describe('targetFor', () => {
     expect(t).toMatchObject({ slotId: 'b', pictureId: null, key: 'b|' });
   });
 
+  it('a spot with only a TV 3 picture never shows on TV 1 / TV 2', () => {
+    const own: Screen[] = screens.map((s) => (s.id === 'tv3' ? { ...s, mirrorOf: null } : s));
+    const withThree = [...slots, slot('c', 3, 10, { pictures: { tv3: 'c3' } })];
+    // TV 1 / TV 2 loop is a (10 s) + b (5 s): at 15 s they are back on a
+    expect(targetFor(withThree, own, null, 'tv1', base + 15_000).slotId).toBe('a');
+    // TV 3 / TV 4 loop is a + b + c (25 s); at a 25 s cycle start TV 3 shows a, falling back to TV 1's picture
+    const b3 = 25_000 * 1000;
+    expect(targetFor(withThree, own, null, 'tv3', b3)).toMatchObject({ slotId: 'a', pictureId: 'a1' });
+    expect(targetFor(withThree, own, null, 'tv3', b3 + 15_000)).toMatchObject({ slotId: 'c', pictureId: 'c3' });
+    expect(targetFor(withThree, own, null, 'tv4', b3 + 15_000)).toMatchObject({ slotId: 'c', pictureId: null });
+  });
+
   it('nothing playing gives an empty target', () => {
     expect(targetFor([], screens, null, 'tv1', base)).toMatchObject({ key: 'none', slotId: null, pictureId: null });
   });

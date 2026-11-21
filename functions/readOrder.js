@@ -141,3 +141,32 @@ export function readError(e) {
   if (status === undefined && /Failed to parse structured output/.test(message)) return 'unreadable';
   return 'unavailable';
 }
+
+// ---------- daily limit ----------
+
+/** Most photos or messages read in one day (restaurant time). Each read costs a little; this caps the bill. */
+export const DAILY_LIMIT = 50;
+export const LIMIT_REACHED = 'Daily limit reached. Please type the order in.';
+
+/** The restaurant's date (America/Phoenix) as yyyy-mm-dd: the day the counter belongs to. */
+export function usageDay(now) {
+  return new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+}
+
+/** The counter document for that day (server only; the rules let no device touch `usage`). */
+export const usageDoc = (now) => `usage/readOrder-${usageDay(now)}`;
+
+/**
+ * Counts one read in a transaction. Returns false (and counts nothing) when the day's limit is used up.
+ * `db` is a Firestore (admin) instance.
+ */
+export async function takeDailyRead(db, now, limit = DAILY_LIMIT) {
+  const ref = db.doc(usageDoc(now));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const count = snap.exists ? Number(snap.get('count')) || 0 : 0;
+    if (count >= limit) return false;
+    tx.set(ref, { count: count + 1, day: usageDay(now), updatedAt: now });
+    return true;
+  });
+}

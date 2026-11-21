@@ -70,8 +70,8 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 ## Updates
 
 - **Menus, pictures, music, orders:** change them in the Manager app; the screens show them right away.
-- **The web app:** updates by itself. Each screen reloads once a night after 4 AM (or as soon as it is on again).
-- **The screen app (`tabla.apk`):** updates itself. A few times a day it checks for a newer version and installs it; the screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?": press **Install** with the remote (if nobody does, it asks again the next day). The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
+- **The web app:** updates by itself. The kitchen tablet picks up a new version within a few minutes when nobody is using it; phones when the app is opened again; TVs reload once a night after 4 AM (or as soon as they are on again).
+- **The screen app (`tabla.apk`):** updates itself. TVs and the kitchen tablet install a new version only between 3 and 5 AM, so leave them on overnight; phones may update any time. The screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?" at that time; nobody is there to press **Install**, so it asks again the next night. To update such a screen during the day, download and install `tabla.apk` again the same way as the first time. The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
 - Copies installed before automatic updates existed (versions below 1.1000) must be updated by hand once: download and install again the same way. If Android says the app "conflicts" with an installed one (only for an early test copy), uninstall Tabla first, then install and choose the screen again.
 
 ## 24-hour test before opening day

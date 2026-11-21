@@ -30,3 +30,14 @@ describe('paymentsOn', () => {
     expect(day).toMatchObject({ paidTotal: 200, unpaidTotal: 300 });
   });
 });
+
+describe('paymentsOn with deposits', () => {
+  it('counts deposits that add up to the amount as paid, not part paid', () => {
+    const o = [order('a', at(20, 12))];
+    const a = [{ id: 'a', amount: 300, deposits: [{ amount: 100, method: 'cash', takenBy: 'X', at: 1 }, { amount: 200, method: 'card', takenBy: 'X', at: 2 }], updatedAt: 0 } as WithId<OrderAmount>];
+    const day = paymentsOn(o, a, at(20, 9));
+    expect(day.rows[0].status).toBe('paid');
+    expect(day.rows[0].paid).toBe(true);
+    expect([day.paidTotal, day.unpaidTotal]).toEqual([300, 0]);
+  });
+});

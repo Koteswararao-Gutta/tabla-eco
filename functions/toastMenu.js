@@ -79,28 +79,6 @@ export function readReport(data) {
  * `prev` is the last status (or null). Alerts once per outage, after ALERT_AFTER_MS, and once when it works again.
  */
 export function nextStatus(prev, result, now) {
-  const settled = settleKilled(prev);
-  const next = nextAfter(settled.status, result, now);
-  // A killed try just alerted and this one worked: the two cancel out.
-  if (settled.alert && next.alert) return { status: next.status, alert: null };
-  return { status: next.status, alert: settled.alert ?? next.alert };
-}
-
-/** The last try started (startedAt) but never saved how it went: it was stopped (time limit, memory). */
-export function wasKilled(prev) {
-  return typeof prev?.startedAt === 'number' && prev.startedAt > (prev.lastTryAt ?? 0);
-}
-
-export const KILLED_ERROR = 'The last try was stopped before it finished (time limit).';
-
-/** Counts a killed last try as a failed one, at the time it started. Leaves any other status as it is. */
-export function settleKilled(prev) {
-  if (!wasKilled(prev)) return { status: prev ?? null, alert: null };
-  const { status, alert } = nextAfter(prev, { ok: false, error: KILLED_ERROR }, prev.startedAt);
-  return { status: { ...status, startedAt: prev.startedAt }, alert };
-}
-
-function nextAfter(prev, result, now) {
   if (result.ok) {
     return {
       status: { lastTryAt: now, lastOkAt: now, source: result.source, lastError: null, failingSince: null, alerted: false },

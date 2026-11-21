@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildRequest, checkRequest, menuNames, MODEL, readError, readOrderPhoto, ScannedOrder } from './readOrder.js';
+import { buildRequest, checkRequest, DAILY_LIMIT, LIMIT_REACHED, menuNames, MODEL, readError, readOrderPhoto, ScannedOrder, takeDailyRead, usageDay, usageDoc } from './readOrder.js';
 
 const ok = { image: 'A'.repeat(200), mediaType: 'image/jpeg', today: '2026-11-18', weekday: 'Wednesday' };
 
@@ -82,4 +82,35 @@ test('readError tells a photo that cannot be read from a service that is down', 
   assert.equal(readError(Object.assign(new Error('rate'), { status: 429 })), 'unavailable');
   assert.equal(readError(new Error('Connection error.')), 'unavailable');
   assert.equal(readError(undefined), 'unavailable');
+});
+
+test('usageDay is the restaurant date (Phoenix), not UTC', () => {
+  // 11 PM Phoenix on Nov 21 is already Nov 22 in UTC.
+  assert.equal(usageDay(Date.UTC(2026, 10, 22, 6, 0)), '2026-11-21');
+  assert.equal(usageDay(Date.UTC(2026, 10, 22, 7, 0)), '2026-11-22');
+  assert.equal(usageDoc(Date.UTC(2026, 10, 22, 7, 0)), 'usage/readOrder-2026-11-22');
+});
+
+/** A tiny in-memory stand-in for the admin Firestore: doc() and runTransaction() only. */
+function fakeDb() {
+  const docs = new Map();
+  return {
+    docs,
+    doc: (path) => ({ path }),
+    runTransaction: async (fn) =>
+      fn({
+        get: async (ref) => ({ exists: docs.has(ref.path), get: (k) => docs.get(ref.path)?.[k] }),
+        set: (ref, data) => docs.set(ref.path, data),
+      }),
+  };
+}
+
+test('takeDailyRead allows DAILY_LIMIT reads a day, then refuses; a new day starts again', async () => {
+  const db = fakeDb();
+  const day1 = Date.UTC(2026, 10, 21, 18, 0);
+  for (let i = 0; i < DAILY_LIMIT; i++) assert.equal(await takeDailyRead(db, day1), true);
+  assert.equal(await takeDailyRead(db, day1), false);
+  assert.equal(db.docs.get(usageDoc(day1)).count, DAILY_LIMIT); // a refused read is not counted
+  assert.equal(await takeDailyRead(db, day1 + 24 * 60 * 60_000), true);
+  assert.match(LIMIT_REACHED, /Daily limit reached\. Please type the order in\./);
 });

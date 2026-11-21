@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Calendar;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,11 +42,23 @@ public class Updater extends BroadcastReceiver {
         return true; // older Android: the "Unknown sources" setting used for the first install covers it
     }
 
-    /** Checks at most every 6 hours; does nothing while a check or install is running. */
+    /** TVs and the kitchen tablet install updates only between these hours (local time), never during service. */
+    static final int QUIET_FROM_HOUR = 3;
+    static final int QUIET_TO_HOUR = 5;
+
+    /** True when an update may install now: any time on a front or manager phone, 3 to 5 AM on TVs and the tablet. */
+    static boolean goodTime(String screen, int hourOfDay) {
+        if (screen != null && (screen.startsWith("manager") || screen.startsWith("front"))) return true;
+        return hourOfDay >= QUIET_FROM_HOUR && hourOfDay < QUIET_TO_HOUR;
+    }
+
+    /** Checks at most every 6 hours; does nothing while a check or install is running.
+     *  MainActivity calls this every 30 minutes, so TVs and the tablet get their turn between 3 and 5 AM. */
     static void checkSoon(Context context) {
         Context app = context.getApplicationContext();
         SharedPreferences p = prefs(app);
         long now = System.currentTimeMillis();
+        if (!goodTime(p.getString("screen", null), Calendar.getInstance().get(Calendar.HOUR_OF_DAY))) return;
         if (busy || now - p.getLong("updateCheckedAt", 0) < EVERY_MS) return;
         if (Build.VERSION.SDK_INT < 21 || !allowed(app)) return;
         busy = true;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { balance, depositError, depositTotal, NO_PAY, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, isPaid, NO_PAY, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 
 const dep = (amount: number) => ({ amount, method: 'cash' as const, takenBy: 'Siri', at: 1 });
 const pay = (p: Partial<Pay>): Pay => ({ ...NO_PAY, ...p });
@@ -30,7 +30,7 @@ describe('balance', () => {
 describe('payLabel', () => {
   it('labels the card', () => {
     expect(payLabel({ amount: 200, paid: true })).toBe('$200 · Paid');
-    expect(payLabel({ amount: 200, paid: false })).toBe('$200 · Not paid');
+    expect(payLabel({ amount: 200, paid: false })).toBe('$200 · Unpaid');
     expect(payLabel({ amount: null, paid: true })).toBe('Paid');
     expect(payLabel({ amount: null, paid: false })).toBe('');
     expect(payLabel(undefined)).toBe('');
@@ -44,7 +44,7 @@ describe('depositError', () => {
   it('needs an amount below what is still owed', () => {
     expect(depositError('', p)).toMatch(/how much/);
     expect(depositError('0', p)).toMatch(/how much/);
-    expect(depositError('abc', p)).toMatch(/like 200/);
+    expect(depositError('abc', p)).toMatch(/like 100 or 100.50/);
     expect(depositError('250', p)).toMatch(/more than the \$200/);
     expect(depositError('200', p)).toMatch(/whole balance/);
     expect(depositError('$150.50', p)).toBe('');
@@ -76,5 +76,26 @@ describe('unpaidDone', () => {
   });
   it('waits while payments load', () => {
     expect(unpaidDone(orders, () => undefined)).toBeNull();
+  });
+});
+
+describe('deposits that add up to the full amount', () => {
+  const full = pay({ amount: 300, deposits: [dep(100), dep(200)] });
+  it('count as paid', () => {
+    expect(isPaid(full)).toBe(true);
+    expect(isPaid(pay({ amount: 300, deposits: [dep(100)] }))).toBe(false);
+    expect(isPaid(pay({ amount: null, deposits: [dep(100)] }))).toBe(false);
+    expect(isPaid(pay({ amount: 0 }))).toBe(false);
+    expect(payLabel(full)).toBe('$300 · Paid');
+  });
+  it('are not in the Unpaid list', () => {
+    const orders = [{ id: 'a', status: 'completed', dueAt: 1 }];
+    expect(unpaidDone(orders, () => full)).toEqual([]);
+  });
+});
+
+describe('depositError wording', () => {
+  it('asks for an amount like 100 without "leave it empty"', () => {
+    expect(depositError('abc', pay({ amount: 300 }))).toBe('Please enter an amount like 100 or 100.50.');
   });
 });

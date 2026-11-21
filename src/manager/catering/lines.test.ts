@@ -136,3 +136,35 @@ describe('mixed quantities (1½ trays)', () => {
     expect(qtyValue('abc')).toBeNaN();
   });
 });
+
+describe('review fixes', () => {
+  it('saved lines with "1 1/2" or "½" in a note or name read back as saved', () => {
+    const lines = [
+      { dishId: 'b1', name: 'Chicken Dum Biryani', qty: 2, unit: 'Full tray', note: 'cut 1 1/2 inch' },
+      { dishId: null, name: 'Paneer ½ Tikka', qty: 1, unit: 'Half tray', note: '' },
+      { dishId: null, name: 'Raita', qty: 0.5, unit: 'Full tray', note: '', extra: 'Raita' },
+    ];
+    const items = lines.map(lineText).join('\n');
+    expect(items).toBe('Chicken Dum Biryani, 2 Full trays (cut 1-1/2 inch)\nPaneer 1/2 Tikka, 1 Half tray\nRaita, 1/2 Full tray (extra)');
+    expect(orderLines({ items, lines }, dishes)).toBe(lines);
+  });
+
+  it('a dish with its own number in brackets reads the amount, not the number', () => {
+    const d = menuDishes({ groups: [{ id: 's', name: 'Starters', items: [{ id: 's', name: 'Samosa (2)' }] }] });
+    expect(parseLine('Samosa (2) 40 pcs', d).line).toMatchObject({ dishId: 's', qty: 40, unit: 'Pieces' });
+    expect(parseLine('Samosa (2) 40 pcs', d).sure).toBe(true);
+    expect(parseLine('Samosa (2) 40 pcs').line).toMatchObject({ qty: 40, unit: 'Pieces' });
+  });
+
+  it('reads the dish without "for N people", "+ 1 HT", a count or caps', () => {
+    const read = (l: string) => { const { name, qty, unit } = parseLine(l).line; return [name, qty, unit]; };
+    expect(read('Chicken Biryani for 50 people')).toEqual(['Chicken Biryani', 50, 'Servings']);
+    expect(read('Chicken biryani 2 FT + 1 HT')).toEqual(['Chicken Biryani', 2, 'Full tray']);
+    expect(parseLine('Chicken biryani 2 FT + 1 HT').sure).toBe(false);
+    expect(read('Gulab Jamun 100')).toEqual(['Gulab Jamun', 100, '']);
+    expect(read('7 Up 24 cans')).toEqual(['7 Up', 24, 'Cans']);
+    expect(read('CHICKEN 65, 2 half trays')).toEqual(['Chicken 65', 2, 'Half tray']);
+    expect(read('Gobi 65')).toEqual(['Gobi 65', null, '']);
+    expect(read('40 samosas')).toEqual(['Samosas', 40, '']);
+  });
+});

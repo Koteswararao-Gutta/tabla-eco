@@ -65,9 +65,9 @@ export function guessDiet(name: string, toast: ToastItem | null): Diet {
   return 'veg';
 }
 
-/** One tag per dish of the order, in order, without repeats: just the dish, never the quantity, unit or the
- *  line's note (notes like "extra spicy" are for the kitchen). The menu dish, when the line has one, gives
- *  the name and veg or non-veg. */
+/** One tag per dish of the order, in order, without repeats ("Samosa" and "Samosas" are one): just the dish,
+ *  never the quantity or unit. The line's note goes under the name ("Bone-in"), unless it is for the kitchen
+ *  ("extra spicy"). The menu dish, when the line has one, gives the name and veg or non-veg. */
 export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines'>>, menu?: ToastMenu | null): NameTag[] {
   const dishes = menuDishes(menu);
   const seen = new Set<string>();
@@ -76,10 +76,10 @@ export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines
     const menuDish = dishById(line.dishId, dishes);
     // The menu's name when the line is a menu dish; else the name typed (an old order's line: without its amount).
     const raw = menuDish?.name ?? (line.dishId ? line.name : line.text ? dishFromLine(line.text).name : line.name);
-    const fromText = !menuDish && !line.dishId && line.text ? dishFromLine(line.text).sub : '';
+    const note = (line.extra ? '' : line.note.trim()) || (!menuDish && !line.dishId && line.text ? dishFromLine(line.text).sub : '');
     const { name, sub: nameSub, mark } = tagName(raw);
-    const sub = nameSub || (fromText && !KITCHEN_NOTE.test(fromText) ? fromText : '');
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const sub = nameSub || (note && !KITCHEN_NOTE.test(note) && !PORTION.test(note) && !MARKER.test(note) ? tidyCase(note) : '');
+    const key = name.toLowerCase().split(/[^a-z0-9]+/).map((w) => (w.length > 3 ? w.replace(/s$/, '') : w)).join('');
     if (!name || seen.has(key)) continue;
     seen.add(key);
     const dish = menuDish ?? findDish(raw, dishes) ?? findDish(name, dishes);
@@ -102,5 +102,13 @@ export function nameSize(name: string): '' | 'long' | 'xlong' {
   if (name.length > 22 || longestWord > 12) return 'long';
   return '';
 }
+
+/** About the most a tag's two lines hold at the smallest size (capitals are wider); a longer name is cut
+ *  short when printed. Checked by eye on the printed sheet: 56 plain letters fit, 60 often don't. */
+export const TAG_NAME_FITS = 58;
+export const tooLong = (name: string) => {
+  const t = name.trim();
+  return t.length + 0.3 * (t.match(/[A-Z]/g) ?? []).length > TAG_NAME_FITS;
+};
 
 export const DIET_LABEL: Record<Diet, string> = { veg: 'Vegetarian', nonveg: 'Non-vegetarian' };

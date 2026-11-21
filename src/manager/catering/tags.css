@@ -14,6 +14,7 @@
 .nt-row-name { flex: 1; min-width: 0; font-weight: 600; font-size: 1.02rem; }
 .nt-row-del { flex: none; width: var(--tap); padding: 0; color: var(--muted); }
 .nt-row-sub { color: var(--muted); font-size: 0.88rem; padding: 0 2px; }
+.nt-row-warn { color: var(--warn); font-size: 0.88rem; font-weight: 600; padding: 0 2px; }
 
 /* ---------- the printed sheets ---------- */
 .nt-print {

@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
-import { PARTNER, pictureFor } from '@shared/clock/loop';
+import { MAIN_OF, PARTNER, loopSlots, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
 import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
 import { useAppBase, useAppMode } from '../mode';
@@ -52,7 +52,7 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
       {mirrorSrc && !front && (
         <Switch
           label={`Mirror ${screenName(mirrorSrc)}`}
-          sub={mirroring ? `Shows the same pictures as ${screenName(mirrorSrc)}` : 'Shows its own pictures'}
+          sub={mirroring ? `Shows the same pictures as ${screenName(mirrorSrc)}` : `Shows ${screenName(mirrorSrc)}'s pictures until you add its own`}
           on={mirroring}
           onChange={(on) => store.updateDoc('screens', tv, { mirrorOf: on ? mirrorSrc : null })}
         />
@@ -82,9 +82,11 @@ type Open =
 function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slots: S[]; screens: Screen[]; now: number; readOnly?: boolean }) {
   const [open, setOpen] = useState<Open>(null);
   const close = () => setOpen(null);
-  const sorted = sortSlots(slots);
+  // Only the spots this TV plays: TV 1 and TV 2 never list spots that exist only on TV 3 / TV 4.
+  const sorted = sortSlots(loopSlots(slots, tv, screens));
   const name = screenName(tv);
   const partner = PARTNER[tv];
+  const main = MAIN_OF[tv];
   const find = (id: string) => sorted.find((s) => s.id === id);
 
   if (!sorted.length) {
@@ -117,7 +119,11 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           const badges = (
             <>
               {kind !== 'menu' && <span className="t-badge accent">{kind === 'special' ? 'Special' : 'Catering'}</span>}
-              {shared && partner && <span className="t-badge">Shared with {screenName(partner)}</span>}
+              {shared && main && shown === slot.pictures[main] ? (
+                <span className="t-badge">Same as {screenName(main)}</span>
+              ) : (
+                shared && partner && <span className="t-badge">Shared with {screenName(partner)}</span>
+              )}
             </>
           );
           return (
@@ -211,9 +217,10 @@ const KINDS: { value: Kind; label: string }[] = [
 function addHint(tv: ScreenId, kind: Kind): string {
   const partner = PARTNER[tv];
   const other = partner ? screenName(partner) : 'The other TV';
-  return kind === 'menu'
+  const mainsSame = MAIN_OF[tv] ? ' TV 1 and TV 2 don\'t change.' : '';
+  return (kind === 'menu'
     ? `${screenName(tv)} shows it right away, then in this spot in the loop. ${other} shows the restaurant name in this spot until you add its picture.`
-    : `It shows right away, then in this spot in the loop. ${other} shows it too until you add a picture for ${other}.`;
+    : `It shows right away, then in this spot in the loop. ${other} shows it too until you add a picture for ${other}.`) + mainsSame;
 }
 
 /** Seconds and "Change with", each on its own full row (the same in every sheet). */
@@ -313,7 +320,7 @@ function FillSheet({ tv, sorted, slot, replace, onClose }: { tv: ScreenId; sorte
   );
 }
 
-const ALL_TVS_NOTE = 'Seconds and change are shared by all front TVs (TV 1 to TV 4) for this spot, because they change pictures together.';
+const ALL_TVS_NOTE = 'Order, seconds and change are shared by TV 1 to TV 4.';
 
 function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
   const [seconds, setSeconds] = useState(String(slot.seconds));
@@ -340,37 +347,35 @@ function TimingSheet({ slot, onClose }: { slot: S; onClose: () => void }) {
 
 function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: ScreenId; sorted: S[]; slot: S; screens: Screen[]; onClose: () => void; onReplace: () => void }) {
   const [confirm, setConfirm] = useState(false);
-  const [seconds, setSeconds] = useState(String(slot.seconds));
-  const [transition, setTransition] = useState<Transition>(slot.transition ?? 'fade');
   const [ends, setEnds] = useState(slot.endsAt != null ? toLocalInput(slot.endsAt) : '');
   const { busy, error, setError, run } = useSaver();
   const index = sorted.findIndex((s) => s.id === slot.id);
   const own = slot.pictures[tv];
   const name = screenName(tv);
   const partner = PARTNER[tv];
+  const main = MAIN_OF[tv];
   const kind = slot.kind ?? 'menu';
   // Menu pictures never end (the Add sheet doesn't offer it); an old end date can still be cleared.
   const showEnds = kind !== 'menu' || slot.endsAt != null;
 
-  const secs = parseSeconds(seconds);
   const endsMs = ends ? fromLocalInput(ends) : null;
-  const dirty = seconds.trim() !== String(slot.seconds) || transition !== (slot.transition ?? 'fade') || (endsMs ?? null) !== (slot.endsAt ?? null);
+  const dirty = (endsMs ?? null) !== (slot.endsAt ?? null);
 
-  /** Moves this picture to position `to` (0 = top), then restarts the loop once so every TV shows the new order. */
+  /** Moves this picture to position `to` (0 = top): all order changes are saved together, then the loop
+   *  restarts once, so the TVs never show a half-moved order. */
   const move = (to: number) =>
     run(async () => {
       const changed = moveSlotTo(sorted, index, to);
       if (!changed.length) return;
-      for (const s of changed) await updateSlot(s.id, { order: s.order });
+      await Promise.all(changed.map((s) => updateSlot(s.id, { order: s.order })));
       await restartLoop(slot.id);
     });
   const first = index <= 0;
   const last = index >= sorted.length - 1;
   const save = () => {
-    if (secs == null) return setError(SECONDS_ERROR);
     if (ends && endsMs == null) return setError('That end date is not a valid date.');
     run(async () => {
-      await updateSlot(slot.id, { seconds: secs, transition, endsAt: endsMs });
+      await updateSlot(slot.id, { endsAt: endsMs });
       await restartLoop(slot.id);
       onClose();
     });
@@ -391,7 +396,11 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
     return (
       <Sheet open title={`Remove this picture from ${name}?`} onClose={onClose}>
         <p className="sc-note">
-          {lastOne ? 'No other TV uses this spot, so it leaves the loop.' : `${partner ? screenName(partner) : 'The other TV'} keeps its picture in this spot.`}
+          {lastOne
+            ? 'No other TV uses this spot, so it leaves the loop.'
+            : main && slot.pictures[main]
+              ? `${name} shows ${screenName(main)}'s picture here again.`
+              : `${partner ? screenName(partner) : 'The other TV'} keeps its picture in this spot.`}
         </p>
         {error && <p className="sc-error" role="alert">{error}</p>}
         <SheetEnd label={busy ? 'Removing…' : 'Remove picture'} primary="sc-danger-solid" onSave={remove} onCancel={() => setConfirm(false)} cancel="Keep it" disabled={busy} />
@@ -410,17 +419,14 @@ function OptionsSheet({ tv, sorted, slot, screens, onClose, onReplace }: { tv: S
         <div className="t-grid2">
           <button className="t-btn" onClick={() => move(index - 1)} disabled={busy || first}>Move up</button>
           <button className="t-btn" onClick={() => move(index + 1)} disabled={busy || last}>Move down</button>
-          <button className="t-btn" onClick={() => move(0)} disabled={busy || first}>Move to top</button>
-          <button className="t-btn" onClick={() => move(sorted.length - 1)} disabled={busy || last}>Move to bottom</button>
         </div>
         {own && (
           <button className="t-btn block danger" onClick={() => setConfirm(true)}>Remove from {name}</button>
         )}
       </div>
-      <hr className="sc-rule" />
-      <TimingFields seconds={seconds} setSeconds={setSeconds} transition={transition} setTransition={setTransition} invalid={secs == null} testId="options-seconds" />
       {showEnds && (
         <>
+          <hr className="sc-rule" />
           <Field label="Stop showing after (optional)">
             <input className="t-input sc-when" type="datetime-local" value={ends} onChange={(e) => setEnds(e.target.value)} data-testid="ends-input" />
           </Field>

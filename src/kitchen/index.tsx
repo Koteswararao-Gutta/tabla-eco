@@ -2,16 +2,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
-import { byDueAsc, countdown, dayLabel, isSoon, showsCountdown, timeLabel } from '../manager/catering/orders';
+import { byDueAsc, countdown, dayLabel, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
-import { Address } from '../manager/catering/Address';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
 import { useBrowserFullscreen } from './fullscreen';
 import { KitchenNotice } from './notice';
-import { ackPatch, dueReminders, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
+import { ackPatch, dueReminders, whenText, onSoundChange, soundIsOn, staffedAt, wakeAudio, type KitchenOrder } from './reminder';
 import { Alarm } from './Alarm';
 import { PrepView } from './Prep';
 import { CalendarView, DayGroups, OrderDetails } from './views';
@@ -49,7 +48,7 @@ export default function Kitchen() {
     };
   }, []);
 
-  const orders = useCollection('orders');
+  const orders = useCollection('orders', 'openOrRecent');
   const now = useNow(15_000);
   // The heads-up runs on every kitchen view, locked or not. Its alarm lives here, so locking or
   // unlocking never restarts it. It rings only while the kitchen is staffed (staff schedule hours).
@@ -67,15 +66,20 @@ export default function Kitchen() {
     // ScreenSurface keeps the screen awake; .k-root turns it into a light page.
     <ScreenSurface testId="kitchen">
       <div className="k-root">
+        {/* In the page flow above everything, so it never covers the top bar. */}
+        <KitchenNotice ordersLoaded={orders !== null} />
         {pin === undefined ? null : unlocked ? (
           <Board orders={orders} now={now} banner={banner} note={soundNote} onLock={() => remember(null)} />
         ) : (
           <div className={'k-lock' + (reminders.length ? ' has-remind' : '')}>
-            {reminders.length > 0 && <div className="k-remind-over">{banner}</div>}
+            {reminders.length > 0 && (
+              <div className="k-remind-over">
+                <HeadsUp reminders={reminders} now={now} max={LOCKED_MAX} />
+              </div>
+            )}
             <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
           </div>
         )}
-        <KitchenNotice ordersLoaded={orders !== null} />
         <Alarm reminders={reminders} now={now} on={alarmOn} />
       </div>
     </ScreenSurface>
@@ -96,23 +100,27 @@ function useSoundOn(): boolean {
   return on;
 }
 
+/** On the PIN screen the heads-up shows this many rows at most, then "+N more", so the keypad keeps its room. */
+export const LOCKED_MAX = 3;
+
 /** One banner row per due heads-up (under the alarm, and on its own after hours). "Got it" needs no PIN. */
-function HeadsUp({ reminders, now }: { reminders: KitchenOrder[]; now: number }) {
+function HeadsUp({ reminders, now, max = Infinity }: { reminders: KitchenOrder[]; now: number; max?: number }) {
   // "Got it" is saved on the order, so it holds after a reload and on every kitchen tablet. No PIN needed.
   const ack = (o: Order) => store.updateDoc('orders', o.id, ackPatch(o));
   if (reminders.length === 0) return null;
   return (
     <div className="k-remind" role="alert" data-testid="kitchen-reminder">
-      {reminders.map((o) => (
+      {reminders.slice(0, max).map((o) => (
         <div key={o.id} className="k-remind-row">
           <span className="k-remind-text">
-            <b>{o.customerName}</b> {o.type === 'delivery' ? 'delivery' : 'pickup'} at {timeLabel(o.dueAt)}, {countdown(o.dueAt, now).text}
+            <b>{o.customerName}</b> {whenText(o, now)}
           </span>
           <button className="t-btn k-remind-btn" onClick={() => ack(o)}>
             Got it
           </button>
         </div>
       ))}
+      {reminders.length > max && <div className="k-remind-more">+{reminders.length - max} more</div>}
     </div>
   );
 }
@@ -361,10 +369,12 @@ function useTaps(onTap: () => void, onDoubleTap: () => void) {
 /** `showDay`: the card's day, for groups whose heading doesn't already name it (Later, earlier days). */
 function OrderCard({ order: o, now, showDay, onTap, onDoubleTap }: { order: Order; now: number; showDay: boolean; onTap: () => void; onDoubleTap: () => void }) {
   const cd = countdown(o.dueAt, now);
+  // One "soon": the orange border shows exactly when the 1-hour countdown does.
+  const soon = showsCountdown(o.dueAt, now);
   const tap = useTaps(onTap, onDoubleTap);
   return (
     <article
-      className={'k-card k-tappable' + (isSoon(o, now) ? ' soon' : '')}
+      className={'k-card k-tappable' + (soon ? ' soon' : '')}
       data-testid="kitchen-order"
       aria-label={`Order for ${o.customerName}`}
       tabIndex={0}
@@ -382,14 +392,15 @@ function OrderCard({ order: o, now, showDay, onTap, onDoubleTap }: { order: Orde
           {showDay && <div className="k-day">{dayLabel(o.dueAt, now)}</div>}
         </div>
         <div className="k-card-right">
-          {showsCountdown(o.dueAt, now) && <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>}
+          {soon && <span className={'k-countdown' + (cd.late ? ' late' : '')}>{cd.text}</span>}
           <span className={'t-badge k-type' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
         </div>
       </div>
 
       <div className="k-who">
         <div className="k-name">{o.customerName}</div>
-        {o.type === 'delivery' && o.address && <Address className="k-address" address={o.address} />}
+        {/* Plain text here, so a tap or double-tap on it works like anywhere on the card. Copy address is in the full order (Calendar). */}
+        {o.type === 'delivery' && o.address && <div className="k-address">{o.address}</div>}
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
 
@@ -407,13 +418,12 @@ function OrderOptions(props: { order: Order; now: number; full?: boolean; onClos
   const o = props.order;
   return (
     <Sheet open title={o.customerName} onClose={props.onClose}>
-      {props.full ? (
-        <OrderDetails order={o} now={props.now} />
-      ) : (
+      {!props.full && (
         <p className="k-opt-when">
           {dayLabel(o.dueAt, props.now)}, {timeLabel(o.dueAt)} · {o.type === 'delivery' ? 'Delivery' : 'Pickup'}
         </p>
       )}
+      {/* The buttons come first, so a long order (Calendar) never pushes them off the screen. */}
       {o.status === 'completed' ? (
         <button type="button" className="t-btn primary block k-opt" onClick={props.onReopen}>
           ↺ Reopen order
@@ -429,6 +439,7 @@ function OrderOptions(props: { order: Order; now: number; full?: boolean; onClos
       <button type="button" className="t-btn block k-opt" onClick={props.onTags}>
         🏷️ Print name tags
       </button>
+      {props.full && <OrderDetails order={o} now={props.now} />}
       <button type="button" className="t-btn ghost block k-opt" onClick={props.onClose}>
         Close
       </button>

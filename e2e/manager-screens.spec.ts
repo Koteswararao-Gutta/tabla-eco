@@ -94,20 +94,22 @@ test('one clear add button at the end, quiet + buttons in between with their own
   await expect(page.getByTestId('slot').last()).toHaveAttribute('data-slot-id', added.id);
 });
 
-test('move to top and move to bottom in one tap, restarting the loop once', async ({ context }) => {
+test('move up and move down, restarting the loop once', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
   const order = () => page.getByTestId('slot').evaluateAll((els) => els.map((e) => e.getAttribute('data-slot-id')));
   await page.getByRole('button', { name: 'Picture 4: options' }).click();
   const sheet = page.getByRole('dialog');
-  await expect(sheet.getByRole('button', { name: 'Move to bottom' })).toBeDisabled();
+  await expect(sheet.getByRole('button', { name: 'Move down' })).toBeDisabled();
+  await expect(sheet.getByRole('button', { name: 'Move to top' })).toHaveCount(0);
+  await expect(sheet.getByTestId('options-seconds')).toHaveCount(0); // seconds live on the "Fade · 10 s ›" line
+  await expect(sheet).toContainText('Order, seconds and change are shared by TV 1 to TV 4.');
   if (SHOTS) await page.waitForTimeout(400); // let the sheet finish rising
   await shot(page, 'options-move');
-  await sheet.getByRole('button', { name: 'Move to top' }).click();
-  await expect.poll(order).toEqual(['slot-catering', 'slot-menu-1', 'slot-menu-2', 'slot-special']);
+  await sheet.getByRole('button', { name: 'Move up' }).click();
+  await expect.poll(order).toEqual(['slot-menu-1', 'slot-menu-2', 'slot-catering', 'slot-special']);
   expect((await singleton(page, 'loop')).firstSlotId).toBe('slot-catering');
-  await expect(sheet.getByRole('button', { name: 'Move to top' })).toBeDisabled();
-  await expect(sheet).toContainText('Picture 1 of 4');
-  await sheet.getByRole('button', { name: 'Move to bottom' }).click();
+  await expect(sheet).toContainText('Picture 3 of 4');
+  await sheet.getByRole('button', { name: 'Move down' }).click();
   await expect.poll(order).toEqual(['slot-menu-1', 'slot-menu-2', 'slot-special', 'slot-catering']);
   const orders = (await readCollection<Slot>(page, 'slots')).sort((a, b) => a.order - b.order).map((s) => s.order);
   expect(orders).toEqual([1, 2, 3, 4]);
@@ -117,7 +119,7 @@ test('changing seconds and transition saves on the slot', async ({ context }) =>
   const page = await openScreen(context, '/manager/screens/tv1');
   await page.getByTestId('slot-line').first().click();
   const sheet = page.getByRole('dialog');
-  await expect(sheet).toContainText('all front TVs');
+  await expect(sheet).toContainText('shared by TV 1 to TV 4');
   await page.getByTestId('timing-seconds').fill('15');
   await sheet.getByRole('button', { name: 'Slide' }).click();
   await sheet.getByRole('button', { name: 'Save' }).click();
@@ -163,15 +165,13 @@ test('moving and removing pictures', async ({ context }) => {
   await expect.poll(pictureIds).not.toContain(specialPic);
 });
 
-test('picture options: preview, seconds, transition and end date in one place', async ({ context }) => {
+test('picture options: preview and end date', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
   await page.getByRole('button', { name: 'Picture 3: options' }).click(); // the special
   const sheet = page.getByRole('dialog');
   await expect(sheet.getByTestId('options-preview').locator('img')).toBeVisible();
   await expect(sheet.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
   await expect(sheet.getByRole('button', { name: 'Clear end date' })).toHaveCount(0);
-  await sheet.getByTestId('options-seconds').fill('12');
-  await sheet.getByRole('button', { name: 'Fade' }).click();
   await sheet.getByTestId('ends-input').fill('2030-01-05T21:00');
   await expect(sheet.getByRole('button', { name: 'Clear end date' })).toBeVisible();
   // the date field stays inside the sheet on a narrow phone
@@ -182,7 +182,7 @@ test('picture options: preview, seconds, transition and end date in one place', 
   await sheet.getByRole('button', { name: 'Save changes' }).click();
   await expect(sheet).toBeHidden();
   const s = (await readCollection<Slot & { endsAt: number | null }>(page, 'slots')).find((x) => x.id === 'slot-special')!;
-  expect([s.seconds, s.transition, s.endsAt]).toEqual([12, 'fade', new Date(2030, 0, 5, 21, 0).getTime()]);
+  expect(s.endsAt).toEqual(new Date(2030, 0, 5, 21, 0).getTime());
   expect((await singleton(page, 'loop')).firstSlotId).toBe('slot-special');
 });
 
@@ -211,9 +211,22 @@ test('TV 3 mirroring can be turned off', async ({ context }) => {
   await expect(sw).toHaveAttribute('aria-checked', 'false');
   expect((await sw.boundingBox())!.y).toBe(before!.y); // the switch never moves under the finger
   await expect(page.getByTestId('mirror-note')).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Add a picture for TV 3' }).first()).toBeVisible();
+  // TV 3 keeps showing TV 1's pictures (never goes blank) until it gets its own
+  await expect(sw).toContainText("Shows TV 1's pictures until you add its own");
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  await expect(page.getByText('Same as TV 1').first()).toBeVisible();
   const tv3 = (await readCollection<{ id: string; mirrorOf: string | null }>(page, 'screens')).find((s) => s.id === 'tv3')!;
   expect(tv3.mirrorOf).toBeNull();
+
+  // A picture added on TV 3 alone is a spot for TV 3 / TV 4 only: TV 1 does not list it (and never blanks for it)
+  await page.getByRole('button', { name: 'Add a picture', exact: true }).click();
+  await page.getByTestId('add-file').setInputFiles({ name: 'tv3.png', mimeType: 'image/png', buffer: PNG });
+  await expect(page.getByTestId('add-hint')).toContainText("TV 1 and TV 2 don't change.");
+  await page.getByRole('dialog').getByRole('button', { name: 'Add picture' }).click();
+  await expect(page.getByTestId('slot')).toHaveCount(5);
+  await page.goto(page.url().replace('/tv3', '/tv1'));
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  await page.goto(page.url().replace('/tv1', '/tv3'));
   await page.getByRole('link', { name: '‹ Screens' }).click();
   await expect(page.getByTestId('tile-tv3')).toContainText('Own pictures');
 });

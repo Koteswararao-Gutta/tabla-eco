@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { store } from '@shared/data';
 import { seedIfEmpty } from '@shared/seed/seed';
 import { ErrorBoundary, TimeZoneNote } from '@shared/ui';
 
@@ -10,7 +11,7 @@ function Crash(): never {
   throw new Error('Test crash');
 }
 
-seedIfEmpty().finally(() => {
+function draw() {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ErrorBoundary>
@@ -19,7 +20,17 @@ seedIfEmpty().finally(() => {
       </ErrorBoundary>
     </StrictMode>,
   );
-});
+}
+
+// Live app: draw at once. A first start without internet must never wait on the database (it would stay
+// blank). Screens already cope with empty data, and sample data (only ever written into a brand-new, empty
+// database) shows up by itself when it lands.
+// Local preview and tests: the sample data is in this browser and ready at once, so it is written first.
+if (store.mode === 'local') void seedIfEmpty().finally(draw);
+else {
+  draw();
+  seedIfEmpty().catch((e) => console.warn('sample data check', e));
+}
 
 // Offline start-up: the service worker keeps a copy of the app so a reload without internet still opens it.
 // Production builds only (the dev server changes files constantly). Same file as the push reminders use.
