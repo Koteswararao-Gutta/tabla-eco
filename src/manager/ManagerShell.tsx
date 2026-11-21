@@ -1,5 +1,5 @@
 // Front app and manager app frame: the tabs. Owned by the foundation; each tab lives in its own folder.
-// Front app (#/front, for front staff): Catering only.
+// Front app (#/front, for front staff): Catering only, with no tab bar.
 // Manager app (#/manager): everything in the front app, plus Screens, Staff and More (☰).
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
@@ -27,18 +27,17 @@ export default function ManagerShell({ mode = 'manager' }: { mode?: AppMode }) {
         <Route path="*" element={<Navigate to={base + '/catering'} replace />} />
       </Routes>
       <OfflineBanner />
-      <TabBar
-        tabs={
-          front
-            ? [{ to: base + '/catering', label: 'Catering' }]
-            : [
-                { to: base + '/catering', label: 'Catering' },
-                { to: base + '/screens', label: 'Screens' },
-                { to: base + '/staff', label: 'Staff' },
-                { to: base + '/more', label: '☰', name: 'More', narrow: true },
-              ]
-        }
-      />
+      {/* The front app is Catering only, so it has no tab bar. */}
+      {!front && (
+        <TabBar
+          tabs={[
+            { to: base + '/catering', label: 'Catering' },
+            { to: base + '/screens', label: 'Screens' },
+            { to: base + '/staff', label: 'Staff' },
+            { to: base + '/more', label: '☰', name: 'More', narrow: true },
+          ]}
+        />
+      )}
     </AppModeProvider>
   );
 }

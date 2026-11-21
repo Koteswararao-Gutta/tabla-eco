@@ -76,10 +76,12 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   // Manager list shows the sample orders.
   await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
   await expect(manager.getByText('Priya Sharma')).toBeVisible();
-  // Completed but not paid: it stays, in "Completed, unpaid" only (and in History).
-  await expect(manager.getByText('Rahul Verma')).toHaveCount(1);
-  await expect(manager.getByRole('region', { name: 'Completed, unpaid' }).getByText('Rahul Verma')).toBeVisible();
+  // Completed but not paid: not in the Orders list (only under History), but under Unpaid.
+  await expect(manager.getByText('Rahul Verma')).toHaveCount(0);
   await shot(manager, 'manager-list');
+  await manager.getByTestId('unpaid-filter').click();
+  await expect(manager.getByRole('region', { name: 'Unpaid' }).getByText('Rahul Verma')).toBeVisible();
+  await manager.getByRole('button', { name: 'Orders', exact: true }).click();
 
   // Kitchen: PIN first. Wrong PIN is rejected, 1234 unlocks.
   await expect(kitchen.getByText('Enter the 4-digit PIN')).toBeVisible();
@@ -1183,7 +1185,8 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   // The sample's finished order (Rahul Verma) isn't paid: it stays in the list, and Unpaid counts it.
   const filter = manager.getByTestId('unpaid-filter');
   await expect(filter).toContainText('Unpaid1');
-  const notPaid = manager.getByRole('region', { name: 'Completed, unpaid' });
+  await filter.click();
+  const notPaid = manager.getByRole('region', { name: 'Unpaid' });
   const card = notPaid.getByRole('button', { name: /Rahul Verma/ });
   await expect(card).toContainText('Unpaid');
   await expect(card.getByText('Unpaid')).toHaveCount(1); // said once, in the badge
@@ -1598,7 +1601,8 @@ test('an order time already passed: a soft warning, still saves', async ({ brows
 test('deposits that add up to the amount count as paid; the amount cannot be cleared once deposits exist', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
-  const card = manager.getByRole('region', { name: 'Completed, unpaid' }).getByRole('button', { name: /Rahul Verma/ });
+  await manager.getByTestId('unpaid-filter').click();
+  const card = manager.getByRole('region', { name: 'Unpaid' }).getByRole('button', { name: /Rahul Verma/ });
   await card.click();
   const details = manager.getByRole('dialog', { name: 'Order details' });
   // Deposit with no amount yet: "paid so far".
@@ -1628,7 +1632,7 @@ test('deposits that add up to the amount count as paid; the amount cannot be cle
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await expect(edit).toHaveCount(0);
   // $100 of $100 in deposits: paid. Off the Unpaid list, no Mark paid, no count.
-  await expect(manager.getByRole('region', { name: 'Completed, unpaid' })).toHaveCount(0);
+  await expect(manager.getByRole('region', { name: 'Unpaid' })).toHaveCount(0);
   await expect(manager.getByTestId('unpaid-filter')).toHaveText('Unpaid');
   await context.close();
 });

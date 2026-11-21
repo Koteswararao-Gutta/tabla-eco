@@ -74,7 +74,8 @@ export default function Catering() {
   }, [params, setParams]);
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  // "Orders", "Unpaid" (finished by the kitchen, not yet paid) or "Estimates" (price quotes for customers).
+  // "Estimates" (price quotes for customers), "Orders" (open ones; completed ones under History) or "Unpaid"
+  // (completed by the kitchen, not yet paid).
   const [view, setView] = useState<'orders' | 'unpaid' | 'estimates'>('orders');
   const estimates = useCollection('estimates');
   const [estimateId, setEstimateId] = useState<string | null>(null); // estimate id, 'new', or closed
@@ -157,6 +158,14 @@ export default function Catering() {
       <AlertsCard />
 
       <div className="c-filter" role="group" aria-label="Show">
+        <button type="button" aria-pressed={view === 'estimates'} onClick={() => setView('estimates')} data-testid="estimates-filter">
+          Estimates
+          {openEstimates > 0 && (
+            <span className="c-count e-count" aria-label={`${openEstimates} open estimates`}>
+              {openEstimates}
+            </span>
+          )}
+        </button>
         <button type="button" aria-pressed={view === 'orders'} onClick={() => setView('orders')}>
           Orders
         </button>
@@ -165,14 +174,6 @@ export default function Catering() {
           {unpaid.length > 0 && (
             <span className="c-count" aria-label={`${unpaid.length} unpaid`}>
               {unpaid.length}
-            </span>
-          )}
-        </button>
-        <button type="button" aria-pressed={view === 'estimates'} onClick={() => setView('estimates')} data-testid="estimates-filter">
-          Estimates
-          {openEstimates > 0 && (
-            <span className="c-count e-count" aria-label={`${openEstimates} open estimates`}>
-              {openEstimates}
             </span>
           )}
         </button>
@@ -195,7 +196,7 @@ export default function Catering() {
         </div>
       ) : (
         <div className="t-stack">
-          {openCount === 0 && unpaid.length === 0 && (
+          {openCount === 0 && (
             <div className="t-empty c-empty">
               No open orders.
               <br />
@@ -206,7 +207,7 @@ export default function Catering() {
           <Group title="Today" orders={groups.today} today={today} payOf={payOf} onOpen={openOrder} />
           <Group title="Tomorrow" orders={groups.tomorrow} today={today} payOf={payOf} onOpen={openOrder} />
           <Group title="Later" orders={groups.later} today={today} payOf={payOf} showDate onOpen={openOrder} />
-          <Group title="Completed, unpaid" orders={unpaid} today={today} payOf={payOf} showDate onOpen={openOrder} />
+          {/* Completed orders show only under History; the ones still to be paid are also under Unpaid. */}
 
           {past.length > 0 && (
             <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
