@@ -92,7 +92,8 @@ export function lineText(l: OrderLine): string {
   if (typeof l.text === 'string' && l.text.trim()) return tidyQty(l.text.trim());
   const q = qtyText(l);
   const note = [l.extra ? 'extra' : '', l.note.trim()].filter(Boolean).join(', ');
-  return `${l.name.trim()}${q ? `, ${q}` : ''}${note ? ` (${note})` : ''}`;
+  // Tidied like itemLines, so a "1 1/2" or "½" in a name or note still reads back as the same line.
+  return tidyQty(`${l.name.trim()}${q ? `, ${q}` : ''}${note ? ` (${note})` : ''}`);
 }
 
 /** All lines as the order's `items` text, one per line. */
@@ -192,24 +193,30 @@ export function searchDishes(query: string, dishes: Dish[], max = 6): Dish[] {
 const SIZE = '(?:(?:extra\\s+)?(?:large|small|medium|big|full|half|lg|lrg|sm|med)\\s+)?';
 const UNIT_SRC =
   SIZE +
-  '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gals?|lbs?|pounds?|pcs?|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qts?|liters?|litres?|ltrs?|servings?|people|persons?|ppl|pax|guests?|oz|ozs|ounces?)';
+  '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gals?|lbs?|pounds?|pcs?|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qts?|liters?|litres?|ltrs?|cans?|bottles?|servings?|people|persons?|ppl|pax|guests?|oz|ozs|ounces?)';
 const UNITS_RE = UNIT_SRC;
 // "2", "1.5", "1/2" and "1-1/2" (mixed numbers are made that way by tidyQty first).
 const QTY = `(?:\\d-\\d/\\d|\\d+(?:[.,/]\\d+)?)`;
 // "6 FT", "15 gallons", "x2", "×3", "2 x"
-const LEAD_QTY = new RegExp(`^(?:${QTY}\\s*(?:x|×|\\*)\\s*|${QTY}\\s*(?:${UNITS_RE})\\b\\.?\\s*(?:of\\s+)?|${QTY}\\s+(?=[a-z]))`, 'i');
+const LEAD_QTY = new RegExp(`^(?:${QTY}\\s*(?:x|×|\\*)\\s*|${QTY}\\s*(?:${UNITS_RE})\\b\\.?\\s*(?:of\\s+)?)`, 'i');
 const TAIL_QTY = new RegExp(
-  `(?:\\s*[-–—:,=]\\s*${QTY}\\s*(?:${UNITS_RE})?\\.?|\\s*(?:x|×|\\*)\\s*${QTY}|\\s+${QTY}\\s*(?:${UNITS_RE})\\.?)\\s*$`,
+  `(?:\\s*[-–—:,=]\\s*(?:for\\s+)?${QTY}\\s*(?:${UNITS_RE})?\\.?|\\s*(?:x|×|\\*)\\s*${QTY}|\\s+(?:for\\s+)?${QTY}\\s*(?:${UNITS_RE})\\.?)\\s*$`,
   'i',
 );
-const QTY_ONLY = new RegExp(`^\\s*(?:x|×)?\\s*${QTY}\\s*(?:${UNITS_RE})?\\.?\\s*$`, 'i');
-const QTY_PARTS = new RegExp(`(${QTY})\\s*(${UNITS_RE})?\\b`, 'i');
+const QTY_ONLY = new RegExp(`^\\s*(?:x|×|for)?\\s*${QTY}\\s*(?:${UNITS_RE})?\\.?\\s*$`, 'i');
+const QTY_PARTS = new RegExp(`(${QTY})\\s*(${UNITS_RE})?\\b`, 'gi');
+// A bare number after the dish ("Gulab Jamun 100") is a count, except the numbers that are part of a dish's name.
+const TAIL_COUNT = /\s+(?!(?:65|555|999)\b)\d+(?:\.\d+)?\s*$/;
+// A number before the dish ("40 samosas"), when it is the only amount on the line.
+const LEAD_COUNT = new RegExp(`^${QTY}\\s+(?=[a-z])`, 'i');
 
-const SMALL_WORDS = new Set(['and', 'with', 'the', 'for', 'of', 'in', 'on', 'or', 'no']);
+const SMALL_WORDS = new Set(['and', 'with', 'the', 'for', 'of', 'in', 'on', 'or', 'no', 'ka', 'ki', 'ke']);
 
 /** Capitalises words like a menu: "chicken dum biryani with raita" → "Chicken Dum Biryani with Raita". */
 export function tidyCase(s: string): string {
   let first = true;
+  // A line typed in capitals ("CHICKEN 65") reads like the menu: "Chicken 65".
+  if (/[A-Z]{2}/.test(s) && !/[a-z]/.test(s)) s = s.toLowerCase();
   return s.replace(/[A-Za-z][A-Za-z']*/g, (w) => {
     const keep = !first && SMALL_WORDS.has(w.toLowerCase());
     first = false;
@@ -229,24 +236,34 @@ export function dishFromLine(line: string): { name: string; sub: string } {
     return ' ';
   });
   s = s.replace(/\s+/g, ' ').trim();
+  const start = s;
   for (let i = 0; i < 3; i++) {
     const before = s;
-    s = s.replace(TAIL_QTY, '').trim();
+    // "2 FT + 1 HT", "2 FT and 1 HT": the joining word goes with the amounts.
+    s = s.replace(TAIL_QTY, '').replace(/\s*(?:[+&]|\band)\s*$/i, '').trim();
     s = s.replace(LEAD_QTY, '').trim();
     if (s === before) break;
   }
+  s = s.replace(TAIL_COUNT, '').trim();
+  // "40 samosas" drops the 40, but "7 Up, 24 cans" keeps its name, and so does "7 Up" alone.
+  const lead = LEAD_COUNT.exec(s);
+  if (lead && s === start && s.slice(lead[0].length).replace(/[^a-z]/gi, '').length > 2) s = s.slice(lead[0].length);
   s = s.replace(/^[-–—:,\s]+|[-–—:,\s]+$/g, '');
   return { name: tidyCase(s), sub: tidyCase(subs.join(', ')) };
 }
 
 /** The quantity and unit written on a line ("Chicken biryani, 2 large trays" → 2, Full tray). */
-function qtyFromLine(line: string): { qty: number | null; unit: string; sure: boolean } {
-  const s = line.trim().replace(/^(?:[-*•·]+|\d+[.)])\s+/, '');
-  const name = dishFromLine(line).name;
-  // Look in what is left once the dish name is taken out, so "Chicken 65, 2 trays" reads 2, not 65.
-  const nameAt = name ? s.toLowerCase().indexOf(name.toLowerCase()) : -1;
-  const rest = nameAt >= 0 ? s.slice(0, nameAt) + ' ' + s.slice(nameAt + name.length) : s;
-  const m = QTY_PARTS.exec(rest);
+function qtyFromLine(line: string, menuName = ''): { qty: number | null; unit: string; sure: boolean } {
+  let rest = line.trim().replace(/^(?:[-*•·]+|\d+[.)])\s+/, '');
+  // Look in what is left once the dish name is taken out, so "Chicken 65, 2 trays" reads 2, not 65, and
+  // "Samosa (2) 40 pcs" (the menu's name has its own number) reads 40.
+  for (const name of [menuName, dishFromLine(line).name]) {
+    const at = name ? rest.toLowerCase().indexOf(name.toLowerCase()) : -1;
+    if (at >= 0) rest = rest.slice(0, at) + ' ' + rest.slice(at + name.length);
+  }
+  // A number with a unit ("40 pcs") comes first, then one after an "x" ("2 x 20"), then the first number.
+  const all = [...rest.matchAll(QTY_PARTS)];
+  const m = all.find((x) => x[2]) ?? all.find((x) => /(?:x|×|\*)\s*$/i.test(rest.slice(0, x.index))) ?? all[0];
   if (!m) return { qty: null, unit: '', sure: false };
   // "1 FT + 1 HT", "2 ft and veg biryani 1 ft": more than one amount on a line can't be read as one.
   const several = (rest.match(new RegExp(QTY, 'g')) ?? []).length > 1;
@@ -272,10 +289,12 @@ export function parseLine(line: string, dishes: Dish[] = []): { line: OrderLine;
   const text = tidyQty(line.trim());
   const { name: typed, sub } = dishFromLine(text);
   const dish = findDish(typed, dishes);
-  const q = qtyFromLine(text);
+  const q = qtyFromLine(text, dish?.name);
   const name = dish?.name ?? typed;
   // A dish matched only by the start of its name ("Chicken 65 Biryani" -> "Chicken 65") is a guess.
-  const sure = !!dish && norm(dish.name) === norm(typed) && q.qty !== null && q.sure;
+  // ("Samosa (2)" on the menu is the same dish as "Samosa" typed.)
+  const same = !!dish && (norm(dish.name) === norm(typed) || norm(dish.name.replace(/\s*[([][^)\]]*[)\]]/g, '')) === norm(typed));
+  const sure = same && q.qty !== null && q.sure;
   return { line: { dishId: dish?.id ?? null, name, qty: q.qty, unit: q.unit, note: sub ? sub.charAt(0).toLowerCase() + sub.slice(1) : '', text, ...(sure ? {} : { check: true }) }, sure };
 }
 

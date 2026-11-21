@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { LOGO_URL as logo, Segmented, Sheet } from '@shared/ui';
 import { useDoc, useSingleton, type CateringOrder } from '@shared/data';
 import { dayLabel, timeLabel } from './orders';
-import { DIET_LABEL, nameSize, sheets, tagsForOrder, TAG_SITE, type Diet, type NameTag } from './tags';
+import { DIET_LABEL, nameSize, sheets, tagsForOrder, TAG_SITE, tooLong, type Diet, type NameTag } from './tags';
 import './tags.css';
 
 declare global {
@@ -94,6 +94,7 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
                   ✕
                 </button>
               </div>
+              {tooLong(t.name) && <span className="nt-row-warn">Too long for the tag</span>}
               {t.sub && <span className="nt-row-sub">{t.sub}</span>}
               <Segmented<Diet>
                 label={`Veg or non-veg: ${t.name}`}

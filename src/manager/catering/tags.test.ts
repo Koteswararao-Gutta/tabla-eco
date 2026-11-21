@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { linesText } from './lines';
-import { dishFromLine, guessDiet, nameSize, sheets, tagName, tagsForOrder } from './tags';
+import { dishFromLine, guessDiet, nameSize, sheets, tagName, tagsForOrder, tooLong } from './tags';
 
 describe('dishFromLine', () => {
   it.each([
@@ -116,5 +116,35 @@ describe('tags show just the dish', () => {
       ['Andhra Chicken Curry', 'Bone-in'],
       ['Mirchi Bajji', ''],
     ]);
+  });
+});
+
+describe('review fixes', () => {
+  const menu = { groups: [{ id: 'n', name: 'Non-Veg Curries', items: [{ id: 'a', name: 'Andhra Chicken Curry' }] }] };
+
+  it('keeps no amounts in the name', () => {
+    const items = 'Chicken Biryani for 50 people\nVeg biryani 2 FT + 1 HT\nGulab Jamun 100\n7 Up 24 cans\nCHICKEN 65, 2 half trays\nMurgh ka Salan 1 FT';
+    expect(tagsForOrder({ items }).map((t) => t.name)).toEqual(['Chicken Biryani', 'Veg Biryani', 'Gulab Jamun', '7 Up', 'Chicken 65', 'Murgh ka Salan']);
+  });
+
+  it('keeps the line note under a menu dish, but not a kitchen note', () => {
+    const lines = [
+      { dishId: 'a', name: 'Andhra Chicken Curry', qty: 2, unit: 'Full tray', note: 'bone-in' },
+      { dishId: null, name: 'Veg Biryani', qty: 1, unit: 'Full tray', note: 'extra spicy' },
+    ];
+    expect(tagsForOrder({ items: linesText(lines), lines }, menu).map((t) => [t.name, t.sub])).toEqual([
+      ['Andhra Chicken Curry', 'Bone-in'],
+      ['Veg Biryani', ''],
+    ]);
+  });
+
+  it('makes one tag for Samosa and Samosas', () => {
+    expect(tagsForOrder({ items: 'Samosa 40 pcs\n2 dozen samosas' }).map((t) => t.name)).toEqual(['Samosa']);
+  });
+
+  it('says when a name is too long for the tag', () => {
+    expect(tooLong('Ulavacharu Kodi Pulao Family Pack Boneless Special Mix')).toBe(false);
+    expect(tooLong('Hyderabadi Gongura Chicken Biryani Boneless Ulavacharu Kheem')).toBe(true);
+    expect(tooLong('M'.repeat(50))).toBe(true);
   });
 });

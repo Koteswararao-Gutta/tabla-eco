@@ -108,3 +108,27 @@ describe('extra rows on the form', () => {
     expect(lineText({ ...raita, qty: 24, unit: 'Oz', note: 'thick' })).toBe('Raita, 24 oz (extra, thick)');
   });
 });
+
+describe('review fixes', () => {
+  it('leaves the amount empty when one of its dishes has none (a part sum would be too little)', () => {
+    const lines = [
+      { name: 'Chicken Dum Biryani', qty: 1, unit: 'Half tray' },
+      { name: 'Veg Dum Biryani', qty: 40, unit: 'Servings' },
+    ];
+    expect(amounts(lines)).toEqual({ Raita: 'null ', Salan: 'null ' });
+    expect(amounts([...lines].reverse())).toEqual({ Raita: 'null ', Salan: 'null ' });
+  });
+
+  it('adds no extra that is already ordered as a dish', () => {
+    const rows = withExtras([row('Chicken Dum Biryani', '2', 'Full tray'), row('Raita', '2', 'Quarts')], new Set());
+    expect(rows.map((r) => [r.name, r.extra ?? ''])).toEqual([['Chicken Dum Biryani', ''], ['Raita', ''], ['Salan', 'Salan']]);
+    const sam = withExtras([row('Veg Samosa', '40', 'Pieces'), row('mint chutney', '1', 'Quarts')], new Set());
+    expect(sam.map((r) => r.name)).toEqual(['Veg Samosa', 'mint chutney', 'Tamarind Chutney']);
+    expect(missingExtras(rows)).toEqual(['Raita']);
+  });
+
+  it('knows the briyani spelling', () => {
+    expect(ruleFor('Veg Briyani')?.extras).toEqual(['Raita', 'Salan']);
+    expect(ruleFor('Chicken Biryan')?.extras).toEqual(['Raita', 'Salan']);
+  });
+});

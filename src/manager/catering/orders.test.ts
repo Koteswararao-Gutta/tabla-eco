@@ -250,6 +250,11 @@ describe('shareText / whatsappHref', () => {
     expect(text).toBe('*Catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nPickup\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150');
   });
 
+  it('says 1 person, and leaves out marks WhatsApp would format', () => {
+    const text = shareText({ ...base, customerName: 'Priya *VIP* _Sharma_', type: 'pickup', people: 1, notes: 'Line 1 ~strike~' });
+    expect(text).toBe('*Catering order*\nPriya VIP Sharma\nFri, Nov 20, 5:30 PM\nPickup\n1 person\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Line 1 strike');
+  });
+
   it('makes a wa.me link with the message encoded', () => {
     expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
   });

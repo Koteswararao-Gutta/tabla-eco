@@ -368,11 +368,13 @@ export function telHref(phone: string): string {
  *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
 export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'>, heading = 'Catering order'): string {
   const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const lines = [`*${heading}*`, `${o.customerName}`, `${date}, ${timeLabel(o.dueAt)}`];
-  lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${o.address.trim()}` : ''}` : 'Pickup');
-  if (o.people) lines.push(`${o.people} people`);
+  // WhatsApp would turn *, _ and ~ in typed text into bold, italic or struck-out words: leave them out.
+  const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
+  const lines = [`*${heading}*`, plain(o.customerName ?? ''), `${date}, ${timeLabel(o.dueAt)}`];
+  lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${plain(o.address)}` : ''}` : 'Pickup');
+  if (o.people) lines.push(`${o.people} ${o.people === 1 ? 'person' : 'people'}`);
   lines.push('', '*Items*', ...itemLines(o.items).map((l) => `• ${l}`));
-  if (o.notes?.trim()) lines.push('', `*Notes:* ${o.notes.trim()}`);
+  if (o.notes?.trim()) lines.push('', `*Notes:* ${plain(o.notes)}`);
   return lines.join('\n');
 }
 
