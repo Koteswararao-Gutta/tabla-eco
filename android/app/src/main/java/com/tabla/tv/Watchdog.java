@@ -72,7 +72,7 @@ public class Watchdog extends BroadcastReceiver {
         SharedPreferences p = prefs(context);
         String screen = p.getString("screen", null);
         if (screen == null) return; // not set up yet
-        if (screen.startsWith("manager")) return; // a manager phone is a normal phone: never take it over
+        if (screen.startsWith("manager") || screen.startsWith("front")) return; // a front or manager phone is a normal phone: never take it over
         if (isQuiet(context)) return;
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         if (pm != null && !pm.isInteractive()) return; // screen off: wait for it to come on

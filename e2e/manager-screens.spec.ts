@@ -1,8 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openScreen, readCollection, unlockManager } from './helpers';
-
-// Screens and Staff ask for the manager PIN; enter it once per test.
-test.beforeEach(async ({ context }) => unlockManager(context));
+import { openScreen, readCollection } from './helpers';
 
 test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
 
