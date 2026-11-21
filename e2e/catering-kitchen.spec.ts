@@ -52,6 +52,10 @@ async function newContext(browser: Browser, opts: BrowserContextOptions = {}) {
 }
 
 /** Staff hours for the test (test-only): 'open' = staffed all day, every day; 'closed' = never. */
+// Midday on the restaurant's clock. Tests that add an order "in 30 minutes" and expect "pickup at …"
+// (not "tomorrow at …") start here, so they pass at any hour GitHub happens to run them.
+const MIDDAY = new Date('2026-11-18T12:00:00-07:00');
+
 async function setHours(page: Page, hours: 'open' | 'closed') {
   await page.evaluate((h) => {
     const t = JSON.parse(localStorage.getItem('tabla:singletons') || '{}');
@@ -287,7 +291,7 @@ test('kitchen 1-hour alarm: full screen, flashing, rings until touched (at least
     };
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await page.clock.install({ time: MIDDAY }); // an order 30 minutes away stays on the same day;
   await page.goto('/#/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   const addOrder = (id: string, name: string, inMin: number) =>
@@ -471,6 +475,7 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
 
 test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late orders drop off', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
+  await context.clock.install({ time: MIDDAY }); // an order 30 minutes away stays on the same day
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   // An order due in 30 minutes and one 3 hours late, written straight into the local store (test-only).
