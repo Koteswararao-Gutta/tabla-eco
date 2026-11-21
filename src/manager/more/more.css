@@ -37,3 +37,4 @@
 .mo-noamount { margin-top: 12px; text-align: center; }
 .mo-week-list { margin-top: 16px; }
 .mo-row .t-badge { white-space: nowrap; }
+.mo-refund { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

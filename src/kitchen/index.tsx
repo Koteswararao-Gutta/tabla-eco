@@ -1,11 +1,12 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
+import { kitchenOrders } from '../manager/catering/safety';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
 import { useBrowserFullscreen } from './fullscreen';
@@ -48,7 +49,9 @@ export default function Kitchen() {
     };
   }, []);
 
-  const orders = useCollection('orders', 'openOrRecent');
+  // Cancelled and deleted orders never reach any kitchen view (list, prep, calendar, alarms, tags).
+  const loaded = useCollection('orders', 'openOrRecent');
+  const orders = useMemo(() => (loaded ? kitchenOrders(loaded) : loaded), [loaded]);
   const now = useNow(15_000);
   // The heads-up runs on every kitchen view, locked or not. Its alarm lives here, so locking or
   // unlocking never restarts it. It rings only while the kitchen is staffed (staff schedule hours).

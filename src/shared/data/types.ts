@@ -73,8 +73,14 @@ export interface CateringOrder {
    *  added (read them with orderLines() from the catering helpers, which falls back to the text). */
   lines?: OrderLine[];
   notes?: string;
-  status: 'open' | 'completed';
+  /** 'cancelled': the customer called it off. Hidden from the kitchen and the totals; deposits stay in Payments. */
+  status: 'open' | 'completed' | 'cancelled';
   completedAt?: number | null;
+  /** When it was cancelled (store time); null after it is reopened. */
+  cancelledAt?: number | null;
+  /** Soft delete: set when deleted in the app, which then hides the order everywhere. Orders are never
+   *  removed from the database by the app. null or missing: not deleted. */
+  deletedAt?: number | null;
   createdAt: number;
   updatedAt: number;
   /** Every saved edit, oldest first (the last 50 are kept). */
@@ -123,7 +129,24 @@ export interface OrderAmount {
   takenBy?: string | null;
   /** Part payments (advances) taken before the order is paid in full, oldest first. Missing when none. */
   deposits?: Deposit[];
+  /** Every money action, oldest first. Add-only: entries are never changed or removed. Missing on older docs. */
+  log?: PayEvent[];
+  /** The order's `items` text when the amount was set or last confirmed, to warn when the items change
+   *  later. null or missing: no check (older orders). */
+  itemsAt?: string | null;
+  /** On a cancelled order: what happened to the money, e.g. "Refunded $200 deposit by Zelle" (<= 500 chars). */
+  refundNote?: string | null;
   updatedAt: number;
+}
+
+/** One money action on a catering order, kept in orderAmounts.log (add-only). */
+export interface PayEvent {
+  kind: 'amount' | 'deposit' | 'depositRemoved' | 'paid' | 'unpaid' | 'cancelled' | 'refund';
+  amount: number | null;
+  method: PayMethod | null;
+  takenBy: string | null;
+  at: number;
+  note?: string;
 }
 
 export type PayMethod = 'cash' | 'card' | 'zelle' | 'check';
@@ -167,6 +190,8 @@ export interface CateringEstimate {
   status: 'open' | 'ordered';
   /** The catering order made from it, once ordered. */
   orderId: string | null;
+  /** Soft delete: set when deleted in the app, which then hides it everywhere. null or missing: not deleted. */
+  deletedAt?: number | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -233,8 +233,20 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(summary.getByText('Anika Wedding')).toBeVisible();
   await summary.getByRole('button', { name: 'Delete' }).click();
   await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
-  await expect(manager.getByText('Anika Wedding')).toHaveCount(0);
-  expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Anika Wedding')).toBe(false);
+  // A soft delete: gone from every screen, with Undo for a few seconds, but still in the database.
+  const deleted = manager.getByRole('status').filter({ hasText: 'Deleted: Anika Wedding' });
+  await expect(deleted).toBeVisible();
+  await expect(manager.getByTestId('order-card').filter({ hasText: 'Anika Wedding' })).toHaveCount(0);
+  const kept = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Anika Wedding');
+  expect(typeof kept?.deletedAt).toBe('number');
+  await deleted.getByRole('button', { name: 'Undo' }).click();
+  await expect(manager.getByTestId('order-card').filter({ hasText: 'Anika Wedding' })).toBeVisible();
+  await manager.getByRole('button', { name: /Anika Wedding/ }).click();
+  await summary.getByRole('button', { name: 'Delete' }).click();
+  await manager.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
+  await expect(manager.getByTestId('order-card').filter({ hasText: 'Anika Wedding' })).toHaveCount(0);
+  await expect(kitchen.getByText('Anika Wedding')).toHaveCount(0);
+  expect((await readCollection<CateringOrder>(manager, 'orders')).some((o) => o.customerName === 'Anika Wedding' && typeof o.deletedAt === 'number')).toBe(true);
 
   await context.close();
 });

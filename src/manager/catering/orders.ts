@@ -44,9 +44,9 @@ export function groupOpen<T extends Order>(orders: T[], now: number): OpenGroups
   return g;
 }
 
-/** Completed orders, newest due first. */
+/** Completed and cancelled orders, newest due first. */
 export function history<T extends Order>(orders: T[]): T[] {
-  return orders.filter((o) => o.status === 'completed').sort(byDueDesc);
+  return orders.filter((o) => o.status === 'completed' || o.status === 'cancelled').sort(byDueDesc);
 }
 
 /** Every order grouped by its due day, newest day (and newest order) first. */
