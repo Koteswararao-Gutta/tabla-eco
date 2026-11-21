@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FirebaseStore } from './firebase';
 import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
+import { onSaveFailure, type SaveFailure } from './resync';
 import type { CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
@@ -11,6 +12,7 @@ export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export type { CollectionFilter } from './filter';
+export type { SaveFailure } from './resync';
 
 /** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
  *  which keeps everything in one browser (tests and the offline Chrome preview). */
@@ -91,3 +93,11 @@ export function useHeartbeat(screenId: ScreenId): void {
 /** A screen counts as online if it reported in the last 5 minutes. */
 export const isOnline = (lastSeen: number | undefined, now: number): boolean =>
   !!lastSeen && now - lastSeen < 300_000;
+
+/** Saves the server refused after they already looked done (e.g. sent later, when the internet came back).
+ *  `failures` is empty until one happens; `dismiss` clears the list. Used once app-wide by the "Not saved" banner. */
+export function useSaveFailures(): { failures: SaveFailure[]; dismiss: () => void } {
+  const [failures, setFailures] = useState<SaveFailure[]>([]);
+  useEffect(() => onSaveFailure((f) => setFailures((list) => [...list.slice(-19), f])), []);
+  return { failures, dismiss: () => setFailures([]) };
+}

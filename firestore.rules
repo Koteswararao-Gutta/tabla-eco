@@ -1,6 +1,7 @@
 rules_version = '2';
 // Tabla Eco: Firestore security rules. Deployed with the server code by .github/workflows/functions.yml
 // (don't edit them in the Firebase console: the next deploy overwrites that).
+// Checked on the Firestore emulator by rules-test/ (npm test --prefix rules-test) before every deploy.
 // Devices sign in anonymously (the owner chose no device password). Anyone who copies the app's public
 // Firebase config can sign in the same way, so these rules are not a lock; they:
 //  - need a sign-in for everything,
@@ -28,10 +29,12 @@ service cloud.firestore {
     function orderTypes(d) {
       return (!('customerName' in d) || (d.customerName is string && d.customerName.size() <= 200))
         && (!('dueAt' in d) || d.dueAt is number)
-        && (!('status' in d) || d.status in ['open', 'completed'])
+        && (!('status' in d) || d.status in ['open', 'completed', 'cancelled'])
         && (!('items' in d) || (d.items is string && d.items.size() <= 20000))
         && (!('type' in d) || d.type in ['pickup', 'delivery'])
         && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number)
+        && (!('cancelledAt' in d) || d.cancelledAt == null || d.cancelledAt is number)
+        && (!('deletedAt' in d) || d.deletedAt == null || d.deletedAt is number)
         && (!('kitchenAckFor' in d) || d.kitchenAckFor == null || d.kitchenAckFor is number)
         && (!('history' in d) || (d.history is list && d.history.size() <= 50))
         && (!('lines' in d) || (d.lines is list && d.lines.size() <= 300));
@@ -41,15 +44,18 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && small() && orderHasMain(request.resource.data) && orderTypes(request.resource.data);
       allow update: if signedIn() && small() && orderTypes(request.resource.data);
-      allow delete: if signedIn();
+      // No deleting from the app: "Delete" sets deletedAt (hidden everywhere, still in the records).
+      allow delete: if false;
     }
     // What a catering order costs, by order id. Shown only in the manager app: the kitchen screen never
     // loads this collection. (With anonymous sign-in the rules can't tell the two apps apart, so this keeps
     // it off the kitchen tablet rather than locking it.) The app's store adds the doc `id` to every save.
     match /orderAmounts/{id} {
-      allow read, delete: if signedIn();
+      allow read: if signedIn();
+      allow delete: if false; // money records are never deleted from the app
       allow create, update: if signedIn()
-        && request.resource.data.keys().hasOnly(['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id'])
+        && request.resource.data.keys().hasOnly(['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id',
+                                                 'log', 'itemsAt', 'refundNote'])
         && (!('paid' in request.resource.data) || request.resource.data.paid is bool)
         && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is number)
         && (!('method' in request.resource.data) || request.resource.data.method == null
@@ -60,16 +66,31 @@ service cloud.firestore {
             || (request.resource.data.deposits is list && request.resource.data.deposits.size() <= 20))
         && (!('amount' in request.resource.data) || request.resource.data.amount == null
             || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
+        && (!('itemsAt' in request.resource.data) || request.resource.data.itemsAt == null
+            || (request.resource.data.itemsAt is string && request.resource.data.itemsAt.size() <= 20000))
+        && (!('refundNote' in request.resource.data) || request.resource.data.refundNote == null
+            || (request.resource.data.refundNote is string && request.resource.data.refundNote.size() <= 500))
+        && (!('log' in request.resource.data) || (request.resource.data.log is list && request.resource.data.log.size() <= 500))
+        && logKept()
         && request.resource.data.updatedAt is number;
+    }
+    // The money log is add-only: a save must keep every entry already saved, in the same order, at the start.
+    function logKept() {
+      return resource == null || !('log' in resource.data)
+        || ('log' in request.resource.data
+            && request.resource.data.log.size() >= resource.data.log.size()
+            && request.resource.data.log[0:resource.data.log.size()] == resource.data.log);
     }
     // A catering price estimate (front and manager apps; the kitchen never loads it).
     match /estimates/{id} {
-      allow read, delete: if signedIn();
+      allow read: if signedIn();
+      allow delete: if false; // "Delete" sets deletedAt instead
       allow create, update: if signedIn() && small()
         && request.resource.data.customerName is string && request.resource.data.customerName.size() <= 200
         && request.resource.data.status in ['open', 'ordered']
         && request.resource.data.lines is list && request.resource.data.lines.size() <= 300
         && request.resource.data.total is number
+        && (!('deletedAt' in request.resource.data) || request.resource.data.deletedAt == null || request.resource.data.deletedAt is number)
         && request.resource.data.updatedAt is number;
     }
     match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
