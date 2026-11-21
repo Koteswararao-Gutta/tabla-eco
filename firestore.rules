@@ -80,6 +80,8 @@ service cloud.firestore {
     }
     // Toast menu: saved only by the server (reportToastMenu, fed by the kitchen tablet); screens can read it.
     match /toastMenu/{id}   { allow read: if signedIn(); allow write: if false; }
+    // How many order photos/messages the AI read each day (the server's daily limit): server only.
+    match /usage/{id}       { allow read, write: if false; }
     match /singletons/{id} {
       allow read: if signedIn();
       allow write: if signedIn() && id in ['seeded', 'loop', 'music', 'settings', 'staffConfig'];

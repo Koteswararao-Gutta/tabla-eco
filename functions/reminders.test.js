@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alertFor, chunks, deadTokens, MAX_AHEAD_MS, MAX_BODY, onRing, planReminder, REMIND_MS, shouldSchedule } from './reminders.js';
+import { alertFor, chunks, deadTokens, MAX_AHEAD_MS, MAX_BODY, onRing, planReminder, REMIND_MS, sendShouldRetry, shouldSchedule } from './reminders.js';
 
 const H = 60 * 60_000;
 const now = Date.UTC(2026, 10, 18, 20, 0); // 1:00 PM in Phoenix
@@ -84,4 +84,12 @@ test('chunks splits tokens into batches of 500', () => {
   const list = Array.from({ length: 1201 }, (_, i) => i);
   assert.deepEqual(chunks(list).map((c) => c.length), [500, 500, 201]);
   assert.deepEqual(chunks([]), []);
+});
+
+test('sendShouldRetry: only when nobody got the reminder and a failure may pass', () => {
+  assert.equal(sendShouldRetry({ sent: 0, failed: 2, removed: 0 }), true); // FCM hiccup
+  assert.equal(sendShouldRetry({ sent: 0, failed: 2, removed: 1 }), true);
+  assert.equal(sendShouldRetry({ sent: 0, failed: 2, removed: 2 }), false); // every phone is gone
+  assert.equal(sendShouldRetry({ sent: 0, failed: 0, removed: 0 }), false); // no phones have alerts on
+  assert.equal(sendShouldRetry({ sent: 1, failed: 3, removed: 0 }), false); // someone got it
 });

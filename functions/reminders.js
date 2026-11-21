@@ -69,3 +69,11 @@ export function chunks(list, size = FCM_BATCH) {
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
   return out;
 }
+
+/**
+ * Whether a reminder send should be tried again (Cloud Tasks retries when the task throws): nobody got it,
+ * and at least one phone failed for a reason that may pass (not a phone that is gone for good).
+ */
+export function sendShouldRetry({ sent, failed, removed }) {
+  return sent === 0 && failed - removed > 0;
+}
