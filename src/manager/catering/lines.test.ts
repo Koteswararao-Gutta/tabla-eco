@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineText, menuDishes, normalizeUnit, orderLines, parseLine, qtyText, qtyValue, searchDishes, tidyQty } from './lines';
+import { dishFromLine, itemTexts, lineText, menuDishes, normalizeUnit, orderLines, parseLine, qtyText, qtyValue, searchDishes, tidyQty } from './lines';
 
 const menu = {
   groups: [
@@ -83,18 +83,54 @@ describe('parseLine', () => {
 });
 
 describe('orderLines', () => {
-  it('uses the saved lines while they match the text', () => {
+  it('uses the saved lines', () => {
     const lines = [{ dishId: 'b1', name: 'Chicken Dum Biryani', qty: 2, unit: 'Full tray', note: 'mild' }];
     const items = lines.map(lineText).join('\n');
     expect(items).toBe('Chicken Dum Biryani, 2 Full trays (mild)');
     expect(orderLines({ items, lines })).toBe(lines);
   });
-  it('reads the text when there are no lines, or when the text was changed by an older app', () => {
+  it('uses the saved lines even when the text reads differently: the lines are the one source', () => {
+    const lines = [{ dishId: 'x1', name: 'Raita', qty: 2, unit: 'Quarts', note: '' }];
+    expect(orderLines({ items: 'Raita, 3 quarts', lines }, dishes)).toBe(lines);
+    // A "1 1/2" in a note or a dish typed in is never read again from the text.
+    const typed = [{ dishId: null, name: 'Goat Curry', qty: 1.5, unit: 'Half tray', note: 'cut 1 1/2 inch' }];
+    expect(orderLines({ items: typed.map(lineText).join('\n'), lines: typed })).toBe(typed);
+  });
+  it('reads the text (marked to check when guessed) when there are no lines', () => {
     expect(orderLines({ items: 'Raita, 2 quarts' }, dishes)).toEqual([{ dishId: 'x1', name: 'Raita', qty: 2, unit: 'Quarts', note: '', text: 'Raita, 2 quarts' }]);
-    const stale = { items: 'Raita, 3 quarts', lines: [{ dishId: 'x1', name: 'Raita', qty: 2, unit: 'Quarts', note: '', text: 'Raita, 2 quarts' }] };
-    expect(orderLines(stale, dishes)[0].qty).toBe(3);
+    expect(orderLines({ items: 'Goat curry 2 trays' }, dishes)[0].check).toBe(true);
     expect(orderLines({ items: '' })).toEqual([]);
     expect(orderLines({ items: 'Rice', lines: [{ bad: true } as never] })[0].name).toBe('Rice');
+    expect(orderLines({ items: 'Rice', lines: [] })[0].name).toBe('Rice');
+    expect(orderLines({ items: '', lines: [] })).toEqual([]);
+  });
+});
+
+describe('itemTexts', () => {
+  it('makes the text from the lines when the order has them', () => {
+    const lines = [
+      { dishId: 'b1', name: 'Chicken Dum Biryani', qty: 1.5, unit: 'Full tray', note: '' },
+      { dishId: 'x1', name: 'Raita', qty: 24, unit: 'Oz', note: '', extra: 'Raita' },
+    ];
+    expect(itemTexts({ items: 'something old', lines })).toEqual(['Chicken Dum Biryani, 1-1/2 Full trays', 'Raita, 24 oz (extra)']);
+  });
+  it('uses the saved text on an old order', () => {
+    expect(itemTexts({ items: 'Samosa 40\n\n Raita ½ tray ' })).toEqual(['Samosa 40', 'Raita 1/2 tray']);
+  });
+});
+
+describe('dish names from typed lines', () => {
+  it.each([
+    ['Chicken Biryani for 40', 'Chicken Biryani', 40],
+    ['Chicken Biryani for 40 people', 'Chicken Biryani', 40],
+    ['Samosa (2) 40 pcs', 'Samosa (2)', 40],
+  ])('%s', (text, name, qty) => {
+    const l = parseLine(text, [...dishes, { id: 'sam', name: 'Samosa (2)', group: '', description: '' }]).line;
+    expect(l.name).toBe(name);
+    expect(l.qty).toBe(qty);
+  });
+  it('keeps the joining word out of the name ("2 FT + 1 HT")', () => {
+    expect(dishFromLine('Chicken Biryani 2 FT + 1 HT').name).toBe('Chicken Biryani');
   });
 });
 

@@ -182,3 +182,4 @@
 .c-methods .t-seg { display: flex; }
 .c-methods .t-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
 .c-pay .t-select[aria-invalid='true'] { border-color: var(--bad); }
+.c-older { margin-top: 4px; color: var(--muted); }

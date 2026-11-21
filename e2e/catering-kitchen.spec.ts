@@ -1245,7 +1245,8 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   await details.getByRole('button', { name: 'Close' }).click();
   await expect(manager.getByTestId('unpaid-list')).toContainText('Nothing to collect');
   await expect(filter).toHaveText('Unpaid');
-  const saved = (await readCollection<Record<string, unknown>>(manager, 'orderAmounts'))[0];
+  // (Every order in the list has an amount doc, paid: false until paid, so look it up by what was saved.)
+  const saved = (await readCollection<Record<string, unknown>>(manager, 'orderAmounts')).find((a) => a.amount === 300)!;
   expect(saved).toMatchObject({ amount: 300, paid: true, method: 'card', takenBy: 'Siri', deposits: [{ amount: 100, method: 'zelle', takenBy: 'Tarun' }] });
   expect(typeof saved.paidAt).toBe('number');
   // Nothing about payments is on the order (the kitchen loads orders only).

@@ -1,10 +1,11 @@
-// Manager > More (☰): manager-only tools: Payments, Statistics and Catering prices. Only the manager app has this tab;
+// Manager > More (☰): manager-only tools: Payments, Statistics, Export and Catering prices. Only the manager app has this tab;
 // the front app (#/front) has no ☰.
 import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { PageHeader } from '@shared/ui';
 import Payments from './Payments';
 import Statistics from './Statistics';
 import Prices from './Prices';
+import Export from './Export';
 import './more.css';
 
 export default function More() {
@@ -14,6 +15,7 @@ export default function More() {
       <Route path="payments" element={<Payments />} />
       <Route path="statistics" element={<Statistics />} />
       <Route path="prices" element={<Prices />} />
+      <Route path="export" element={<Export />} />
       <Route path="*" element={<Navigate to="/manager/more" replace />} />
     </Routes>
   );
@@ -35,6 +37,13 @@ function MoreHome() {
           <span>
             <h2 className="mo-h2">Statistics</h2>
             <span className="mo-note">This week's catering orders and total, Monday to Sunday.</span>
+          </span>
+          <span className="mo-chev" aria-hidden="true">›</span>
+        </Link>
+        <Link className="t-card mo-link" to="export" data-testid="export">
+          <span>
+            <h2 className="mo-h2">Export</h2>
+            <span className="mo-note">Download catering orders for a month, a year or any dates, as a spreadsheet file.</span>
           </span>
           <span className="mo-chev" aria-hidden="true">›</span>
         </Link>

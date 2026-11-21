@@ -206,7 +206,8 @@ const TAIL_QTY = new RegExp(
 const QTY_ONLY = new RegExp(`^\\s*(?:x|×|for)?\\s*${QTY}\\s*(?:${UNITS_RE})?\\.?\\s*$`, 'i');
 const QTY_PARTS = new RegExp(`(${QTY})\\s*(${UNITS_RE})?\\b`, 'gi');
 // A bare number after the dish ("Gulab Jamun 100") is a count, except the numbers that are part of a dish's name.
-const TAIL_COUNT = /\s+(?!(?:65|555|999)\b)\d+(?:\.\d+)?\s*$/;
+// "Chicken Biryani for 40": the "for" goes with the count.
+const TAIL_COUNT = /\s+(?:for\s+)?(?!(?:65|555|999)\b)\d+(?:\.\d+)?\s*$/i;
 // A number before the dish ("40 samosas"), when it is the only amount on the line.
 const LEAD_COUNT = new RegExp(`^${QTY}\\s+(?=[a-z])`, 'i');
 
@@ -301,13 +302,27 @@ export function parseLine(line: string, dishes: Dish[] = []): { line: OrderLine;
 const validLine = (l: unknown): l is OrderLine =>
   !!l && typeof l === 'object' && typeof (l as OrderLine).name === 'string' && typeof (l as OrderLine).unit === 'string' && typeof (l as OrderLine).note === 'string';
 
-/** The order's items as structured lines. Uses the saved lines when they still match the items text;
- *  otherwise (an old order, or one edited by an older app version) reads them from the text. */
-export function orderLines(o: Partial<Pick<CateringOrder, 'items' | 'lines'>>, dishes: Dish[] = []): OrderLine[] {
-  const text = itemLines(o.items ?? '');
+/** The order's saved structured lines, or null when it has none (an order saved before lines were added). */
+export function savedLines(o: Partial<Pick<CateringOrder, 'items' | 'lines'>>): OrderLine[] | null {
   const saved = o.lines;
-  if (Array.isArray(saved) && saved.length === text.length && saved.every((l, i) => validLine(l) && lineText(l) === text[i])) return saved;
-  return text.map((t) => parseLine(t, dishes).line);
+  if (!Array.isArray(saved) || !saved.every(validLine)) return null;
+  // An empty list next to items text is not a real "no items" (nothing saves that): read the text instead.
+  if (saved.length === 0 && itemLines(o.items ?? '').length > 0) return null;
+  return saved;
+}
+
+/** The order's items as structured lines: the saved lines whenever the order has them (they are the one
+ *  source; `items` is only text made from them). An old order without lines is read from its text by a
+ *  guess, and those lines are marked to check. */
+export function orderLines(o: Partial<Pick<CateringOrder, 'items' | 'lines'>>, dishes: Dish[] = []): OrderLine[] {
+  return savedLines(o) ?? itemLines(o.items ?? '').map((t) => parseLine(t, dishes).line);
+}
+
+/** The order's items as text, one entry per line, for reading (cards, WhatsApp, the change history, export):
+ *  made from the lines when the order has them, else its saved text. */
+export function itemTexts(o: Partial<Pick<CateringOrder, 'items' | 'lines'>>): string[] {
+  const lines = savedLines(o);
+  return lines ? lines.map(lineText).filter(Boolean) : itemLines(o.items ?? '');
 }
 
 /** Lines saved without anything undefined (Firestore refuses undefined). */

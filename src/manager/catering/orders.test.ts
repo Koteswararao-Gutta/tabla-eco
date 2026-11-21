@@ -255,6 +255,13 @@ describe('shareText / whatsappHref', () => {
     expect(text).toBe('*Catering order*\nPriya VIP Sharma\nFri, Nov 20, 5:30 PM\nPickup\n1 person\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Line 1 strike');
   });
 
+  it('lists the items from the saved lines when the order has them', () => {
+    const lines = [{ dishId: 'b1', name: 'Chicken Dum Biryani', qty: 1.5, unit: 'Full tray', note: 'mild' }];
+    const text = shareText({ ...base, items: 'stale text', lines, type: 'pickup', people: null });
+    expect(text).toContain('*Items*\n• Chicken Dum Biryani, 1-1/2 Full trays (mild)');
+    expect(text).not.toContain('stale');
+  });
+
   it('makes a wa.me link with the message encoded', () => {
     expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
   });

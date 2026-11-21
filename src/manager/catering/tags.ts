@@ -74,9 +74,10 @@ export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines
   const tags: NameTag[] = [];
   for (const line of orderLines(order, dishes)) {
     const menuDish = dishById(line.dishId, dishes);
-    // The menu's name when the line is a menu dish; else the name typed (an old order's line: without its amount).
-    const raw = menuDish?.name ?? (line.dishId ? line.name : line.text ? dishFromLine(line.text).name : line.name);
-    const note = (line.extra ? '' : line.note.trim()) || (!menuDish && !line.dishId && line.text ? dishFromLine(line.text).sub : '');
+    // The menu's name when the line is a menu dish; else the line's own name (an old order's line was read
+    // from its text once, without its amount). The text is never read again here.
+    const raw = menuDish?.name ?? line.name;
+    const note = line.extra ? '' : line.note.trim();
     const { name, sub: nameSub, mark } = tagName(raw);
     const sub = nameSub || (note && !KITCHEN_NOTE.test(note) && !PORTION.test(note) && !MARKER.test(note) ? tidyCase(note) : '');
     const key = name.toLowerCase().split(/[^a-z0-9]+/).map((w) => (w.length > 3 ? w.replace(/s$/, '') : w)).join('');
