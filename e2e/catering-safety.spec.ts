@@ -158,7 +158,7 @@ test('payment log is add-only: removing a deposit and "not paid" are recorded, n
   await expect(details.getByTestId('pay-history')).toContainText('Marked not paid · Card · Tarun');
   await manager.waitForTimeout(300);
   await shot(manager, 'payment-history');
-  const amt = (await readCollection<OrderAmount>(manager, 'orderAmounts'))[0];
+  const amt = (await readCollection<OrderAmount>(manager, 'orderAmounts')).find((a) => a.log?.length)!;
   expect(amt.log!.map((e) => e.kind)).toEqual(['amount', 'deposit', 'depositRemoved', 'paid', 'unpaid']);
   expect(amt.log![3]).toMatchObject({ kind: 'paid', amount: 300, method: 'card', takenBy: 'Tarun' });
   expect(amt).toMatchObject({ paid: false, deposits: [] });
@@ -179,7 +179,7 @@ test('price check: changed items after the amount was set ask to check it; "Pric
   await edit.getByLabel('Amount $ (optional)').fill('350');
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await expect(card.getByTestId('price-drift')).toHaveCount(0);
-  const saved = (await readCollection<OrderAmount>(manager, 'orderAmounts'))[0];
+  const saved = (await readCollection<OrderAmount>(manager, 'orderAmounts')).find((a) => a.log?.length)!;
   const order = (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.customerName === 'Desert Tech office')!;
   expect(saved.itemsAt).toBe(order.items);
 
@@ -198,7 +198,7 @@ test('price check: changed items after the amount was set ask to check it; "Pric
   await expect(details.getByTestId('price-drift')).toHaveCount(0);
   await details.getByRole('button', { name: 'Close' }).click();
   await expect(card.getByTestId('price-drift')).toHaveCount(0);
-  const after = (await readCollection<OrderAmount>(manager, 'orderAmounts'))[0];
+  const after = (await readCollection<OrderAmount>(manager, 'orderAmounts')).find((a) => a.log?.length)!;
   expect(after.log!.map((e) => e.kind)).toEqual(['amount', 'amount']);
   await context.close();
 });
