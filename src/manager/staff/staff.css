@@ -34,8 +34,9 @@
 .sp .savepill.off{visibility:hidden}
 
 /* sub-tabs: same look as the shared segmented control */
-.sp .views{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--sp-line);border-radius:999px;padding:3px;background:var(--surface);margin:0 0 16px}
-.sp .views button{border:0;background:transparent;border-radius:999px;padding:8px 10px;font-weight:600;color:var(--sp-muted);min-height:44px}
+/* three equal parts; with large text they wrap onto a second row instead of running off the screen */
+.sp .views{display:flex;flex-wrap:wrap;border:1px solid var(--sp-line);border-radius:26px;padding:3px;background:var(--surface);margin:0 0 16px}
+.sp .views button{border:0;background:transparent;border-radius:999px;flex:1 1 5.5em;padding:8px 10px;font-weight:600;color:var(--sp-muted);min-height:44px}
 .sp .views button[aria-selected="true"]{background:var(--bg);color:var(--sp-ink);box-shadow:var(--shadow)}
 
 /* buttons not covered by .t-btn */
@@ -46,7 +47,7 @@
 
 /* week navigation and day tabs */
 .sp .weeknav{display:grid;grid-template-columns:48px 1fr 48px;align-items:center;gap:8px;margin:0 0 12px}
-.sp .arrow{background:var(--sp-surface);border:1px solid var(--sp-line);border-radius:var(--radius-sm);height:48px;font-size:1.4rem;font-weight:600}
+.sp .arrow{background:var(--sp-surface);border:1px solid var(--sp-line);border-radius:50%;width:48px;height:48px;padding:0;font-size:1.4rem;font-weight:600}
 .sp .wlabel{font-size:1.1rem;font-weight:650;text-align:center;line-height:1.2}
 .sp .wlabel small{display:block;font-weight:600;font-size:.78rem;color:var(--sp-muted)}
 .sp .wlabel small.now{color:var(--sp-sel)}
