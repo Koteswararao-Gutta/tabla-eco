@@ -29,6 +29,7 @@ function Home() {
     ['/tv/4', 'TV 4 (mirrors TV 2)'],
     ['/tv/5', 'TV 5 (music)'],
     ['/kitchen', 'Kitchen tablet'],
+    ['/front', 'Front app (front staff)'],
     ['/manager', 'Manager app'],
   ];
   return (
@@ -52,7 +53,8 @@ export function App() {
         <Route path="/" element={<Home />} />
         <Route path="/tv/:n" element={<TvRoute />} />
         <Route path="/kitchen" element={<Suspense fallback={null}><Kitchen /></Suspense>} />
-        <Route path="/manager/*" element={<ManagerShell />} />
+        <Route path="/front/*" element={<ManagerShell mode="front" />} />
+        <Route path="/manager/*" element={<ManagerShell mode="manager" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>

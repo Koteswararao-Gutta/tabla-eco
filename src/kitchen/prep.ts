@@ -73,7 +73,8 @@ export function prepFor(orders: Order[], day: number, dishes: Dish[] = []): Prep
       const menuDish = dishById(l.dishId, dishes);
       const name = menuDish?.name ?? l.name.trim();
       const key = norm(name);
-      const rank = menuDish ? dishes.indexOf(menuDish) : dishes.length;
+      // Extras (raita, chutneys) after the dishes.
+      const rank = menuDish ? dishes.indexOf(menuDish) : dishes.length + (l.extra ? 1 : 0);
       const d: Acc = byDish.get(key) ?? { name, rank, units: new Map(), from: new Map() };
       byDish.set(key, d);
       d.rank = Math.min(d.rank, rank);
@@ -101,4 +102,5 @@ export function prepFor(orders: Order[], day: number, dishes: Dish[] = []): Prep
   return { orders: todays.length, dishes: dishList.map(({ rank: _rank, ...d }) => d), others, notes };
 }
 
-const counts = (l: OrderLine) => !!l.dishId && typeof l.qty === 'number' && Number.isFinite(l.qty) && l.qty > 0 && !!l.name.trim();
+/** A line that adds up: a menu dish or an auto extra, with a quantity. */
+const counts = (l: OrderLine) => (!!l.dishId || !!l.extra) && typeof l.qty === 'number' && Number.isFinite(l.qty) && l.qty > 0 && !!l.name.trim();

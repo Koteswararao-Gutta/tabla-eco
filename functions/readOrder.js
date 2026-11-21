@@ -13,7 +13,7 @@ const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const MAX_TEXT_CHARS = 8000;
 
 /** The units the order form offers. Keep in step with UNITS in src/manager/catering/lines.ts. */
-export const UNITS = ['Full tray', 'Half tray', 'Pieces', 'Servings', 'Lbs', 'Quarts', 'Gallons', 'Plates'];
+export const UNITS = ['Full tray', 'Half tray', 'Pieces', 'Servings', 'Lbs', 'Quarts', 'Gallons', 'Plates', 'Oz'];
 /** Most menu dish names sent along with an order (Tabla's menu has about 200). */
 export const MAX_MENU_NAMES = 400;
 
