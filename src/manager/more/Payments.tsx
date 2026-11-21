@@ -3,16 +3,18 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useCollection, useNow } from '@shared/data';
 import { PageHeader } from '@shared/ui';
 import { amountLabel, dayLabel, dayStart, fromInputs, timeLabel, toDateInput } from '../catering/orders';
+import { useAmountsOf } from '../catering/data';
 import { paymentsOn } from './payments';
 
 export default function Payments() {
   const now = useNow(60_000);
-  const orders = useCollection('orders');
-  const amounts = useCollection('orderAmounts');
   // The day lives in the link, so coming back from an order returns to the same day.
   const [params, setParams] = useSearchParams();
   const picked = fromInputs(params.get('day') ?? '', '12:00');
   const day = dayStart(picked ?? now);
+  // Only that day's orders and their amounts are loaded.
+  const orders = useCollection('orders', { dueFrom: day, dueTo: dayStart(day, 1) });
+  const amounts = useAmountsOf(orders).current;
   const go = (ms: number) => setParams({ day: toDateInput(ms) }, { replace: true });
   const data = orders && amounts ? paymentsOn(orders, amounts, day) : null;
   const longDate = new Date(day).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });

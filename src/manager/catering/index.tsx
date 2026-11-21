@@ -2,15 +2,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
+import { recentSince, store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
+  amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
 import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
-import { menuDishes, orderLines, qtyText, type Dish } from './lines';
+import { itemTexts, menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
 import { balance, depositError, depositTotal, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
 import { savePay } from './payWrite';
@@ -19,6 +19,7 @@ import './catering.css';
 import { Address } from './Address';
 import { EstimateSheet, EstimatesList, type Estimate } from './Estimates';
 import { orderFormFromEstimate } from './estimates';
+import { nearDay, olderStep, shortDate, useAmountsOf, useCateringOrders, useExplicitPaid, useOrder } from './data';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
@@ -57,11 +58,20 @@ function useSaver() {
 }
 
 export default function Catering() {
+  // Open and recent orders, unpaid ones however old, and older history once asked for (see data.ts).
   // Deleted orders (soft delete) are left out of everything here: list, calendar, Unpaid, details.
-  const allOrders = useCollection('orders');
-  const orders = useMemo(() => (allOrders ? notDeleted(allOrders) : allOrders), [allOrders]);
-  // Manager only: what each order costs (orderAmounts/{order id}). The kitchen never loads this.
-  const amounts = useCollection('orderAmounts');
+  const [recentFrom] = useState(() => recentSince(store.now()));
+  const [olderFrom, setOlderFrom] = useState<number | null>(null);
+  const { orders: loadedOrders, recent, unpaidReady, olderLoading } = useCateringOrders(olderFrom, recentFrom);
+  const orders = useMemo(() => (loadedOrders ? notDeleted(loadedOrders) : loadedOrders), [loadedOrders]);
+  const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
+  // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
+  // completing it) shows in the sheet at once; an older order (e.g. opened from Payments) is read on its own.
+  const editOrder = useOrder(editing && editing !== 'new' ? editing : null, orders) ?? null;
+  const onScreen = useMemo(() => (orders && editOrder && !orders.some((o) => o.id === editOrder.id) ? [...orders, editOrder] : orders), [orders, editOrder]);
+  // Manager only: what each order costs (orderAmounts/{order id}), for the orders loaded. The kitchen never loads this.
+  const { shown: amounts, current: currentAmounts } = useAmountsOf(onScreen);
+  useExplicitPaid(recent, currentAmounts);
   // Read once per snapshot, so each card gets the same Pay object until its payment changes.
   const pays = useMemo(() => (amounts ? new Map(amounts.map((a) => [a.id, payFrom(a)])) : null), [amounts]);
   const payOf = useCallback((id: string): Pay | undefined => (pays ? pays.get(id) ?? NO_PAY : undefined), [pays]);
@@ -70,7 +80,6 @@ export default function Catering() {
   const today = dayStart(now);
   const menu = useDoc('toastMenu', 'current');
   useStructureOldOrders(orders, menu === undefined ? undefined : menuDishes(menu));
-  const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   // "?order=<id>" (e.g. from More > Payments) opens that order.
   const [params, setParams] = useSearchParams();
   useEffect(() => {
@@ -84,8 +93,8 @@ export default function Catering() {
   // "Estimates" (price quotes for customers), "Orders" (open ones; completed ones under History) or "Unpaid"
   // (completed by the kitchen, not yet paid).
   const [view, setView] = useState<'orders' | 'unpaid' | 'estimates'>('orders');
-  const allEstimates = useCollection('estimates');
-  const estimates = useMemo(() => (allEstimates ? notDeleted(allEstimates) : allEstimates), [allEstimates]);
+  const loadedEstimates = useCollection('estimates', 'openOrRecentlyUpdated');
+  const estimates = useMemo(() => (loadedEstimates ? notDeleted(loadedEstimates) : loadedEstimates), [loadedEstimates]);
   const [estimateId, setEstimateId] = useState<string | null>(null); // estimate id, 'new', or closed
   const openEstimate = estimateId && estimateId !== 'new' ? estimates?.find((e) => e.id === estimateId) ?? null : null;
   const openEstimates = estimates ? estimates.filter((e) => e.status !== 'ordered').length : 0;
@@ -123,14 +132,12 @@ export default function Catering() {
   const past = orders ? history(orders) : [];
   // The calendar is for planning: cancelled orders are left out.
   const calendarOrders = useMemo(() => (orders ? orders.filter((o) => !isCancelled(o)) : orders), [orders]);
-  // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
-  // completing it) shows in the sheet at once. If it is deleted elsewhere, the sheet closes.
-  const editOrder = editing && editing !== 'new' ? orders?.find((o) => o.id === editing) ?? null : null;
+  // If the order being edited is deleted elsewhere, the sheet closes.
   const sheetOpen = editing === 'new' || !!editOrder;
   const openOrder = useCallback((o: Order) => setEditing(o.id), []);
   const openCount = groups ? groups.overdue.length + groups.today.length + groups.tomorrow.length + groups.later.length : 0;
   // A finished order stays in the list until it is paid.
-  const unpaid = orders && amounts ? unpaidDone(orders, payOf) ?? [] : [];
+  const unpaid = orders && amounts && unpaidReady ? unpaidDone(orders, payOf) ?? [] : [];
   const owedTotal = unpaid.reduce((a, o) => a + (balance(payOf(o.id) ?? NO_PAY) ?? 0), 0);
 
   return (
@@ -220,12 +227,16 @@ export default function Catering() {
           <Group title="Later" orders={groups.later} today={today} payOf={payOf} showDate onOpen={openOrder} />
           {/* Completed orders show only under History; the ones still to be paid are also under Unpaid. */}
 
-          {past.length > 0 && (
-            <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
-              {showHistory ? 'Hide history' : `History (${past.length})`}
+          <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
+            {showHistory ? 'Hide history' : past.length > 0 ? `History (${past.length})` : 'History'}
+          </button>
+          {showHistory && <Group title="History" orders={past} today={today} payOf={payOf} showDate onOpen={openOrder} />}
+          {/* Older orders are loaded only when asked for, 6 months at a time. */}
+          {showHistory && (
+            <button className="t-btn block ghost c-older" disabled={olderLoading} onClick={() => setOlderFrom(olderStep(olderFrom ?? recentFrom))} data-testid="show-older">
+              {olderLoading ? 'Loading…' : `Show orders before ${shortDate(olderFrom ?? recentFrom)}`}
             </button>
           )}
-          {showHistory && past.length > 0 && <Group title="History" orders={past} today={today} payOf={payOf} showDate onOpen={openOrder} />}
         </div>
       )}
 
@@ -457,7 +468,7 @@ function Group(props: { title?: string; orders: Order[]; today: number; showDate
 
 /** Manager list card. The kitchen has its own cards (src/kitchen), which never show the amount. */
 const OrderCard = memo(function OrderCard({ order: o, pay, today, showDate, onOpen }: { order: Order; pay?: Pay; today: number; showDate?: boolean; onOpen: (o: Order) => void }) {
-  const n = itemLines(o.items).length;
+  const n = itemTexts(o).length;
   const cancelled = isCancelled(o);
   const unpaidBadge = o.status === 'completed' && !!pay && !isPaid(pay);
   const drift = !cancelled && itemsChangedSincePrice(o.items, pay);
@@ -1104,7 +1115,8 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     return { ...f, lines: [{ ...f.lines[0], unit: lastUnit() }] };
   });
   const [f, setF] = useState<OrderForm>(start);
-  const loadedOrders = useCollection('orders');
+  // Orders a day either side of the picked date (the same-day list), not every order ever saved.
+  const loadedOrders = useCollection('orders', nearDay(f.date));
   const allOrders = useMemo(() => (loadedOrders ? notDeleted(loadedOrders) : loadedOrders), [loadedOrders]);
   // A new order for a phone that already has an order that day: asks "Save anyway?" first.
   const [dup, setDup] = useState<Order | null>(null);

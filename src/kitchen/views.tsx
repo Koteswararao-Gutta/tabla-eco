@@ -1,10 +1,10 @@
 // Kitchen list grouped by day (Today first), and the Calendar view: a month with order counts per day.
 import { useState, type ReactNode } from 'react';
 import type { CateringOrder, WithId } from '@shared/data';
-import { countdown, dayLabel, dayStart, itemLines, ordersByDay, showsCountdown, timeLabel } from '../manager/catering/orders';
+import { countdown, dayLabel, dayStart, ordersByDay, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { MonthCalendar } from '../manager/catering/calendar';
 import { ItemList } from '../manager/catering';
-import { orderLines } from '../manager/catering/lines';
+import { itemTexts, orderLines } from '../manager/catering/lines';
 import { Address } from '../manager/catering/Address';
 import { kitchenGroups, weekdayLabel } from './days';
 
@@ -58,7 +58,7 @@ export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: nu
                     </span>
                     <span className="k-row-items">
                       {o.people ? `${o.people} people · ` : ''}
-                      {itemLines(o.items).join(' · ')}
+                      {itemTexts(o).join(' · ')}
                     </span>
                   </span>
                   <span className="k-row-side">

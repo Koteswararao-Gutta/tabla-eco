@@ -72,13 +72,16 @@ export class LocalStore implements DataStore {
   watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void, filter?: CollectionFilter): Unsubscribe {
     let last = '\u0000';
     const since = recentSince(this.now());
+    // { ids }: just those documents (the same rule as matchesFilter, without looking at every document).
+    const ids = filter && typeof filter === 'object' && 'ids' in filter ? new Set(filter.ids) : null;
     const run = () => {
       const table = this.read(col);
       const s = JSON.stringify(table);
       if (s === last) return;
       last = s;
-      const docs = Object.entries(table).map(([id, d]) => ({ ...(d as object), id }) as WithId<Collections[C]>);
-      cb(filter ? docs.filter((d) => matchesFilter(d, filter, since)) : docs);
+      const entries = ids ? [...ids].filter((id) => table[id]).map((id) => [id, table[id]] as const) : Object.entries(table);
+      const docs = entries.map(([id, d]) => ({ ...(d as object), id }) as WithId<Collections[C]>);
+      cb(filter && !ids ? docs.filter((d) => matchesFilter(d, filter, since, d.id)) : docs);
     };
     run();
     return this.listen(col, run);

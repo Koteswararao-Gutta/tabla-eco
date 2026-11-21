@@ -190,3 +190,4 @@
 .c-cancelled-note { margin: 0; color: var(--muted); }
 .c-dup { padding: 12px 14px; border-radius: var(--radius); background: var(--bad-soft); }
 .c-dup p { margin: 0; }
+.c-older { margin-top: 4px; color: var(--muted); }
