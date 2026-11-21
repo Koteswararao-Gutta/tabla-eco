@@ -10,6 +10,8 @@ test('kitchen card: plain address, orange border only with the countdown; sheet 
     localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
   });
   const page = await context.newPage();
+  // Midday, so "in 90 minutes" is still today in the Calendar whatever time the test runs.
+  await page.clock.install({ time: new Date('2026-11-18T12:00:00-07:00') });
   await page.goto('/#/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
   await page.evaluate(() => {

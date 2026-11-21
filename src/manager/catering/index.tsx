@@ -311,7 +311,7 @@ export function ItemList({ lines, className, showChecks }: { lines: OrderLine[];
       {lines.map((l, i) => {
         const check = showChecks && l.check ? <span className="t-badge c-check-badge">Check</span> : null;
         const extra = l.extra ? <span className="t-badge accent c-extra-badge">Extra</span> : null;
-        if (l.text) {
+        if (l.text && (l.check || !l.dishId)) {
           return (
             <li key={i}>
               {l.text}
