@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { dishFromLine, guessDiet, nameSize, sheets, tagsForOrder } from './tags';
+import { linesText } from './lines';
+import { dishFromLine, guessDiet, nameSize, sheets, tagName, tagsForOrder } from './tags';
 
 describe('dishFromLine', () => {
   it.each([
@@ -62,4 +63,58 @@ it('splits into sheets of 10 and sizes long names', () => {
   expect(nameSize('Rose Milk')).toBe('');
   expect(nameSize('Andhra Chicken Curry Special')).toBe('long');
   expect(nameSize('Hyderabadi Chicken Dum Biryani Family Pack')).toBe('xlong');
+});
+
+describe('tags show just the dish', () => {
+  const menu = {
+    groups: [
+      { id: 'a', name: 'Veg Appetizers', items: [{ id: 'samosa', name: 'Onion Samosa (6 pcs) (V)' }, { id: 'rolls', name: 'Spring Rolls (6 pc)' }, { id: 'chaat', name: 'Samosa Chaat' }] },
+      { id: 'b', name: 'Non-Veg Appetizers', items: [{ id: 'c65', name: 'Chicken 65' }] },
+      { id: 'c', name: 'Breads', items: [{ id: 'naan', name: 'Garlic Naan' }] },
+      { id: 'd', name: 'Desserts', items: [{ id: 'gj', name: 'Gulab Jamun (4 pc)' }, { id: 'rm', name: 'Rasmalai (3 pc)' }] },
+    ],
+  };
+  const line = (dishId: string | null, name: string, qty: number | null, unit: string, note = '') => ({ dishId, name, qty, unit, note });
+
+  it('leaves out quantities, units, notes, portion sizes and menu markers', () => {
+    const lines = [
+      line('samosa', 'Onion Samosa (6 pcs) (V)', 60, 'Pieces'),
+      line('chaat', 'Samosa Chaat', 2, 'Half tray', 'chutney on the side'),
+      line('c65', 'Chicken 65', 1.5, 'Full tray', 'extra spicy'),
+      line('naan', 'Garlic Naan', 60, 'Pieces', 'cut in 4'),
+      line('gj', 'Gulab Jamun (4 pc)', 25, 'Pieces'),
+      line('rolls', 'Spring Rolls (6 pc)', 30, 'Pieces'),
+      line(null, 'Raita', 2, 'Quarts'),
+      line('rm', 'Rasmalai (3 pc)', 60, 'Pieces'),
+    ];
+    // As the app saves an order: the lines, plus the same items as text.
+    const tags = tagsForOrder({ lines, items: linesText(lines) }, menu);
+    expect(tags.map((t) => [t.name, t.sub, t.diet])).toEqual([
+      ['Onion Samosa', '', 'veg'],
+      ['Samosa Chaat', '', 'veg'],
+      ['Chicken 65', '', 'nonveg'],
+      ['Garlic Naan', '', 'veg'],
+      ['Gulab Jamun', '', 'veg'],
+      ['Spring Rolls', '', 'veg'],
+      ['Raita', '', 'veg'],
+      ['Rasmalai', '', 'veg'],
+    ]);
+  });
+
+  it('keeps a describing word in brackets, drops markers', () => {
+    expect(tagName('Andhra Chicken Curry (Bone-in)')).toEqual({ name: 'Andhra Chicken Curry', sub: 'Bone-in', mark: null });
+    expect(tagName('Paneer 65 (V) (Spicy)')).toEqual({ name: 'Paneer 65', sub: '', mark: 'veg' });
+    expect(tagName('Chicken Biryani (Serves 2-3)')).toEqual({ name: 'Chicken Biryani', sub: '', mark: null });
+    expect(tagName('Egg Puffs - 2 pcs')).toEqual({ name: 'Egg Puffs', sub: '', mark: null });
+  });
+
+  it('typed lines of old orders drop amounts like 1-1/2 FT and kitchen notes', () => {
+    const tags = tagsForOrder({ items: 'Chicken 65 - 1-1/2 FT (extra spicy)\nVeg Biryani 1½ trays\nAndhra Chicken Curry (Bone-in) - 4 FT\nMirchi Bajji, 40 pcs (chutney on the side)' }, null);
+    expect(tags.map((t) => [t.name, t.sub])).toEqual([
+      ['Chicken 65', ''],
+      ['Veg Biryani', ''],
+      ['Andhra Chicken Curry', 'Bone-in'],
+      ['Mirchi Bajji', ''],
+    ]);
+  });
 });
