@@ -371,7 +371,9 @@ test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on
     localStorage.setItem('tabla:orders', JSON.stringify(t));
   });
   await page.reload();
-  await expect(page.getByTestId('kitchen-reminder').getByRole('button', { name: 'Got it' })).toHaveCount(5);
+  // The PIN screen shows 3 rows and "+2 more" (no hidden scroll area); all 5 show once unlocked.
+  await expect(page.getByTestId('kitchen-reminder').getByRole('button', { name: 'Got it' })).toHaveCount(3);
+  await expect(page.getByTestId('kitchen-reminder')).toContainText('+2 more');
   const onScreen = async () => {
     const vh = page.viewportSize()!.height;
     for (const k of ['1', '0', 'Clear', 'Delete last digit']) {
@@ -383,7 +385,7 @@ test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on
     expect(await page.evaluate(() => {
       const hit = (el: Element) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!top && (el === top || el.contains(top)); };
       // ...nor on the heads-up: it sits below the time zone strip.
-      return document.documentElement.classList.contains('t-tz-on') && [...document.querySelectorAll('.k-key, .k-dots'), document.querySelector('.k-remind-btn')!].every(hit);
+      return document.documentElement.classList.contains('t-tz-on') && [...document.querySelectorAll('.k-key, .k-dots, .k-remind-btn')].every(hit);
     })).toBe(true);
   };
   await onScreen();
@@ -394,6 +396,7 @@ test('kitchen: with 5 heads-ups and the time zone strip, the PIN keypad stays on
   // The keypad still works, and so does Got it.
   await typePin(page, '1234');
   await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
+  await expect(page.getByTestId('kitchen-reminder').getByRole('button', { name: 'Got it' })).toHaveCount(5);
   await context.close();
 });
 
@@ -1411,20 +1414,16 @@ test('tapping a delivery address offers Copy (and Open in Maps in the manager ap
   await shot(manager, 'manager-address-copy');
   await expect(summary.getByRole('button', { name: 'Copy address' })).toBeVisible({ timeout: 4000 });
 
-  // Kitchen: tapping the address on a card copies it instead of opening the order's options.
+  // Kitchen: the card shows the address as plain text (a tap opens the order's options, like the rest of
+  // the card); Copy address is in the full order opened from the Calendar.
   await manager.evaluate(() => navigator.clipboard.writeText(''));
   const kitchen = await context.newPage();
   await kitchen.setViewportSize({ width: 1280, height: 800 });
   await kitchen.goto('/#/kitchen');
   await typePin(kitchen, '1234');
   const card = kitchen.getByRole('article', { name: 'Order for Desert Tech office' });
-  await card.getByTestId('address').click();
-  await expect(kitchen.getByRole('dialog')).toHaveCount(0);
-  await expect(card.getByRole('link', { name: 'Open in Maps' })).toHaveCount(0); // the tablet app stays put
-  await card.getByRole('button', { name: 'Copy address' }).click();
-  await expect(card.getByRole('button', { name: '✓ Copied' })).toBeVisible();
-  expect(await kitchen.evaluate(() => navigator.clipboard.readText())).toBe(addr);
-  await shot(kitchen, 'kitchen-address-copy');
+  await expect(card.getByText(addr)).toBeVisible();
+  await expect(card.getByTestId('address')).toHaveCount(0);
   // And in the full order opened from the Calendar.
   await kitchen.getByRole('button', { name: 'Calendar', exact: true }).click();
   const cal = kitchen.getByTestId('kitchen-calendar');
@@ -1436,7 +1435,9 @@ test('tapping a delivery address offers Copy (and Open in Maps in the manager ap
   await cal.getByTestId('kitchen-cal-row').filter({ hasText: 'Desert Tech office' }).click();
   const full = kitchen.getByRole('dialog', { name: 'Desert Tech office' }).getByTestId('kitchen-order-details');
   await full.getByTestId('address').click();
-  await expect(full.getByRole('button', { name: 'Copy address' })).toBeVisible();
+  await full.getByRole('button', { name: 'Copy address' }).click();
+  expect(await kitchen.evaluate(() => navigator.clipboard.readText())).toBe(addr);
+  await shot(kitchen, 'kitchen-address-copy');
   await context.close();
 });
 
