@@ -1,0 +1,33 @@
+/* Catering > Estimates. Uses the theme's variables only. */
+.e-count { background: var(--muted); }
+.e-card-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Saved estimate: items with their prices, then the totals. */
+.e-priced { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 1.02rem; }
+.e-priced li { display: flex; gap: 12px; align-items: baseline; }
+.e-priced-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.e-priced-amt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.e-totals { margin: 12px 0 0; padding: 12px 14px; border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+.e-totals > div { display: flex; justify-content: space-between; gap: 12px; }
+.e-totals dt { color: var(--muted); }
+.e-totals dd { margin: 0; font-variant-numeric: tabular-nums; }
+.e-totals .e-total dt { color: var(--ink); font-weight: 650; }
+.e-totals .e-total dd { font-size: 1.4rem; font-weight: 700; }
+
+/* Form: one row per item with its price box. */
+.e-prices { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.e-price-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.e-price-row + .e-price-row { border-top: 1px solid var(--line); }
+.e-price-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.e-price-name small { color: var(--muted); font-size: 0.82rem; }
+.e-price-box { display: flex; align-items: center; gap: 4px; flex: none; width: 112px; font-weight: 600; }
+.e-price-box .t-input { text-align: right; font-variant-numeric: tabular-nums; }
+.e-price-free { flex: none; color: var(--good); font-weight: 600; }
+.e-confirm { padding: 12px 14px; border-radius: var(--radius); background: var(--bad-soft); display: flex; flex-direction: column; gap: 10px; }
+.e-confirm p { margin: 0; }
+.e-valid { text-align: center; }
+
+/* ☰ More > Catering prices */
+.e-list-group { margin: 20px 0 8px; font-size: 0.95rem; font-weight: 650; color: var(--muted); }
+.e-search { margin-bottom: 4px; }
+.e-form-prices .e-price-box .t-input::placeholder { color: var(--ink); font-style: normal; opacity: 1; }

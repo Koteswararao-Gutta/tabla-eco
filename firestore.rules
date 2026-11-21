@@ -62,6 +62,16 @@ service cloud.firestore {
             || (request.resource.data.amount is number && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000))
         && request.resource.data.updatedAt is number;
     }
+    // A catering price estimate (front and manager apps; the kitchen never loads it).
+    match /estimates/{id} {
+      allow read, delete: if signedIn();
+      allow create, update: if signedIn() && small()
+        && request.resource.data.customerName is string && request.resource.data.customerName.size() <= 200
+        && request.resource.data.status in ['open', 'ordered']
+        && request.resource.data.lines is list && request.resource.data.lines.size() <= 300
+        && request.resource.data.total is number
+        && request.resource.data.updatedAt is number;
+    }
     match /staffWeeks/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /clocks/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
@@ -84,7 +94,7 @@ service cloud.firestore {
     match /usage/{id}       { allow read, write: if false; }
     match /singletons/{id} {
       allow read: if signedIn();
-      allow write: if signedIn() && id in ['seeded', 'loop', 'music', 'settings', 'staffConfig'];
+      allow write: if signedIn() && id in ['seeded', 'loop', 'music', 'settings', 'staffConfig', 'cateringPrices'];
     }
     match /pictureData/{id} {
       allow read: if signedIn();

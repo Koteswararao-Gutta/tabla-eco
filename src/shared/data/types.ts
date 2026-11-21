@@ -139,6 +139,61 @@ export interface Deposit {
   at: number;
 }
 
+/**
+ * A catering price estimate (quote) made with a customer before they confirm. Front and manager apps only:
+ * the kitchen never loads this collection. Once the customer agrees, "Make order" turns it into a real
+ * catering order and the estimate is kept, marked `ordered`, with the new order's id.
+ */
+export interface CateringEstimate {
+  customerName: string;
+  /** '' when not given. */
+  phone: string;
+  /** When the customer wants it, if known (ms since epoch); null when not decided yet. */
+  dueAt: number | null;
+  type: 'pickup' | 'delivery';
+  /** '' unless delivery. */
+  address: string;
+  people: number | null;
+  lines: EstimateLine[];
+  /** US dollars off the subtotal; null when none. */
+  discount: number | null;
+  /** US dollars; null when none. */
+  deliveryFee: number | null;
+  /** Sales tax in percent, as it was when the estimate was saved (0 = no tax). */
+  taxPercent: number;
+  /** What the customer pays, as worked out when saved. */
+  total: number;
+  notes: string;
+  status: 'open' | 'ordered';
+  /** The catering order made from it, once ordered. */
+  orderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** One item of an estimate: an order line with its price. */
+export interface EstimateLine extends OrderLine {
+  /** What this line costs in US dollars (all of it, not each). 0 for a free extra; null when not priced. */
+  price: number | null;
+  /** true when someone typed the price; otherwise it came from the price list. */
+  priceSet?: boolean;
+}
+
+/**
+ * The catering price list (singleton `cateringPrices`), edited in the manager app under ☰ More.
+ * Missing: the app uses its built-in starting prices (see prices.ts in the catering folder).
+ */
+export interface CateringPrices {
+  /** Full-tray price per dish, by the dish's plain name key (letters and digits, lower case). Half tray = half. */
+  trays: Record<string, number>;
+  /** Full-tray price for a dish with no price of its own, by kind of dish (chicken includes paneer and egg;
+   *  meat is goat, lamb and fish). Pieces (samosa, kebab, tikki) are priced by hand for now. */
+  defaults: { veg: number; chicken: number; meat: number };
+  /** Sales tax in percent; 0 = no tax line. */
+  taxPercent: number;
+  updatedAt: number;
+}
+
 /** Which device saved an edit: the kitchen tablet or the manager phone app. */
 export type EditedBy = 'kitchen' | 'manager';
 
@@ -216,6 +271,7 @@ export interface Singletons {
   staffConfig: StaffConfig;
   loop: LoopAnchor;
   seeded: { at: number };
+  cateringPrices: CateringPrices;
 }
 export type SingletonId = keyof Singletons;
 
@@ -227,6 +283,8 @@ export interface Collections {
   orders: CateringOrder;
   /** Manager only: the amount per order (doc id = order id). Never read it from the kitchen. */
   orderAmounts: OrderAmount;
+  /** Catering price estimates (front and manager apps). Never read it from the kitchen. */
+  estimates: CateringEstimate;
   /** Single documents: use useSingleton / saveSingleton rather than this collection directly. */
   singletons: Singletons[SingletonId];
   staffWeeks: StaffWeek;
