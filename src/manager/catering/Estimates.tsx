@@ -5,15 +5,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Field, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useDoc, useSingleton, type CateringEstimate, type WithId } from '@shared/data';
+import { store, useDoc, useSingleton, type CateringEstimate, type ScannedOrder, type WithId } from '@shared/data';
 import { amountLabel, dayLabel, NAME_MAX, parseQty, telHref, timeLabel, toTimeInput } from './orders';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
 import { menuDishes, qtyText } from './lines';
 import { priceList } from './prices';
 import {
-  customerWhatsappHref, draftPrice, emptyEstimateForm, estimateFields, estimateText, estimateTotals, formFromEstimate, formTotals, validateEstimate, VALID_DAYS,
+  customerWhatsappHref, draftPrice, emptyEstimateForm, estimateFields, estimateFormFromScan, estimateText, estimateTotals, formFromEstimate, formTotals, validateEstimate, VALID_DAYS,
   type EstimateErrors, type EstimateForm, type PricedDraft,
 } from './estimates';
+import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { useAppMode } from '../mode';
 import './estimates.css';
 
@@ -59,7 +60,7 @@ export function EstimatesList({ estimates, now, onOpen }: { estimates: Estimate[
         <div className="t-empty c-empty">
           No estimates.
           <br />
-          Tap “+ New estimate” to price an order for a customer.
+          Tap “+ Estimate” to price an order for a customer.
         </div>
       )}
       {open.map((e) => (
@@ -283,7 +284,10 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
   const [attempt, setAttempt] = useState(0);
   const form = useRef<HTMLFormElement>(null);
   const { busy, error, run } = useBusy();
-  dirty.current = JSON.stringify(f) !== JSON.stringify(start);
+  const [scanFrom, setScanFrom] = useState<ScanFrom | null>(null);
+  const [unsure, setUnsure] = useState<(keyof EstimateForm)[]>([]);
+  const [pendingPaste, setPendingPaste] = useState(false);
+  dirty.current = JSON.stringify(f) !== JSON.stringify(start) || scanFrom !== null || pendingPaste;
 
   useEffect(() => {
     if (!attempt) return;
@@ -298,6 +302,14 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
       if (tried) setErrors(validateEstimate(next, list));
       return next;
     });
+    setUnsure((u) => u.filter((x) => x !== k));
+  };
+  const filledFrom = (got: ScannedOrder, from: ScanFrom) => {
+    const filled = estimateFormFromScan(got, f, dishes);
+    setF(filled.form);
+    setUnsure(filled.unsure);
+    if (tried) setErrors(validateEstimate(filled.form, list));
+    setScanFrom(from);
   };
   const setPrice = (i: number, price: string) => set('lines', f.lines.map((d, j) => (j === i ? { ...d, price } : d)));
 
@@ -319,7 +331,12 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
     });
   };
 
-  const err = (k: keyof EstimateForm) => errors[k] && <small className="c-err" role="alert">{errors[k]}</small>;
+  const err = (k: keyof EstimateForm) =>
+    errors[k] ? (
+      <small className="c-err" role="alert">{errors[k]}</small>
+    ) : (
+      unsure.includes(k) && <small className="c-check">Please check this: it was {scanFrom === 'message' ? 'unclear' : 'hard to read'}.</small>
+    );
   const t = formTotals(f, list);
   const priced = f.lines.map((d, i) => ({ d, i })).filter(({ d }) => d.name.trim());
   const count = Object.keys(errors).length;
@@ -334,6 +351,7 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
         save();
       }}
     >
+      {!estimate && <ScanPaste onFilled={filledFrom} saveLabel="Save estimate" onPending={setPendingPaste} />}
       <Field label="Customer name">
         <input className="t-input" maxLength={NAME_MAX} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
         {err('customerName')}
@@ -363,10 +381,12 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
             { value: 'delivery', label: 'Delivery' },
           ]}
         />
+        {err('type')}
       </div>
       {f.type === 'delivery' && (
         <Field label="Delivery address (optional)">
           <input className="t-input" value={f.address} onChange={(e) => set('address', e.target.value)} autoComplete="off" />
+          {err('address')}
         </Field>
       )}
       <Field label="Number of people (optional)">
@@ -449,6 +469,7 @@ function EstimateFormView({ estimate, dirty, onSaved, onCancel }: { estimate: Es
       </div>
       <Field label="Notes for the customer (optional)">
         <textarea className="t-textarea c-notes" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />
+        {err('notes')}
       </Field>
 
       <TotalsBlock t={t} taxPercent={list.taxPercent} />

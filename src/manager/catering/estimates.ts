@@ -1,9 +1,10 @@
 // Catering estimates (price quotes): the form, its checks, the saved shape and the customer's WhatsApp
 // message. Pure helpers: no React, no store.
-import type { CateringEstimate, CateringPrices, EstimateLine } from '@shared/data';
+import type { CateringEstimate, CateringPrices, EstimateLine, ScannedOrder } from '@shared/data';
+import type { Dish } from './lines';
 import { qtyText } from './lines';
 import {
-  amountError, amountInput, amountLabel, blankLine, draftFromLine, fromInputs, linesFromForm, NAME_MAX, parseAmount, parseQty, timeLabel, toDateInput, toTimeInput,
+  amountError, amountInput, amountLabel, blankLine, draftFromLine, formFromScan, fromInputs, linesFromForm, NAME_MAX, parseAmount, parseQty, timeLabel, toDateInput, toTimeInput,
   type LineDraft, type OrderForm,
 } from './orders';
 import { listPrice, totals, type Totals } from './prices';
@@ -51,6 +52,14 @@ export function formFromEstimate(e: CateringEstimate): EstimateForm {
     discount: amountInput(e.discount),
     deliveryFee: amountInput(e.deliveryFee),
   };
+}
+
+/** "Scan paper" / "Paste message" on a new estimate: the same reading as a new order. Read items carry no
+ *  typed price, so each one is priced from the price list. Discount and delivery fee stay as they were.
+ *  An estimate needs no date, so a missing one is not flagged. */
+export function estimateFormFromScan(s: ScannedOrder, base: EstimateForm, dishes: Dish[] = []): { form: EstimateForm; unsure: (keyof EstimateForm)[] } {
+  const { form, unsure } = formFromScan(s, base, dishes);
+  return { form: { ...base, ...form, lines: form.lines as PricedDraft[] }, unsure: form.date ? unsure : unsure.filter((k) => k !== 'date') };
 }
 
 /** A row's price: what was typed in its price box, else the price list's. null when neither gives one. */
