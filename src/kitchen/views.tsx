@@ -54,7 +54,7 @@ export function CalendarView({ orders, now, onOpen }: { orders: Order[]; now: nu
                   <span className="k-row-main">
                     <span className="k-row-head">
                       <span className="k-row-name">{o.customerName}</span>
-                      <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+                      <span className={'t-badge k-type' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
                     </span>
                     <span className="k-row-items">
                       {o.people ? `${o.people} people · ` : ''}
