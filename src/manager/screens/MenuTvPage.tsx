@@ -8,7 +8,7 @@ import { newId, restartLoop, store, useCollection, useNow, type Screen, type Scr
 import { MAIN_OF, PARTNER, loopSlots, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
 import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
-import { useAppBase, useAppMode } from '../mode';
+import { useAppBase } from '../mode';
 import { deletePictureIfUnused, FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
 
 type S = WithId<Slot>;
@@ -36,7 +36,6 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const slots = useMemo(() => allSlots && allSlots.filter(isWholeSlot), [allSlots]);
   const now = useNow(30_000);
   const base = useAppBase();
-  const front = useAppMode() === 'front'; // the front app only looks
   if (!screens || !slots) {
     return <ScreenPage id={tv}><p className="t-sub">Loading…</p></ScreenPage>;
   }
@@ -48,8 +47,7 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const sub = SIDE_LINE[tv] ?? PLAY_LINE;
   return (
     <ScreenPage id={tv} sub={sub}>
-      {front && <p className="sc-note" data-testid="view-only">Only the manager app can change these pictures.</p>}
-      {mirrorSrc && !front && (
+      {mirrorSrc && (
         <Switch
           label={`Mirror ${screenName(mirrorSrc)}`}
           sub={mirroring ? `Shows the same pictures as ${screenName(mirrorSrc)}` : `Shows ${screenName(mirrorSrc)}'s pictures until you add its own`}
@@ -60,13 +58,13 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
       {mirroring && source ? (
         <>
           <p className="sc-note sc-mirror-note" data-testid="mirror-note">
-            {front ? `Shows the same pictures as ${screenName(source)}.` : 'To change these pictures, open'}
-            {!front && <Link className="sc-link" to={base + '/screens/' + source}>{screenName(source)} ›</Link>}
+            To change these pictures, open
+            <Link className="sc-link" to={base + '/screens/' + source}>{screenName(source)} ›</Link>
           </p>
           <PictureList tv={source} slots={slots} screens={screens} now={now} readOnly />
         </>
       ) : (
-        <PictureList tv={tv} slots={slots} screens={screens} now={now} readOnly={front} />
+        <PictureList tv={tv} slots={slots} screens={screens} now={now} />
       )}
     </ScreenPage>
   );

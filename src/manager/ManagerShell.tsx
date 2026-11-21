@@ -1,6 +1,6 @@
 // Front app and manager app frame: the tabs. Owned by the foundation; each tab lives in its own folder.
-// Front app (#/front, for front staff): Catering, and Screens to look at only.
-// Manager app (#/manager): everything in the front app, Screens can be changed, plus Staff and More (☰).
+// Front app (#/front, for front staff): Catering only.
+// Manager app (#/manager): everything in the front app, plus Screens, Staff and More (☰).
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { OfflineBanner, TabBar } from '@shared/ui';
@@ -20,7 +20,7 @@ export default function ManagerShell({ mode = 'manager' }: { mode?: AppMode }) {
     <AppModeProvider value={mode}>
       <Routes>
         <Route index element={<Navigate to="catering" replace />} />
-        <Route path="screens/*" element={<LazyScreen fallback={null}><Screens /></LazyScreen>} />
+        {!front && <Route path="screens/*" element={<LazyScreen fallback={null}><Screens /></LazyScreen>} />}
         <Route path="catering/*" element={<Catering />} />
         {!front && <Route path="staff/*" element={<LazyScreen fallback={null}><Staff /></LazyScreen>} />}
         {!front && <Route path="more/*" element={<LazyScreen fallback={null}><More /></LazyScreen>} />}
@@ -30,10 +30,7 @@ export default function ManagerShell({ mode = 'manager' }: { mode?: AppMode }) {
       <TabBar
         tabs={
           front
-            ? [
-                { to: base + '/catering', label: 'Catering' },
-                { to: base + '/screens', label: 'Screens' },
-              ]
+            ? [{ to: base + '/catering', label: 'Catering' }]
             : [
                 { to: base + '/catering', label: 'Catering' },
                 { to: base + '/screens', label: 'Screens' },
