@@ -32,7 +32,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   let hiddenAt = 0;
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'hidden') return void (hiddenAt = Date.now());
-    if (!location.hash.startsWith('#/manager')) return; // TVs and the kitchen (PIN) are left alone
+    if (!/^#\/(manager|front)/.test(location.hash)) return; // TVs and the kitchen (PIN) are left alone
     if (!hiddenAt || Date.now() - hiddenAt < 60_000 || document.querySelector('[role="dialog"]')) return;
     try {
       const html = await (await fetch('./', { cache: 'no-cache' })).text();

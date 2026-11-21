@@ -13,11 +13,3 @@ export async function readCollection<T = Record<string, unknown>>(page: Page, co
   return page.evaluate((c) => Object.values(JSON.parse(localStorage.getItem('tabla:' + c) || '{}')), col) as Promise<T[]>;
 }
 
-/** Enter the default manager PIN once, so Screens, Staff and More open in every page of this context. */
-export async function unlockManager(context: BrowserContext, pin = '5678'): Promise<void> {
-  const page = await openScreen(context, '/manager/more');
-  await page.getByTestId('manager-lock').waitFor();
-  await page.keyboard.type(pin);
-  await page.getByTestId('statistics').waitFor();
-  await page.close();
-}

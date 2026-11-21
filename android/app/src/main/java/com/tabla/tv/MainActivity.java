@@ -59,6 +59,7 @@ public class MainActivity extends Activity {
         {"TV 4 (mirrors TV 2)", "tv/4"},
         {"TV 5 (music)", "tv/5"},
         {"Kitchen tablet", "kitchen"},
+        {"Front app (front staff phone)", "front"},
         {"Manager app", "manager"},
     };
     static final long RETRY_MS = 15_000;

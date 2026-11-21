@@ -10,7 +10,7 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         Watchdog.start(context); // alarms are cleared on restart (and on update)
         String screen = context.getSharedPreferences("tabla", Context.MODE_PRIVATE).getString("screen", "");
-        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction()) && screen.startsWith("manager")) {
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction()) && (screen.startsWith("manager") || screen.startsWith("front"))) {
             return; // a phone: don't jump into Tabla just because it updated
         }
         Intent open = new Intent(context, MainActivity.class);

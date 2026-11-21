@@ -175,7 +175,7 @@ export type AlertState = 'on' | 'off' | 'blocked' | 'needs-home-screen' | 'unsup
 
 export interface AppSettings {
   kitchenPin: string; // 4 digits
-  /** Manager PIN (4 digits) for the Screens, Staff and More tabs. Missing = the default, 5678. */
+  /** No longer used (the manager PIN was removed when the front app got its own link). Left so old data still reads. */
   managerPin?: string;
   restaurantName: string;
 }
