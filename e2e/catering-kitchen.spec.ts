@@ -1395,3 +1395,49 @@ test('kitchen: the countdown shows only in the last hour, and in red once the ti
   await expect(late).toHaveClass(/late/);
   await shot(page, 'kitchen-countdown-last-hour');
 });
+
+test('tapping a delivery address offers Copy (and Open in Maps in the manager app)', async ({ browser }) => {
+  const addr = '1200 W Main St, Suite 300'; // seeded Desert Tech delivery
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Desert Tech office/ }).click();
+  const summary = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(summary.getByTestId('copy-address')).toHaveCount(0);
+  await summary.getByTestId('address').click();
+  await expect(summary.getByRole('link', { name: 'Open in Maps' })).toHaveAttribute('href', 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr));
+  await summary.getByRole('button', { name: 'Copy address' }).click();
+  await expect(summary.getByRole('button', { name: '✓ Copied' })).toBeVisible();
+  expect(await manager.evaluate(() => navigator.clipboard.readText())).toBe(addr);
+  await manager.waitForTimeout(300);
+  await shot(manager, 'manager-address-copy');
+  await expect(summary.getByRole('button', { name: 'Copy address' })).toBeVisible({ timeout: 4000 });
+
+  // Kitchen: tapping the address on a card copies it instead of opening the order's options.
+  await manager.evaluate(() => navigator.clipboard.writeText(''));
+  const kitchen = await context.newPage();
+  await kitchen.setViewportSize({ width: 1280, height: 800 });
+  await kitchen.goto('/#/kitchen');
+  await typePin(kitchen, '1234');
+  const card = kitchen.getByRole('article', { name: 'Order for Desert Tech office' });
+  await card.getByTestId('address').click();
+  await expect(kitchen.getByRole('dialog')).toHaveCount(0);
+  await expect(card.getByRole('link', { name: 'Open in Maps' })).toHaveCount(0); // the tablet app stays put
+  await card.getByRole('button', { name: 'Copy address' }).click();
+  await expect(card.getByRole('button', { name: '✓ Copied' })).toBeVisible();
+  expect(await kitchen.evaluate(() => navigator.clipboard.readText())).toBe(addr);
+  await shot(kitchen, 'kitchen-address-copy');
+  // And in the full order opened from the Calendar.
+  await kitchen.getByRole('button', { name: 'Calendar', exact: true }).click();
+  const cal = kitchen.getByTestId('kitchen-calendar');
+  const long = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (tomorrow.getMonth() !== today.getMonth()) await cal.getByRole('button', { name: 'Next month' }).click();
+  await cal.getByRole('button', { name: `${long(tomorrow)}: 1 order` }).click();
+  await cal.getByTestId('kitchen-cal-row').filter({ hasText: 'Desert Tech office' }).click();
+  const full = kitchen.getByRole('dialog', { name: 'Desert Tech office' }).getByTestId('kitchen-order-details');
+  await full.getByTestId('address').click();
+  await expect(full.getByRole('button', { name: 'Copy address' })).toBeVisible();
+  await context.close();
+});
