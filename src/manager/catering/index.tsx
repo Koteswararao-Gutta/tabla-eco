@@ -8,6 +8,7 @@ import {
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
+import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
 import { menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
@@ -137,7 +138,7 @@ export default function Catering() {
             </button>
             {view === 'estimates' ? (
               <button className="t-btn accent" onClick={() => setEstimateId('new')}>
-                + New estimate
+                + Estimate
               </button>
             ) : (
               <button
@@ -892,9 +893,8 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
   const { busy, error, run } = useSaver();
-  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; from?: 'photo' | 'message'; message?: string }>({ state: 'idle' });
-  const [pasting, setPasting] = useState(false);
-  const [pasted, setPasted] = useState('');
+  const [scanFrom, setScanFrom] = useState<ScanFrom | null>(null);
+  const [pendingPaste, setPendingPaste] = useState(false);
   const [unsure, setUnsure] = useState<(keyof OrderForm)[]>([]);
 
   // The saved amount can arrive after the form opens: take it then, unless something was typed already.
@@ -931,7 +931,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   };
 
   const changed = JSON.stringify(f) !== JSON.stringify(start) || (!!props.fromEstimate && !order);
-  props.dirty.current = changed || amountChanged || scan.state === 'done' || pasted.trim() !== '';
+  props.dirty.current = changed || amountChanged || scanFrom !== null || pendingPaste;
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
     const next = { ...f, [k]: v };
@@ -940,45 +940,12 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     if (tried) setErrors(validate(next));
   };
 
-  const fillFrom = async (from: 'photo' | 'message', read: () => Promise<ScannedOrder>) => {
-    setScan({ state: 'reading', from });
-    try {
-      const got = await read();
-      if (!got.isOrder) {
-        const message = from === 'photo' ? "This photo doesn't look like an order. Please try another photo." : "This message doesn't look like an order. Please check what you pasted.";
-        return setScan({ state: 'failed', from, message });
-      }
-      const filled = formFromScan(got, f, dishes);
-      setF(filled.form);
-      setUnsure(filled.unsure);
-      if (tried) setErrors(validate(filled.form));
-      setScan({ state: 'done', from });
-      setPasting(false);
-    } catch (e) {
-      setScan({ state: 'failed', from, message: e instanceof Error ? e.message : `Couldn't read the ${from}.` });
-    }
-  };
-  const scanPhoto = (photo: File | undefined) => photo && fillFrom('photo', () => store.readOrderPhoto(photo));
-  const readPasted = (text = pasted) => {
-    if (text.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
-    fillFrom('message', () => store.readOrderText(text));
-  };
-  // One tap: read what was copied and fill the form at once. If the phone won't share the clipboard,
-  // the box opens instead, and pasting into it fills the form the same way.
-  const openPaste = async () => {
-    setScan({ state: 'idle' });
-    let copied = '';
-    try {
-      copied = ((await navigator.clipboard?.readText?.()) ?? '').slice(0, 8000);
-    } catch {
-      /* not allowed here: the person pastes into the box */
-    }
-    if (copied.trim().length >= 5) {
-      setPasted(copied);
-      readPasted(copied);
-    } else {
-      setPasting(true);
-    }
+  const filledFrom = (got: ScannedOrder, from: ScanFrom) => {
+    const filled = formFromScan(got, f, dishes);
+    setF(filled.form);
+    setUnsure(filled.unsure);
+    if (tried) setErrors(validate(filled.form));
+    setScanFrom(from);
   };
 
   /** Checks the form; false (and the errors shown, first one focused) when something needs fixing. */
@@ -1035,7 +1002,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     errors[k] ? (
       <small className="c-err" role="alert">{errors[k]}</small>
     ) : (
-      unsure.includes(k) && <small className="c-check">Please check this: it was {scan.from === 'message' ? 'unclear' : 'hard to read'}.</small>
+      unsure.includes(k) && <small className="c-check">Please check this: it was {scanFrom === 'message' ? 'unclear' : 'hard to read'}.</small>
     );
   const count = Object.keys(errors).length + (amountErr ? 1 : 0);
   // A soft warning only: a new order, or a changed date or time, that is already in the past. Saving still works.
@@ -1058,69 +1025,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
           Filled in from the estimate. {f.date && f.time ? 'Please check everything' : 'Please add the date and time'}, then tap Save order.
         </p>
       )}
-      {!order && !props.fromEstimate && (
-        <div className="c-scan">
-          <div className="c-scan-row">
-            <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
-              <input
-                type="file"
-                accept="image/*"
-                className="c-file"
-                disabled={scan.state === 'reading'}
-                aria-label="Scan paper order"
-                onChange={(e) => {
-                  scanPhoto(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-              {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : 'Scan paper'}
-            </label>
-            <button
-              type="button"
-              className={'t-btn block c-scan-btn' + (pasting ? ' on' : '')}
-              disabled={scan.state === 'reading'}
-              aria-expanded={pasting}
-              onClick={() => (pasting ? setPasting(false) : openPaste())}
-            >
-              {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : 'Paste message'}
-            </button>
-          </div>
-          {pasting && (
-            <div className="c-paste">
-              <textarea
-                className="t-input c-paste-box"
-                aria-label="Customer's message"
-                placeholder="Press and hold here, then tap Paste"
-                rows={5}
-                maxLength={8000}
-                value={pasted}
-                autoFocus
-                onChange={(e) => setPasted(e.target.value)}
-                onPaste={(e) => {
-                  const text = e.clipboardData.getData('text').slice(0, 8000);
-                  if (pasted.trim() || text.trim().length < 5) return; // adding to typed text: let them tap Fill the form
-                  e.preventDefault();
-                  setPasted(text);
-                  readPasted(text);
-                }}
-              />
-              <button type="button" className="t-btn primary block" disabled={scan.state === 'reading'} onClick={() => readPasted()}>
-                {scan.state === 'reading' && scan.from === 'message' ? 'Reading the message…' : 'Fill the form'}
-              </button>
-            </div>
-          )}
-          {scan.state === 'done' && (
-            <p className="c-scan-note" role="status">
-              Filled in from the {scan.from === 'message' ? 'message' : 'photo'}. Please check every field, then tap Save order.
-            </p>
-          )}
-          {scan.state === 'failed' && (
-            <p className="c-err" role="alert">
-              {scan.message}
-            </p>
-          )}
-        </div>
-      )}
+      {!order && !props.fromEstimate && <ScanPaste onFilled={filledFrom} saveLabel="Save order" onPending={setPendingPaste} />}
       <Field label="Customer name">
         <input className="t-input" maxLength={NAME_MAX} value={f.customerName} onChange={(e) => set('customerName', e.target.value)} aria-invalid={!!errors.customerName} autoComplete="off" />
         {err('customerName')}
