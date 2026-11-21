@@ -1,5 +1,5 @@
 // Pure helpers for the menu TV: what to show and when to look again.
-import { loopPosition, pictureFor } from '@shared/clock/loop';
+import { loopPosition, loopSlots, pictureFor } from '@shared/clock/loop';
 import type { LoopAnchor, Screen, ScreenId, Slot, Transition } from '@shared/data';
 
 /** Small margin after a boundary so the timer never wakes a hair too early. */
@@ -25,7 +25,7 @@ export function targetFor(
   screenId: ScreenId,
   now: number,
 ): Target {
-  const pos = loopPosition(slots, now, loop);
+  const pos = loopPosition(loopSlots(slots, screenId, screens), now, loop);
   if (!pos) return { key: 'none', slotId: null, pictureId: null, transition: 'fade', nextPictureId: null };
   const pictureId = pictureFor(pos.slot, screenId, screens);
   return {
