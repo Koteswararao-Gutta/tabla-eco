@@ -57,7 +57,11 @@
 
 /* Header: calendar icon + New order */
 .c-head-actions { display: flex; gap: 6px; align-items: center; flex: none; }
-.c-head-actions .t-btn.accent { padding: 0 14px; }
+.c-head-actions .t-btn.accent { padding: 0 12px; }
+/* Keep the calendar and + button on the title row on every phone font (Orders and Estimates alike):
+   a little less space, and if it still doesn't fit the title gives way instead of the buttons wrapping. */
+.c-page > .t-header { flex-wrap: nowrap; column-gap: 8px; }
+.c-page > .t-header .t-title { gap: 8px; }
 .c-head-actions .t-btn { white-space: nowrap; }
 .c-cal-btn { min-width: var(--tap); min-height: var(--tap); padding: 0 12px; color: var(--ink); }
 .c-cal-btn svg { display: block; }
