@@ -3,7 +3,7 @@
 // and it never reaches the WhatsApp message, the name tags or the order's change history.
 import type { Deposit, OrderAmount, PayMethod, StaffConfig } from '@shared/data';
 import { defaults, normalizeDB } from '../staff/model';
-import { amountError, amountLabel, parseAmount } from './orders';
+import { amountLabel, parseAmount } from './orders';
 
 export const PAY_METHODS: { value: PayMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
@@ -52,23 +52,28 @@ export function balance(pay: Pick<Pay, 'amount' | 'paid' | 'deposits'>): number 
   return Math.max(0, Math.round((pay.amount - depositTotal(pay)) * 100) / 100);
 }
 
-/** For a manager order card: "$200 · Paid", "$300 · $200 owed", "$200 · Not paid", "$100 paid so far", "Paid";
+/** Paid: marked "Paid in full", or deposits that add up to the whole amount (nothing left owed). */
+export function isPaid(pay: Pick<Pay, 'amount' | 'paid' | 'deposits'>): boolean {
+  return pay.paid || (pay.amount != null && pay.deposits.length > 0 && balance(pay) === 0);
+}
+
+/** For a manager order card: "$200 · Paid", "$300 · $200 owed", "$200 · Unpaid", "$100 paid so far", "Paid";
  *  '' when nothing is set. */
 export function payLabel(pay: Pick<Pay, 'amount' | 'paid'> & { deposits?: Deposit[] } | null | undefined): string {
   if (!pay) return '';
   const amount = amountLabel(pay.amount);
-  if (pay.paid) return amount ? `${amount} · Paid` : 'Paid';
   const p = { ...pay, deposits: pay.deposits ?? [] };
+  if (isPaid(p)) return amount ? `${amount} · Paid` : 'Paid';
   const paidSoFar = depositTotal(p);
   if (paidSoFar > 0) return amount ? `${amount} · ${amountLabel(balance(p))} owed` : `${amountLabel(paidSoFar)} paid so far`;
-  return amount ? `${amount} · Not paid` : '';
+  return amount ? `${amount} · Unpaid` : '';
 }
 
 /** Error for the deposit box, or ''. A deposit is part of the balance: the whole balance is "Paid in full". */
 export function depositError(text: string, pay: Pick<Pay, 'amount' | 'paid' | 'deposits'>): string {
   const n = parseAmount(text);
   if (n === null || n === 0) return 'Please enter how much they paid.';
-  if (Number.isNaN(n)) return amountError(text);
+  if (Number.isNaN(n)) return 'Please enter an amount like 100 or 100.50.';
   const owed = balance(pay);
   if (owed != null && n > owed) return `That's more than the ${amountLabel(owed)} still owed.`;
   if (owed != null && n === owed) return `That's the whole balance. Choose “Paid in full” instead.`;
@@ -90,7 +95,7 @@ export function unpaidDone<T extends { id: string; status: string; dueAt: number
     if (o.status !== 'completed') continue;
     const p = payOf(o.id);
     if (!p) return null;
-    if (!p.paid) out.push(o);
+    if (!isPaid(p)) out.push(o);
   }
   return out.sort((a, b) => a.dueAt - b.dueAt);
 }
