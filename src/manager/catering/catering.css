@@ -132,6 +132,10 @@
 .c-lines { display: flex; flex-direction: column; gap: 10px; }
 .c-line { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .c-line.check { border-color: var(--warn); }
+.c-line-wrap { display: flex; flex-direction: column; gap: 8px; }
+.c-extras-head { margin-top: 6px; color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.c-line.extra { background: var(--bg); border-style: dashed; }
+.c-extra-badge { flex: none; font-size: 0.72rem; padding: 1px 8px; vertical-align: 2px; }
 .c-line-top { display: flex; gap: 6px; align-items: center; }
 .c-line-top .c-dish { flex: 1; min-width: 0; font-weight: 600; }
 .c-line-x { flex: none; width: var(--tap); padding: 0; color: var(--muted); }

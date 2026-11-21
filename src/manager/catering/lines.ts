@@ -26,6 +26,7 @@ export const UNITS: Unit[] = [
   { label: 'Quarts', one: 'quart', many: 'quarts' },
   { label: 'Gallons', one: 'gallon', many: 'gallons' },
   { label: 'Plates', one: 'plate', many: 'plates' },
+  { label: 'Oz', one: 'oz', many: 'oz' },
 ];
 
 const unitByLabel = (label: string) => UNITS.find((u) => u.label.toLowerCase() === label.trim().toLowerCase()) ?? null;
@@ -42,6 +43,7 @@ const UNIT_WORDS: [RegExp, string, boolean][] = [
   [/^(?:gallons?|gal|gals)$/i, 'Gallons', true],
   [/^plates?$/i, 'Plates', true],
   [/^(?:dozen|doz)$/i, 'Pieces', true],
+  [/^(?:oz|ozs|ounces?)$/i, 'Oz', true],
 ];
 
 /** A unit as written ("FT", "large trays", "pcs") as one of UNITS, else the word as written. */
@@ -84,11 +86,12 @@ export function tidyQty(s: string): string {
     .replace(/(?<![\d./-])([1-9])([13])\/([24])(?![\d/])/g, (m, w: string, a: string, b: string) => (+a < +b ? `${w}-${a}/${b}` : m));
 }
 
-/** The line as text: "Chicken Dum Biryani, 2 Full trays (extra spicy)". A line kept from an old order reads as typed. */
+/** The line as text: "Chicken Dum Biryani, 2 Full trays (extra spicy)", or for an auto extra
+ *  "Raita, 24 oz (extra)". A line kept from an old order reads as typed. */
 export function lineText(l: OrderLine): string {
   if (typeof l.text === 'string' && l.text.trim()) return tidyQty(l.text.trim());
   const q = qtyText(l);
-  const note = l.note.trim();
+  const note = [l.extra ? 'extra' : '', l.note.trim()].filter(Boolean).join(', ');
   return `${l.name.trim()}${q ? `, ${q}` : ''}${note ? ` (${note})` : ''}`;
 }
 
@@ -189,7 +192,7 @@ export function searchDishes(query: string, dishes: Dish[], max = 6): Dish[] {
 const SIZE = '(?:(?:extra\\s+)?(?:large|small|medium|big|full|half|lg|lrg|sm|med)\\s+)?';
 const UNIT_SRC =
   SIZE +
-  '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gals?|lbs?|pounds?|pcs?|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qts?|liters?|litres?|ltrs?|servings?|people|persons?|ppl|pax|guests?)';
+  '(?:full\\s+trays?|half\\s+trays?|ft|ht|fts|hts|trays?|pans?|tubs?|gallons?|gals?|lbs?|pounds?|pcs?|pieces?|nos|qty|dozen|doz|plates?|boxes?|quarts?|qts?|liters?|litres?|ltrs?|servings?|people|persons?|ppl|pax|guests?|oz|ozs|ounces?)';
 const UNITS_RE = UNIT_SRC;
 // "2", "1.5", "1/2" and "1-1/2" (mixed numbers are made that way by tidyQty first).
 const QTY = `(?:\\d-\\d/\\d|\\d+(?:[.,/]\\d+)?)`;
@@ -293,5 +296,7 @@ export function cleanLine(l: OrderLine): OrderLine {
   const out: OrderLine = { dishId: l.dishId ?? null, name: l.name.trim(), qty: typeof l.qty === 'number' && Number.isFinite(l.qty) ? l.qty : null, unit: l.unit.trim(), note: l.note.trim() };
   if (typeof l.text === 'string' && l.text.trim()) out.text = l.text.trim();
   if (l.check) out.check = true;
+  if (typeof l.extra === 'string' && l.extra) out.extra = l.extra;
+  if (out.extra && l.extraEdited) out.extraEdited = true;
   return out;
 }
