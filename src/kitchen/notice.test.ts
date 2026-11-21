@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { noticeText } from './notice';
 
-const ok = { online: true, ordersLoaded: true, waitedLong: false, toastError: null };
+const ok = { online: true, ordersLoaded: true, waitedLong: false };
 
 describe('kitchen red notice', () => {
   it('shows nothing when all is well', () => {
@@ -14,9 +14,5 @@ describe('kitchen red notice', () => {
   it('waits a while before saying orders cannot be reached', () => {
     expect(noticeText({ ...ok, ordersLoaded: false })).toBeNull();
     expect(noticeText({ ...ok, ordersLoaded: false, waitedLong: true })).toMatch(/Can’t reach the orders/);
-  });
-  it('mentions a failed Toast menu read, below the bigger problems', () => {
-    expect(noticeText({ ...ok, toastError: 'blocked' })).toMatch(/Toast menu/);
-    expect(noticeText({ ...ok, online: false, toastError: 'blocked' })).toMatch(/Offline/);
   });
 });

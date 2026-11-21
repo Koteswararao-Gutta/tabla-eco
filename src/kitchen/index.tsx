@@ -28,7 +28,7 @@ const UNLOCK_KEY = 'kitchenUnlock';
 
 export default function Kitchen() {
   useHeartbeat('kitchen');
-  const toastError = useToastBridge();
+  useToastBridge(); // passes the tablet's hourly Toast menu read to the server
   useBrowserFullscreen();
   const pin = expectedPin(useSingleton('settings'));
   // Stays unlocked through reloads and restarts, until someone taps Lock or the manager changes the PIN.
@@ -75,7 +75,7 @@ export default function Kitchen() {
             <PinScreen pin={pin} note={soundNote} onUnlock={() => remember(pinFingerprint(pin))} />
           </div>
         )}
-        <KitchenNotice ordersLoaded={orders !== null} toastError={toastError} />
+        <KitchenNotice ordersLoaded={orders !== null} />
         <Alarm reminders={reminders} now={now} on={alarmOn} />
       </div>
     </ScreenSurface>
