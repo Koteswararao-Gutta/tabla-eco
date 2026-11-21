@@ -153,6 +153,12 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(card.getByText('150 pieces')).toBeVisible();
   await expect(card.getByText('Garlic Naan')).toBeVisible();
   await expect(card.getByText(/^in /)).toHaveCount(0); // tomorrow: no countdown until the last hour
+  // Kept short: no phone number and no day under the time (the "Tomorrow" heading says it), and the
+  // tap hint is said once above the list, not on every card.
+  await expect(card).not.toContainText('555 222 3333');
+  await expect(card.locator('.k-day')).toHaveCount(0);
+  await expect(kitchen.getByText('Tap an order for options. Double-tap to mark it completed.')).toHaveCount(1);
+  await expect(kitchen.getByTestId('kitchen-group').first().getByRole('heading')).toHaveText('Today');
   await shot(kitchen, 'kitchen-open-orders');
 
   // One tap shows the options; Mark completed: card goes, Undo brings it back.
@@ -171,19 +177,22 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   await expect(options).toBeHidden();
   await expect(kitchen.getByRole('button', { name: 'Undo' })).toBeHidden({ timeout: 9000 });
 
-  // Show all orders: ticked as completed, and it can be reopened.
-  await kitchen.getByRole('button', { name: 'Show all orders' }).click();
-  // Upcoming days first: Today, then Tomorrow, then past days.
-  const days = await kitchen.locator('.k-day-group h2').allTextContents();
-  expect(days.slice(0, 2)).toEqual(['Today', 'Tomorrow']);
-  expect(days.indexOf('Yesterday')).toBeGreaterThan(1);
-  const row = kitchen.getByTestId('kitchen-row').filter({ hasText: 'Anika Wedding' });
-  await expect(row).toContainText('✓ Completed');
-  await expect(kitchen.getByTestId('kitchen-row').filter({ hasText: 'Rahul Verma' })).toContainText('✓ Completed');
-  await shot(kitchen, 'kitchen-show-all');
-  await row.getByRole('button', { name: 'Reopen' }).click();
+  // No "Show all orders" button: the Calendar shows completed orders, and reopens them.
+  await expect(kitchen.getByRole('button', { name: /Show all orders/ })).toHaveCount(0);
+  await kitchen.getByRole('button', { name: 'Calendar', exact: true }).click();
+  const [y, m, d] = tomorrow.split('-').map(Number);
+  const tmr = new Date(y, m - 1, d);
+  if (tmr.getMonth() !== new Date().getMonth()) await kitchen.getByRole('button', { name: 'Next month' }).click();
+  await kitchen.getByRole('button', { name: new RegExp('^' + tmr.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + ':') }).click();
+  const row = kitchen.getByTestId('kitchen-cal-row').filter({ hasText: 'Anika Wedding' });
+  await expect(row).toContainText('Completed');
+  await row.click();
+  const full = kitchen.getByRole('dialog', { name: 'Anika Wedding' });
+  await expect(full.getByTestId('kitchen-order-details')).toContainText('555 222 3333'); // the phone is in the full order
+  await full.getByRole('button', { name: /Reopen order/ }).click();
   await expect(row).toContainText('Open');
-  await kitchen.getByRole('button', { name: '← Back to open orders' }).click();
+  await kitchen.keyboard.press('Escape');
+  await kitchen.getByRole('button', { name: 'List', exact: true }).click();
   await expect(card).toBeVisible();
 
   // The manager sees the kitchen's change and can complete / delete from the order summary.
@@ -424,23 +433,6 @@ test('kitchen: shows "Tap anywhere to turn on sound" while the browser keeps sou
   await context.close();
 });
 
-test('kitchen: Show all orders goes back to open orders after 3 minutes with no touch', async ({ browser }) => {
-  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
-  await page.clock.install();
-  await page.goto('/#/kitchen');
-  await typePin(page, '1234');
-  await page.getByRole('button', { name: 'Show all orders' }).click();
-  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
-  await page.clock.runFor(120_000);
-  await page.mouse.click(640, 700); // a touch restarts the 3 minutes
-  await page.clock.runFor(120_000);
-  await expect(page.getByRole('heading', { name: 'All orders' })).toBeVisible();
-  await page.clock.runFor(61_000);
-  await expect(page.getByRole('heading', { name: 'Open orders' })).toBeVisible();
-  await context.close();
-});
-
 test('saving an edit never undoes a completion made in the kitchen meanwhile', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1 });
   const manager = await openScreen(context, '/manager/catering');
@@ -497,10 +489,10 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
   expect((await gotIt.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   await shot(page, 'kitchen-reminder');
 
-  // Also shown on the all orders view.
-  await page.getByRole('button', { name: 'Show all orders' }).click();
+  // Also shown on the Calendar.
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   await expect(banner).toContainText('Anita Rao');
-  await page.getByRole('button', { name: '← Back to open orders' }).click();
+  await page.getByRole('button', { name: 'List', exact: true }).click();
 
   await gotIt.click();
   await expect(banner).toHaveCount(0);
@@ -520,7 +512,7 @@ test('kitchen 1-hour heads-up: Got it is saved, a new time brings it back, late 
   await context.close();
 });
 
-test('kitchen: long names wrap, portrait all-orders rows fit, offline is clear', async ({ browser }) => {
+test('kitchen: long names wrap, portrait calendar rows fit, offline is clear', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 800, height: 1280 } });
   const page = await openScreen(context, '/kitchen');
   await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
@@ -536,11 +528,11 @@ test('kitchen: long names wrap, portrait all-orders rows fit, offline is clear',
   const fits = () => page.evaluate(() => [...document.querySelectorAll('.k-root *')].every((el) => el.getBoundingClientRect().right <= window.innerWidth + 1));
   expect(await fits()).toBe(true);
   await shot(page, 'kitchen-portrait');
-  await page.getByRole('button', { name: 'Show all orders' }).click();
-  await expect(page.getByTestId('kitchen-row').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(page.getByTestId('kitchen-cal-row').first()).toBeVisible();
   expect(await page.evaluate(() => (document.querySelector('.k-root') as HTMLElement).scrollTop)).toBe(0);
   expect(await fits()).toBe(true);
-  await shot(page, 'kitchen-portrait-all');
+  await shot(page, 'kitchen-portrait-calendar');
   await context.setOffline(true);
   await expect(page.getByText('Offline: showing the last saved orders')).toBeVisible();
   await context.close();
@@ -1155,7 +1147,6 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await details.getByRole('button', { name: 'Close' }).click();
   const after = (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.id === o.id)!;
   expect(after.history).toHaveLength(1);
-  await kitchen.getByRole('button', { name: /Show all orders/ }).click();
   await expect(kitchen.getByText('Mehta Party').first()).toBeVisible();
   await expect(kitchen.locator('body')).not.toContainText('$200');
   await expect(kitchen.locator('body')).not.toContainText('Paid');
@@ -1250,8 +1241,8 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   expect(typeof saved.paidAt).toBe('number');
   // Nothing about payments is on the order (the kitchen loads orders only).
   for (const o of await readCollection<CateringOrder>(manager, 'orders')) expect(JSON.stringify(o)).not.toMatch(/Zelle|zelle|paid|Siri|Tarun/);
-  await kitchen.getByRole('button', { name: /Show all orders/ }).click();
-  await expect(kitchen.getByText('Rahul Verma').first()).toBeVisible();
+  await kitchen.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(kitchen.getByTestId('kitchen-calendar')).toBeVisible();
   await expect(kitchen.locator('body')).not.toContainText('Zelle');
   await expect(kitchen.locator('body')).not.toContainText('owed');
   await expect(kitchen.locator('body')).not.toContainText('paid');
@@ -1303,7 +1294,7 @@ test('kitchen list groups open orders by day, and Calendar shows the month with 
   await expect(groups).toHaveCount(4);
   await expect(groups.nth(0).getByRole('heading')).toContainText('Not completed from earlier days');
   await expect(groups.nth(0).getByRole('article', { name: 'Order for Old Open Order' })).toBeVisible();
-  await expect(groups.nth(1).getByRole('heading')).toContainText('Today1 order');
+  await expect(groups.nth(1).getByRole('heading')).toHaveText('Today');
   await expect(groups.nth(1).getByRole('article', { name: 'Order for Priya Sharma' })).toBeVisible();
   await expect(groups.nth(2).getByRole('heading')).toContainText('Tomorrow');
   await expect(groups.nth(2).getByRole('article', { name: 'Order for Desert Tech office' })).toBeVisible();
