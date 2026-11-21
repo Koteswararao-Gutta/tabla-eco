@@ -5,16 +5,19 @@ test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
 
 const SHOTS = process.env.SHOT_DIR || 'test-results';
 
-test('front app: Catering only; no Screens, no Staff, no ☰, no PIN', async ({ context }) => {
+test('front app: Catering only, no tab bar; no Screens, no Staff, no ☰, no PIN', async ({ context }) => {
   const page = await openScreen(context, '/front');
   await expect(page).toHaveURL(/#\/front\/catering$/);
-  await expect(page.getByRole('link', { name: 'Catering', exact: true })).toBeVisible();
+  // Catering only, so no tab bar at the bottom.
+  await expect(page.getByRole('heading', { name: 'Catering' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Catering', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Staff', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'More' })).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/front-catering.png` });
 
   // Front staff take payments: Mark paid works, and "Taken by" lists the staff from the Staff tab.
-  await page.getByRole('region', { name: 'Completed, unpaid' }).getByRole('button', { name: /Rahul Verma/ }).click();
+  await page.getByTestId('unpaid-filter').click();
+  await page.getByRole('region', { name: 'Unpaid' }).getByRole('button', { name: /Rahul Verma/ }).click();
   const details = page.getByRole('dialog', { name: 'Order details' });
   await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
   const pay = page.getByRole('dialog', { name: 'Mark paid' });

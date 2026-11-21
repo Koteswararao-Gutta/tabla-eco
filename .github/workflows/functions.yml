@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: functions
   cancel-in-progress: false
@@ -18,23 +19,31 @@ env:
   FIREBASE: npx --yes firebase-tools@15.36.0
 jobs:
   # Deploy only the newest tested commit: a slower, older Tests run finishing late must not overwrite a newer deploy.
+  # When two merges land close together, a waiting run can be dropped for a newer one (one deploy at a time),
+  # so a run for an older commit deploys the tip of main instead when the tip's Tests already passed.
   latest:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.tip.outputs.ok }}
+      sha: ${{ steps.tip.outputs.sha }}
     steps:
       - id: tip
         env:
           GH_TOKEN: ${{ github.token }}
           TESTED: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ -z "$TESTED" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi  # started by hand
+          if [ -z "$TESTED" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"; exit 0; fi  # started by hand
           tip=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
           if [ "$tip" = "$TESTED" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=$tip" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          passed=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yml/runs?head_sha=$tip&event=push&status=success" --jq .total_count)
+          if [ "${passed:-0}" -gt 0 ]; then
+            echo "::notice::$TESTED is no longer the tip of main; deploying the tip ($tip), whose tests passed."
+            echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=$tip" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Skipped: $TESTED is no longer the tip of main ($tip); the newer commit's run deploys."
+            echo "::notice::Skipped: $TESTED is no longer the tip of main ($tip); the tip's own run deploys once its tests pass."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -62,8 +71,8 @@ jobs:
       - if: steps.check.outputs.ready == 'true'
         uses: actions/checkout@v7
         with:
-          # The commit the tests passed on (not whatever main is by now).
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # A commit whose tests passed (see `latest`), not whatever main is by now.
+          ref: ${{ needs.latest.outputs.sha }}
       - if: steps.check.outputs.ready == 'true'
         uses: actions/setup-node@v7
         with:
