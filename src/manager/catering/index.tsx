@@ -14,6 +14,8 @@ import { TagsSheet } from './TagsSheet';
 import { balance, depositError, depositTotal, isPaid, methodLabel, NO_PAY, PAY_METHODS, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 import './catering.css';
 import { Address } from './Address';
+import { EstimateSheet, EstimatesList, type Estimate } from './Estimates';
+import { orderFormFromEstimate } from './estimates';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
@@ -72,8 +74,14 @@ export default function Catering() {
   }, [params, setParams]);
   const [deleting, setDeleting] = useState<Order | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  // "Orders" or "Unpaid" (finished by the kitchen, not yet paid).
-  const [view, setView] = useState<'orders' | 'unpaid'>('orders');
+  // "Orders", "Unpaid" (finished by the kitchen, not yet paid) or "Estimates" (price quotes for customers).
+  const [view, setView] = useState<'orders' | 'unpaid' | 'estimates'>('orders');
+  const estimates = useCollection('estimates');
+  const [estimateId, setEstimateId] = useState<string | null>(null); // estimate id, 'new', or closed
+  const openEstimate = estimateId && estimateId !== 'new' ? estimates?.find((e) => e.id === estimateId) ?? null : null;
+  const openEstimates = estimates ? estimates.filter((e) => e.status !== 'ordered').length : 0;
+  // "Make order" from an estimate: the new-order form opens filled in from it.
+  const [fromEstimate, setFromEstimate] = useState<Estimate | null>(null);
   const [calendar, setCalendar] = useState(false);
   const [newDay, setNewDay] = useState<number | undefined>(undefined);
   // "Print tags": the order's tag sheet replaces its summary; closing it goes back to the order.
@@ -126,15 +134,22 @@ export default function Catering() {
                 <path d="M3.5 10h17M8 3v4M16 3v4" />
               </svg>
             </button>
-            <button
-              className="t-btn accent"
-              onClick={() => {
-                setNewDay(undefined);
-                setEditing('new');
-              }}
-            >
-              + New order
-            </button>
+            {view === 'estimates' ? (
+              <button className="t-btn accent" onClick={() => setEstimateId('new')}>
+                + New estimate
+              </button>
+            ) : (
+              <button
+                className="t-btn accent"
+                onClick={() => {
+                  setNewDay(undefined);
+                  setFromEstimate(null);
+                  setEditing('new');
+                }}
+              >
+                + New order
+              </button>
+            )}
           </div>
         }
       />
@@ -153,9 +168,19 @@ export default function Catering() {
             </span>
           )}
         </button>
+        <button type="button" aria-pressed={view === 'estimates'} onClick={() => setView('estimates')} data-testid="estimates-filter">
+          Estimates
+          {openEstimates > 0 && (
+            <span className="c-count e-count" aria-label={`${openEstimates} open estimates`}>
+              {openEstimates}
+            </span>
+          )}
+        </button>
       </div>
 
-      {!groups ? null : view === 'unpaid' ? (
+      {view === 'estimates' ? (
+        estimates && <EstimatesList estimates={estimates} now={now} onOpen={(e) => setEstimateId(e.id)} />
+      ) : !groups ? null : view === 'unpaid' ? (
         <div className="t-stack" data-testid="unpaid-list">
           {unpaid.length === 0 ? (
             <div className="t-empty c-empty">Nothing to collect. Every completed order is paid.</div>
@@ -209,6 +234,26 @@ export default function Catering() {
         />
       )}
 
+      {(estimateId === 'new' || openEstimate) && (
+        <EstimateSheet
+          key={estimateId!}
+          estimate={openEstimate}
+          now={now}
+          onClose={() => setEstimateId(null)}
+          onCreated={(id) => setEstimateId(id)}
+          onMakeOrder={(e) => {
+            setEstimateId(null);
+            setFromEstimate(e);
+            setNewDay(undefined);
+            setEditing('new');
+          }}
+          onOpenOrder={(id) => {
+            setEstimateId(null);
+            setEditing(id);
+          }}
+        />
+      )}
+
       {sheetOpen && (
         <OrderSheet
           key={editing!}
@@ -216,7 +261,11 @@ export default function Catering() {
           pay={editOrder ? payOf(editOrder.id) : NO_PAY}
           day={newDay}
           now={now}
-          onClose={() => setEditing(null)}
+          fromEstimate={editing === 'new' ? fromEstimate ?? undefined : undefined}
+          onClose={() => {
+            setEditing(null);
+            setFromEstimate(null);
+          }}
           onCompleted={markedCompleted}
           onDelete={(o) => {
             setEditing(null);
@@ -421,7 +470,9 @@ const OrderCard = memo(function OrderCard({ order: o, pay, today, showDate, onOp
 
 /** `onDelete` is left out where deleting isn't offered (the kitchen tablet). `by` is who saves (default: Manager).
  *  `pay` (manager only): the order's saved amount and paid, undefined while loading. Those boxes show only when `by` is Manager. */
-type SheetProps = { order: Order | null; pay?: Pay; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy };
+type SheetProps = { order: Order | null; pay?: Pay; day?: number; now: number; onClose: () => void; onCompleted: (o: Order) => void; onDelete?: (o: Order) => void; onPrintTags?: (o: Order) => void; by?: EditedBy;
+  /** A new order made from a confirmed estimate: the form starts filled in from it, with its total as the amount. */
+  fromEstimate?: Estimate };
 
 /** An existing order opens on its summary first; "Edit" switches to the form. A new order opens on the form.
  *  Once the form has anything typed, scanned or pasted, closing the sheet asks first. */
@@ -831,6 +882,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   const dishes = menuDishes(menu);
   const [start] = useState<OrderForm>(() => {
     if (order) return formFromOrder(order, dishes);
+    if (props.fromEstimate) return orderFormFromEstimate(props.fromEstimate);
     const f = emptyForm(store.now(), props.day);
     return { ...f, lines: [{ ...f.lines[0], unit: lastUnit() }] };
   });
@@ -848,7 +900,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   // Paid / deposits are recorded with "Mark paid" on the order's summary, not here.
   const loaded = (p: Pay | undefined) => (p === undefined && order ? undefined : { amount: amountInput(p?.amount) });
   const [payStart, setPayStart] = useState(() => loaded(props.pay));
-  const [amount, setAmount] = useState(payStart?.amount ?? '');
+  const [amount, setAmount] = useState(props.fromEstimate && !order ? amountInput(props.fromEstimate.total) : payStart?.amount ?? '');
   const [amountErr, setAmountErr] = useState('');
   useEffect(() => {
     if (payStart !== undefined || props.pay === undefined) return;
@@ -877,7 +929,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     await store.updateDoc('orderAmounts', id, { amount: parseAmount(amount), updatedAt: store.now() });
   };
 
-  const changed = JSON.stringify(f) !== JSON.stringify(start);
+  const changed = JSON.stringify(f) !== JSON.stringify(start) || (!!props.fromEstimate && !order);
   props.dirty.current = changed || amountChanged || scan.state === 'done' || pasted.trim() !== '';
 
   const set = <K extends keyof OrderForm>(k: K, v: OrderForm[K]) => {
@@ -972,6 +1024,8 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
       const fields = orderFields(f);
       const id = created.current ?? (created.current = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now }));
       await saveAmount(id);
+      // The estimate it came from is kept, marked as made into this order.
+      if (props.fromEstimate) await store.updateDoc('estimates', props.fromEstimate.id, { status: 'ordered', orderId: id, updatedAt: store.now() }).catch(() => {});
       props.onSaved(shareText(fields, 'New catering order'));
     });
   };
@@ -998,7 +1052,12 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         save();
       }}
     >
-      {!order && (
+      {props.fromEstimate && !order && (
+        <p className="c-scan-note" role="status" data-testid="from-estimate">
+          Filled in from the estimate. {f.date && f.time ? 'Please check everything' : 'Please add the date and time'}, then tap Save order.
+        </p>
+      )}
+      {!order && !props.fromEstimate && (
         <div className="c-scan">
           <div className="c-scan-row">
             <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
