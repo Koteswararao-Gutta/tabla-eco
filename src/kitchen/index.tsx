@@ -49,7 +49,7 @@ export default function Kitchen() {
     };
   }, []);
 
-  const orders = useCollection('orders');
+  const orders = useCollection('orders', 'openOrRecent');
   const now = useNow(15_000);
   // The heads-up runs on every kitchen view, locked or not. Its alarm lives here, so locking or
   // unlocking never restarts it. It rings only while the kitchen is staffed (staff schedule hours).

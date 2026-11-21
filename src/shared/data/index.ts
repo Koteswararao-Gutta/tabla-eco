@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FirebaseStore } from './firebase';
 import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
+import type { CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
 
@@ -9,16 +10,18 @@ export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
+export type { CollectionFilter } from './filter';
 
 /** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
  *  which keeps everything in one browser (tests and the offline Chrome preview). */
 export const store: DataStore =
   import.meta.env.VITE_STORE === 'local' ? new LocalStore() : new FirebaseStore(firebaseConfig);
 
-/** Live collection. `null` until the first value arrives. */
-export function useCollection<C extends CollectionName>(col: C): WithId<Collections[C]>[] | null {
+/** Live collection. `null` until the first value arrives.
+ *  `filter` narrows it, e.g. 'openOrRecent' (open orders and the last 60 days) for the kitchen. */
+export function useCollection<C extends CollectionName>(col: C, filter?: CollectionFilter): WithId<Collections[C]>[] | null {
   const [docs, setDocs] = useState<WithId<Collections[C]>[] | null>(null);
-  useEffect(() => store.watchCollection(col, setDocs), [col]);
+  useEffect(() => store.watchCollection(col, setDocs, filter), [col, filter]);
   return docs;
 }
 

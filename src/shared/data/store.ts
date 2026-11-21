@@ -5,6 +5,7 @@
 //  - FirebaseStore (firebase.ts): the same calls, shared across real devices.
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
+import type { CollectionFilter } from './filter';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 export type Unsubscribe = () => void;
@@ -21,8 +22,9 @@ export interface DataStore {
   /** Live view of one document. Calls back immediately with the current value (or null), then on every change. */
   watchDoc<C extends CollectionName>(col: C, id: string, cb: (doc: WithId<Collections[C]> | null) => void): Unsubscribe;
 
-  /** Live view of a whole collection. Calls back immediately, then on every change. Order is not guaranteed. */
-  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void): Unsubscribe;
+  /** Live view of a whole collection. Calls back immediately, then on every change. Order is not guaranteed.
+   *  With `filter`, only the matching documents (see filter.ts), e.g. open and recent orders. */
+  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void, filter?: CollectionFilter): Unsubscribe;
 
   getDoc<C extends CollectionName>(col: C, id: string): Promise<WithId<Collections[C]> | null>;
   setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void>;

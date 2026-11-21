@@ -62,8 +62,12 @@ async function networkFirst(event, shellKey) {
       // Every route is the same page (routes live after the #), so keep one copy under the app's address.
       event.waitUntil(cache.put(shellKey || req, copy).catch(() => {}));
       if (shellKey) event.waitUntil(keepShellAssets(cache, res.clone()));
+      return res;
     }
-    return res;
+    // A bad answer (e.g. GitHub's error page during a deploy, or a 404): use the kept copy when there is one,
+    // so a TV reloading at 4 AM never shows an error page.
+    const kept = await cache.match(shellKey || req, { ignoreSearch: true });
+    return kept || res;
   } catch (err) {
     const hit = (await cache.match(shellKey || req, { ignoreSearch: true })) || (await cache.match(req, { ignoreSearch: true }));
     if (hit) return hit;
@@ -112,14 +116,16 @@ async function keepShellAssets(cache, res) {
       if (!(await cache.match(url))) await cache.add(url).catch(() => (complete = false));
     }
     // Only once every file of the new version is kept: drop the files of older versions (each deploy renames
-    // them all). Without the list, only old entry files go, since the page names nothing else.
+    // them all).
     if (!complete) return;
     for (const key of await cache.keys()) {
       const p = new URL(key.url).pathname;
       const i = p.indexOf('/assets/');
       if (i < 0) continue;
       const name = p.slice(i + 1);
-      if (!used.has(name) && (listed || /^assets\/index-/.test(name))) await cache.delete(key);
+      // Without the list nothing is dropped: the page names only the entry file, and other files share its
+      // name pattern (e.g. the catering code, shared by the kitchen and the phones).
+      if (listed && !used.has(name)) await cache.delete(key);
     }
   } catch {
     /* keeping old files is harmless */

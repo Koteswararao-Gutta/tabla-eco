@@ -135,3 +135,36 @@ export function singleFlight<T>(job: () => Promise<T>): () => Promise<T> | null 
     return p;
   };
 }
+
+/** How long a save waits for the server before it counts as done. Firestore has already put the change in
+ *  this device's copy (screens show it at once) and sends it when the internet is back. */
+export const SAVE_WAIT_MS = 2500;
+
+/**
+ * A save as the screens see it: done once the server confirms it, or once it has waited SAVE_WAIT_MS (or at once
+ * when the device knows it is offline), because Firestore keeps the change and sends it later. So "Saving…" never
+ * hangs without internet. A refusal (e.g. the rules) that comes back in that time still fails the save as before;
+ * one that comes back later is written to the console.
+ */
+export function queued(write: Promise<void>, what: string, waitMs = SAVE_WAIT_MS, offline = isOffline()): Promise<void> {
+  let settled = false;
+  const sent = write.then(
+    () => void (settled = true),
+    (e) => {
+      if (settled) console.error(`${what}: the server refused this save`, e);
+      settled = true;
+      throw e;
+    },
+  );
+  sent.catch(() => {}); // a late refusal is logged above, never an unhandled rejection
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      settled = true;
+      resolve();
+    }, offline ? 0 : waitMs);
+  });
+  return Promise.race([sent, waited]).finally(() => clearTimeout(timer));
+}
+
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;

@@ -3,6 +3,7 @@
 // Other windows hear changes through the browser's "storage" event, so /tv/1 to /tv/4,
 // /kitchen and /manager open side by side in Chrome behave like the real devices.
 
+import { matchesFilter, recentSince, type CollectionFilter } from './filter';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
@@ -68,14 +69,16 @@ export class LocalStore implements DataStore {
     return this.listen(col, run);
   }
 
-  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void): Unsubscribe {
+  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void, filter?: CollectionFilter): Unsubscribe {
     let last = '\u0000';
+    const since = recentSince(this.now());
     const run = () => {
       const table = this.read(col);
       const s = JSON.stringify(table);
       if (s === last) return;
       last = s;
-      cb(Object.entries(table).map(([id, d]) => ({ ...(d as object), id }) as WithId<Collections[C]>));
+      const docs = Object.entries(table).map(([id, d]) => ({ ...(d as object), id }) as WithId<Collections[C]>);
+      cb(filter ? docs.filter((d) => matchesFilter(d, filter, since)) : docs);
     };
     run();
     return this.listen(col, run);
