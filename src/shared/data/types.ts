@@ -98,6 +98,11 @@ export interface OrderLine {
   text?: string;
   /** true when the line was read by a guess (an old order, a scan or a paste) and nobody has checked it yet. */
   check?: boolean;
+  /** Set on an extra (raita with a biryani, ...) added by the auto-extras rules: the extra's name, which
+   *  finds the row again when the dishes change. Missing on dish rows. */
+  extra?: string;
+  /** true once someone changed the extra's amount or name: it then stays as they left it. */
+  extraEdited?: boolean;
 }
 
 /**
