@@ -111,14 +111,18 @@ export function whenText(o: { type: string; dueAt: number }, now: number, capita
   const type = o.type === 'delivery' ? 'delivery' : 'pickup';
   const kind = capital ? type[0].toUpperCase() + type.slice(1) : type;
   const day = dayLabel(o.dueAt, now);
-  if (day === 'Today') return `${kind} at ${timeLabel(o.dueAt)}, ${countdown(o.dueAt, now).text}`;
+  if (day === 'Today' || isNear(o.dueAt, now)) return `${kind} at ${timeLabel(o.dueAt)}, ${countdown(o.dueAt, now).text}`;
   const on = day === 'Tomorrow' || day === 'Yesterday' ? day.toLowerCase() : 'on ' + day;
   return `${kind} ${on} at ${timeLabel(o.dueAt)}`;
 }
 
-/** The alarm's headline: "soon" only when every order is today; otherwise the day (or "coming up"). */
+/** Within this time an order reads as "soon, in 30 min", even just past midnight; further off, by its day. */
+const NEAR_MS = 3 * 3_600_000;
+const isNear = (dueAt: number, now: number) => dueAt - now <= NEAR_MS;
+
+/** The alarm's headline: "soon" when every order is today or within a few hours; otherwise the day (or "coming up"). */
 export function alarmTitle(reminders: readonly { dueAt: number }[], now: number): string {
-  const days = new Set(reminders.map((o) => dayLabel(o.dueAt, now)));
+  const days = new Set(reminders.map((o) => (isNear(o.dueAt, now) ? 'Today' : dayLabel(o.dueAt, now))));
   const one = days.size === 1 ? [...days][0] : null;
   const when = one === 'Today' ? 'soon' : one === 'Tomorrow' ? 'tomorrow' : 'coming up';
   return reminders.length > 1 ? `${reminders.length} catering orders ${when}` : `Catering order ${when}`;

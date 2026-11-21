@@ -117,6 +117,11 @@ describe('heads-up wording names the day when it is not today', () => {
   it('the headline says "soon" only for today', () => {
     expect(alarmTitle([today], now)).toBe('Catering order soon');
     expect(alarmTitle([tomorrow], now)).toBe('Catering order tomorrow');
+    // Just before midnight, an order 30 minutes away is "soon", with its countdown, not "tomorrow".
+    const late = new Date(2026, 10, 23, 23, 50).getTime();
+    const pastMidnight = { type: 'pickup', dueAt: late + 30 * 60_000 };
+    expect(alarmTitle([pastMidnight], late)).toBe('Catering order soon');
+    expect(whenText(pastMidnight, late)).toBe('pickup at 12:20 AM, in 30 min');
     expect(alarmTitle([today, tomorrow], now)).toBe('2 catering orders coming up');
     expect(alarmTitle([today, today], now)).toBe('2 catering orders soon');
   });
