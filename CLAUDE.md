@@ -15,9 +15,9 @@ One web app (Vite + React + TypeScript), hash routes:
 | `#/tv/5` | Music TV: YouTube playlist + catering clip between songs | `src/tv-music/` (agent 3) |
 | `#/manager/catering`, `#/kitchen` | Catering orders; kitchen tablet with PIN | `src/manager/catering/`, `src/kitchen/` (agent 4) |
 | `#/manager/staff` | Shift planner (port of `reference/shift-planner.html`) | `src/manager/staff/` (agent 5) |
-| `#/front/catering`, `#/front/screens` | Front app for front staff: the same Catering, and Screens to look at only. No Staff, no ☰ | `src/manager/ManagerShell.tsx` (`mode="front"`, `src/manager/mode.tsx`) |
+| `#/front/catering` | Front app for front staff: the same Catering only. No Screens, no Staff, no ☰ | `src/manager/ManagerShell.tsx` (`mode="front"`, `src/manager/mode.tsx`) |
 
-Two links, one code base: `#/manager` (everything, no PIN) and `#/front` (front staff). Inside these apps build links with `useAppBase()` from `src/manager/mode.tsx`, never a hard-coded `/manager`; check `useAppMode() === 'front'` to hide anything that changes Screens.
+Two links, one code base: `#/manager` (everything, no PIN) and `#/front` (front staff). Inside these apps build links with `useAppBase()` from `src/manager/mode.tsx`, never a hard-coded `/manager`; check `useAppMode() === 'front'` for anything that differs in the front app.
 
 Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**`, `src/App.tsx`, `src/main.tsx`, `src/manager/ManagerShell.tsx`, configs, `e2e/helpers.ts`, `e2e/foundation.spec.ts`, this file.
 

@@ -1,4 +1,4 @@
-// Which app this phone is running: the front app (front staff: Catering, and Screens to look at only)
+// Which app this phone is running: the front app (front staff: Catering only)
 // or the manager app (everything). Both are the same code at two links: #/front and #/manager.
 import { createContext, useContext } from 'react';
 
