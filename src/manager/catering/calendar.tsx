@@ -9,8 +9,8 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 /** A month of days with each day's order count. Tap a day to pick it. Shared by the manager's
  *  Calendar sheet and the kitchen tablet's Calendar view. */
-export function MonthCalendar(props: { orders: Order[]; now: number; picked: number; onPick: (day: number) => void }) {
-  const { orders, now, picked, onPick } = props;
+export function MonthCalendar(props: { orders: Order[]; now: number; picked: number | null; onPick: (day: number) => void; onMonth?: () => void }) {
+  const { orders, now, picked, onPick, onMonth } = props;
   const today = dayStart(now);
   const [month, setMonth] = useState(() => {
     const d = new Date(now);
@@ -21,6 +21,7 @@ export function MonthCalendar(props: { orders: Order[]; now: number; picked: num
   const move = (by: number) => {
     const d = new Date(month.y, month.m + by, 1);
     setMonth({ y: d.getFullYear(), m: d.getMonth() });
+    onMonth?.();
   };
   const thisMonth = new Date(now).getMonth() === month.m && new Date(now).getFullYear() === month.y;
   const title = new Date(month.y, month.m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -82,39 +83,44 @@ export function MonthCalendar(props: { orders: Order[]; now: number; picked: num
 export function CalendarSheet(props: { orders: Order[]; now: number; onClose: () => void; onOpen: (o: Order) => void; onNew: (day: number) => void }) {
   const { orders, now, onClose, onOpen, onNew } = props;
   const today = dayStart(now);
-  const [picked, setPicked] = useState(today);
-  const dayOrders = ordersByDay(orders).get(picked) ?? [];
+  // Cleared when the month changes, until a day in the new month is tapped.
+  const [picked, setPicked] = useState<number | null>(today);
+  const dayOrders = picked === null ? [] : ordersByDay(orders).get(picked) ?? [];
   const people = dayOrders.reduce((n, o) => n + (o.people ?? 0), 0);
 
   return (
     <Sheet open title="Calendar" onClose={onClose}>
       <div className="cal" data-testid="calendar">
-        <MonthCalendar orders={orders} now={now} picked={picked} onPick={setPicked} />
+        <MonthCalendar orders={orders} now={now} picked={picked} onPick={setPicked} onMonth={() => setPicked(null)} />
 
-        <section className="cal-list" aria-label="Orders that day">
-          <h3>
-            {dayLabel(picked, now)}
-            <span>
-              {dayOrders.length === 0 ? 'No orders' : `${dayOrders.length} order${dayOrders.length === 1 ? '' : 's'}`}
-              {people > 0 && ` · ${people} people`}
-            </span>
-          </h3>
-          {dayOrders.map((o) => (
-            <button key={o.id} className={'cal-row' + (o.status === 'completed' ? ' done' : '')} onClick={() => onOpen(o)}>
-              <b>{timeLabel(o.dueAt)}</b>
-              <span className="cal-row-name">{o.customerName}</span>
-              <span className="cal-row-meta">
-                {o.status === 'completed' ? '✓ Done' : o.type === 'delivery' ? 'Delivery' : 'Pickup'}
-                {o.people ? ` · ${o.people}` : ''}
+        {picked === null ? (
+          <p className="cal-hint">Tap a day to see its orders.</p>
+        ) : (
+          <section className="cal-list" aria-label="Orders that day">
+            <h3>
+              {dayLabel(picked, now)}
+              <span>
+                {dayOrders.length === 0 ? 'No orders' : `${dayOrders.length} order${dayOrders.length === 1 ? '' : 's'}`}
+                {people > 0 && ` · ${people} people`}
               </span>
-            </button>
-          ))}
-          {picked >= today && (
-            <button className="t-btn accent block" onClick={() => onNew(picked)}>
-              + New order on {new Date(picked).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </button>
-          )}
-        </section>
+            </h3>
+            {dayOrders.map((o) => (
+              <button key={o.id} className={'cal-row' + (o.status === 'completed' ? ' done' : '')} onClick={() => onOpen(o)}>
+                <b>{timeLabel(o.dueAt)}</b>
+                <span className="cal-row-name">{o.customerName}</span>
+                <span className="cal-row-meta">
+                  {o.status === 'completed' ? '✓ Completed' : o.type === 'delivery' ? 'Delivery' : 'Pickup'}
+                  {o.people ? ` · ${o.people}` : ''}
+                </span>
+              </button>
+            ))}
+            {picked >= today && (
+              <button className="t-btn accent block" onClick={() => onNew(picked)}>
+                + New order on {new Date(picked).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              </button>
+            )}
+          </section>
+        )}
       </div>
     </Sheet>
   );

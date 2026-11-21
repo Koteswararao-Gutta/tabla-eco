@@ -14,9 +14,9 @@ test('front app: Catering and Screens (look only); no Staff, no ☰, no PIN', as
   await page.screenshot({ path: `${SHOTS}/front-catering.png` });
 
   // Front staff take payments: Mark paid works, and "Taken by" lists the staff from the Staff tab.
-  await page.getByRole('region', { name: 'Done, not paid' }).getByRole('button', { name: /Rahul Verma/ }).click();
+  await page.getByRole('region', { name: 'Completed, unpaid' }).getByRole('button', { name: /Rahul Verma/ }).click();
   const details = page.getByRole('dialog', { name: 'Order details' });
-  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
   const pay = page.getByRole('dialog', { name: 'Mark paid' });
   await pay.getByLabel('Taken by').selectOption('Tarun');
   await page.keyboard.press('Escape');

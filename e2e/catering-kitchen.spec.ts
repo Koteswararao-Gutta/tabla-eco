@@ -72,9 +72,9 @@ test('manager adds an order, kitchen sees it live, completes, undoes and reopens
   // Manager list shows the sample orders.
   await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
   await expect(manager.getByText('Priya Sharma')).toBeVisible();
-  // Completed but not paid: it stays, in "Done, not paid" only (and in History).
+  // Completed but not paid: it stays, in "Completed, unpaid" only (and in History).
   await expect(manager.getByText('Rahul Verma')).toHaveCount(1);
-  await expect(manager.getByRole('region', { name: 'Done, not paid' }).getByText('Rahul Verma')).toBeVisible();
+  await expect(manager.getByRole('region', { name: 'Completed, unpaid' }).getByText('Rahul Verma')).toBeVisible();
   await shot(manager, 'manager-list');
 
   // Kitchen: PIN first. Wrong PIN is rejected, 1234 unlocks.
@@ -447,11 +447,12 @@ test('saving an edit never undoes a completion made in the kitchen meanwhile', a
   await manager.getByRole('button', { name: /Desert Tech office/ }).click();
   await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
   const edit = manager.getByRole('dialog', { name: 'Edit order' });
-  await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
+  await expect(edit.getByLabel('Notes (optional)')).toBeVisible();
 
   // ...the kitchen completes the order while it is open...
   await kitchenOption(kitchen, 'Desert Tech office', 'Mark completed');
-  await expect(edit.getByRole('button', { name: 'Reopen' })).toBeVisible(); // the sheet shows the live status
+  await expect(kitchen.getByRole('article', { name: 'Order for Desert Tech office' })).toHaveCount(0);
+  await expect.poll(async () => (await readCollection<CateringOrder>(manager, 'orders')).find((x) => x.customerName === 'Desert Tech office')!.status).toBe('completed');
 
   // ...and saving the edit keeps it completed.
   await edit.getByLabel('Notes (optional)').fill('Call when outside, gate code 42');
@@ -584,7 +585,7 @@ test('paste a customer message fills the new order form, then saves', async ({ b
   await manager.setViewportSize({ width: 390, height: 844 });
   await manager.getByRole('button', { name: '+ New order' }).click();
   const sheet = manager.getByRole('dialog', { name: 'New order' });
-  await sheet.getByRole('button', { name: '📋 Paste message' }).click();
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
   const box = sheet.getByLabel("Customer's message");
   await expect(box).toBeFocused();
   // Nothing pasted yet: a plain message, no AI call.
@@ -615,7 +616,7 @@ test('one tap on Paste message reads what was copied and fills the form', async 
   await manager.evaluate(() => navigator.clipboard.writeText('Hi, Meera here. 2 trays veg biryani and 50 gulab jamun tomorrow 6:30pm pickup'));
   await manager.getByRole('button', { name: '+ New order' }).click();
   const sheet = manager.getByRole('dialog', { name: 'New order' });
-  await sheet.getByRole('button', { name: '📋 Paste message' }).click();
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
   await expect(sheet.getByText('Filled in from the message.')).toBeVisible();
   await expect(sheet.getByLabel("Customer's message")).toHaveCount(0); // no box, no extra tap
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
@@ -754,25 +755,17 @@ test('closing a form with typed changes asks first; untouched forms close at onc
   await context.close();
 });
 
-test('Mark completed in the edit form saves the typed changes too, and checks them first', async ({ browser }) => {
+test('the edit form has no Mark completed or Delete: those stay on the order details', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');
   await manager.getByRole('button', { name: /Priya Sharma/ }).click();
-  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: 'Edit' }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(details.getByRole('button', { name: /Mark completed/ })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Delete' })).toBeVisible();
+  await details.getByRole('button', { name: 'Edit' }).click();
   const edit = manager.getByRole('dialog', { name: 'Edit order' });
-  // An invalid change: shown, and the status is left alone.
-  await edit.getByLabel('Customer name').fill('');
-  await edit.getByRole('button', { name: 'Mark completed' }).click();
-  await expect(edit.getByText("Please enter the customer's name.")).toBeVisible();
-  const priya = async () => (await readCollection<CateringOrder>(manager, 'orders')).find((o) => o.phone === '555 123 4567')!;
-  expect((await priya()).status).toBe('open');
-  // Fixed: both the edits and the status are saved.
-  await edit.getByLabel('Customer name').fill('Priya S.');
-  await edit.getByLabel('Notes (optional)').fill('Extra raita');
-  await edit.getByRole('button', { name: 'Mark completed' }).click();
-  await expect(edit).toHaveCount(0);
-  expect(await priya()).toMatchObject({ customerName: 'Priya S.', notes: 'Extra raita', status: 'completed', completedAt: expect.any(Number) });
-  await expect(manager.getByRole('status').filter({ hasText: 'Marked completed' })).toBeVisible();
+  await expect(edit.getByLabel('Customer name')).toBeVisible();
+  await expect(edit.getByRole('button', { name: /Mark completed|Reopen|Delete/ })).toHaveCount(0);
   await context.close();
 });
 
@@ -813,7 +806,7 @@ test('kitchen edits an order: tablet shows only the updated order, manager app k
   await kitchenOption(kitchen, 'Priya Sharma', 'Edit order');
   const edit = kitchen.getByRole('dialog', { name: 'Edit order' });
   await expect(edit.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-  await expect(edit.getByRole('button', { name: 'Mark completed' })).toBeVisible();
+  await expect(edit.getByRole('button', { name: 'Mark completed' })).toHaveCount(0);
   // Change one quantity and add a dish; the untouched rows stay exactly as they were typed.
   await expect(edit.getByTestId('item-row')).toHaveCount(4);
   await edit.getByLabel('Item 1 quantity').fill('3');
@@ -1070,7 +1063,7 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   await sheet.getByLabel('Date').fill(tomorrow);
   await sheet.getByLabel('Time').fill('12:30');
   await fillItems(sheet, [{ dish: 'Veg biryani', qty: '2', unit: 'Full tray' }, { dish: 'Samosa', qty: '40', unit: 'Pieces' }]);
-  const amount = sheet.getByLabel('Amount $ (optional, manager only)');
+  const amount = sheet.getByLabel('Amount $ (optional)');
   await amount.fill('two hundred');
   await sheet.getByRole('button', { name: 'Save order' }).click();
   await expect(sheet.getByText('Please enter an amount like 200')).toBeVisible();
@@ -1096,7 +1089,7 @@ test('order amount: manager only, kept apart from the order, never on the kitche
 
   // Manager list card and details show it.
   const mCard = manager.getByRole('button', { name: /Mehta Party/ });
-  await expect(mCard).toContainText('$1,250.50 · Not paid');
+  await expect(mCard).toContainText('$1,250.50 · Unpaid');
   await mCard.click();
   const details = manager.getByRole('dialog', { name: 'Order details' });
   await expect(details.getByTestId('order-amount')).toHaveText(/Amount\s*\$1,250\.50/);
@@ -1127,14 +1120,14 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   // Manager changes the amount: no history entry (the kitchen sees the history), and the tablet still shows nothing.
   await details.getByRole('button', { name: 'Edit' }).click();
   const mEdit = manager.getByRole('dialog', { name: 'Edit order' });
-  await expect(mEdit.getByLabel('Amount $ (optional, manager only)')).toHaveValue('1250.50');
-  await mEdit.getByLabel('Amount $ (optional, manager only)').fill('200');
+  await expect(mEdit.getByLabel('Amount $ (optional)')).toHaveValue('1250.50');
+  await mEdit.getByLabel('Amount $ (optional)').fill('200');
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
-  await expect(mCard).toContainText('$200 · Not paid');
+  await expect(mCard).toContainText('$200 · Unpaid');
   // Marked paid from the order's summary (how and who are asked for).
   await mCard.click();
-  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
   const pay = manager.getByRole('dialog', { name: 'Mark paid' });
   await pay.getByRole('button', { name: 'Cash' }).click();
   await pay.getByLabel('Taken by').selectOption('Siri');
@@ -1158,7 +1151,7 @@ test('order amount: manager only, kept apart from the order, never on the kitche
   // Clearing it removes it from the card.
   await mCard.click();
   await details.getByRole('button', { name: 'Edit' }).click();
-  await mEdit.getByLabel('Amount $ (optional, manager only)').fill('');
+  await mEdit.getByLabel('Amount $ (optional)').fill('');
   await mEdit.getByRole('button', { name: 'Save changes' }).click();
   await expect(mEdit).toHaveCount(0);
   await mCard.click();
@@ -1182,9 +1175,10 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   // The sample's finished order (Rahul Verma) isn't paid: it stays in the list, and Unpaid counts it.
   const filter = manager.getByTestId('unpaid-filter');
   await expect(filter).toContainText('Unpaid1');
-  const notPaid = manager.getByRole('region', { name: 'Done, not paid' });
+  const notPaid = manager.getByRole('region', { name: 'Completed, unpaid' });
   const card = notPaid.getByRole('button', { name: /Rahul Verma/ });
-  await expect(card).toContainText('Not paid');
+  await expect(card).toContainText('Unpaid');
+  await expect(card.getByText('Unpaid')).toHaveCount(1); // said once, in the badge
   await shot(manager, 'manager-unpaid-in-list');
 
   // Set the amount, then take a $100 deposit.
@@ -1192,10 +1186,10 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   const details = manager.getByRole('dialog', { name: 'Order details' });
   await details.getByRole('button', { name: 'Edit' }).click();
   const edit = manager.getByRole('dialog', { name: 'Edit order' });
-  await edit.getByLabel('Amount $ (optional, manager only)').fill('300');
+  await edit.getByLabel('Amount $ (optional)').fill('300');
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await card.click();
-  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
   const pay = manager.getByRole('dialog', { name: 'Mark paid' });
   await expect(pay.getByTestId('pay-totals')).toContainText('$300');
   await pay.getByRole('button', { name: 'Deposit' }).click();
@@ -1222,18 +1216,19 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
 
   // The Unpaid view lists it with what's owed.
   await filter.click();
-  await expect(manager.getByTestId('unpaid-list')).toContainText('1 finished order not paid · $200 still owed');
+  await expect(manager.getByTestId('unpaid-list')).toContainText('$200 still owed');
+  await expect(manager.getByTestId('unpaid-list')).not.toContainText('finished');
   await shot(manager, 'manager-unpaid-filter');
 
   // Paid in full: card, Siri took it. Saved with the time; it leaves the Unpaid list and the count goes.
   await manager.getByTestId('unpaid-list').getByRole('button', { name: /Rahul Verma/ }).click();
-  await details.getByRole('button', { name: '💵 Mark paid' }).click();
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
   await expect(pay.getByRole('button', { name: 'Paid in full ($200)' })).toHaveAttribute('aria-pressed', 'true');
   await pay.getByRole('button', { name: 'Card' }).click();
   await pay.getByLabel('Taken by').selectOption('Siri');
   await pay.getByRole('button', { name: '✓ Mark paid' }).click();
   await expect(details.getByTestId('paid-row')).toContainText('✓ Paid in full · Card · Siri');
-  await expect(details.getByRole('button', { name: '💵 Mark paid' })).toHaveCount(0);
+  await expect(details.getByRole('button', { name: 'Mark paid', exact: true })).toHaveCount(0);
   await manager.waitForTimeout(300);
   await shot(manager, 'manager-order-paid-full');
   await details.getByRole('button', { name: 'Close' }).click();
@@ -1526,5 +1521,123 @@ test('auto extras: biryani brings raita and salan, samosas their chutneys; they 
   await kitchen.getByRole('button', { name: 'Prep', exact: true }).click();
   await expect(kitchen.getByText('Raita', { exact: true })).toBeVisible();
   await shot(kitchen, 'kitchen-prep-extras');
+  await context.close();
+});
+
+test('phone Back closes an open sheet through the same "Discard" question, and never leaves the page', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  const url = manager.url();
+  // Nothing typed: Back just closes the form.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await expect(sheet).toBeVisible();
+  await manager.goBack();
+  await expect(sheet).toHaveCount(0);
+  expect(manager.url()).toBe(url);
+  // Something typed: Back asks first; Keep editing keeps it, and Back asks again; Discard closes.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await sheet.getByLabel('Customer name').fill('Back Test');
+  await manager.goBack();
+  const ask = manager.getByRole('dialog', { name: 'Discard this order?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Back Test');
+  await manager.goBack();
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect(manager.url()).toBe(url);
+  // A sheet closed with its own button leaves no extra Back step behind: Back goes to the page before.
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet).toHaveCount(0);
+  await manager.waitForTimeout(200);
+  expect(manager.url()).toBe(url);
+  // Opening one order from another sheet (Calendar) still closes with one Back.
+  await manager.getByRole('button', { name: 'Calendar' }).click();
+  await manager.getByRole('dialog', { name: 'Calendar' }).getByRole('button', { name: /Priya Sharma/ }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await expect(details).toBeVisible();
+  await manager.goBack();
+  await expect(manager.getByRole('dialog')).toHaveCount(0);
+  expect(manager.url()).toBe(url);
+  await context.close();
+});
+
+test('an order time already passed: a soft warning, still saves', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: '+ New order' }).click();
+  const sheet = manager.getByRole('dialog', { name: 'New order' });
+  await sheet.getByLabel('Customer name').fill('Late Lunch');
+  await sheet.getByLabel('Phone').fill('555 999 0000');
+  const y = new Date(Date.now() - 24 * 3600_000);
+  const ymd = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+  await sheet.getByLabel('Date').fill(ymd);
+  await sheet.getByLabel('Time').fill('12:00');
+  await expect(sheet.getByTestId('past-time')).toHaveText('This time has already passed. Did you mean tomorrow?');
+  await fillItems(sheet, [{ dish: 'Samosa', qty: '10', unit: 'Pieces' }]);
+  await shot(manager, 'manager-form-past-time');
+  await sheet.getByRole('button', { name: 'Save order' }).click();
+  await expect(manager.getByTestId('order-saved')).toBeVisible();
+  // Done sits above Share, which takes Save's place at the bottom.
+  const saved = manager.getByTestId('order-saved');
+  const done = (await saved.getByRole('button', { name: 'Done' }).boundingBox())!;
+  const share = (await saved.getByRole('link', { name: 'Share to WhatsApp' }).boundingBox())!;
+  expect(share.y).toBeGreaterThan(done.y);
+  await context.close();
+});
+
+test('deposits that add up to the amount count as paid; the amount cannot be cleared once deposits exist', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  const card = manager.getByRole('region', { name: 'Completed, unpaid' }).getByRole('button', { name: /Rahul Verma/ });
+  await card.click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  // Deposit with no amount yet: "paid so far".
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
+  const pay = manager.getByRole('dialog', { name: 'Mark paid' });
+  await pay.getByRole('button', { name: 'Deposit' }).click();
+  await pay.getByTestId('deposit-input').fill('abc');
+  await pay.getByRole('button', { name: 'Cash' }).click();
+  await pay.getByLabel('Taken by').selectOption('Tarun');
+  await pay.getByRole('button', { name: 'Save deposit' }).click();
+  await expect(pay).toContainText('Please enter an amount like 100 or 100.50.');
+  await pay.getByTestId('deposit-input').fill('100');
+  await pay.getByRole('button', { name: 'Save deposit' }).click();
+  await expect(details.getByTestId('order-amount')).toContainText('$100 paid so far');
+  // The amount can't be cleared now.
+  await details.getByRole('button', { name: 'Edit' }).click();
+  const edit = manager.getByRole('dialog', { name: 'Edit order' });
+  await edit.getByLabel('Amount $ (optional)').fill('250');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+  await card.click();
+  await details.getByRole('button', { name: 'Edit' }).click();
+  await edit.getByLabel('Amount $ (optional)').fill('');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toContainText('Deposits already taken. Enter the full amount.');
+  await edit.getByLabel('Amount $ (optional)').fill('100');
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+  // $100 of $100 in deposits: paid. Off the Unpaid list, no Mark paid, no count.
+  await expect(manager.getByRole('region', { name: 'Completed, unpaid' })).toHaveCount(0);
+  await expect(manager.getByTestId('unpaid-filter')).toHaveText('Unpaid');
+  await context.close();
+});
+
+test('calendar: moving to another month clears the day list until a day there is tapped', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: 'Calendar' }).click();
+  const cal = manager.getByRole('dialog', { name: 'Calendar' });
+  await expect(cal.getByRole('region', { name: 'Orders that day' })).toBeVisible();
+  await cal.getByRole('button', { name: 'Next month' }).click();
+  await expect(cal.getByRole('region', { name: 'Orders that day' })).toHaveCount(0);
+  await expect(cal).toContainText('Tap a day to see its orders.');
+  await cal.getByRole('grid').getByRole('button').first().click();
+  await expect(cal.getByRole('region', { name: 'Orders that day' })).toBeVisible();
+  await shot(manager, 'manager-calendar');
   await context.close();
 });

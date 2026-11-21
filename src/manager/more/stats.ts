@@ -1,7 +1,7 @@
 // Statistics (pure): the catering orders in one week, Monday to Sunday, with amounts and the week's totals.
 import type { CateringOrder, OrderAmount, WithId } from '@shared/data';
 import { dayStart } from '../catering/orders';
-import { balance, depositTotal, payFrom } from '../catering/pay';
+import { balance, depositTotal, isPaid, payFrom } from '../catering/pay';
 
 /** Midnight on the Monday of the week that contains `ms`, moved by `addWeeks`. */
 export function weekStart(ms: number, addWeeks = 0): number {
@@ -50,7 +50,7 @@ export function weekStats(orders: WithId<CateringOrder>[], amounts: WithId<Order
         paid += deposits;
         unpaid += balance(pay) ?? 0;
       }
-      const status = pay.paid ? 'paid' : deposits > 0 ? 'part' : 'unpaid';
+      const status = isPaid(pay) ? 'paid' : deposits > 0 ? 'part' : 'unpaid';
       return { order, amount: pay.amount, status };
     });
   return { rows, total: round(total), paid: round(paid), unpaid: round(unpaid), noAmount };
