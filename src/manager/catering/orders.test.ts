@@ -47,9 +47,10 @@ describe('grouping', () => {
     expect(g.later).toEqual([d]);
     expect(g.overdue).toEqual([old]);
   });
-  it('history is completed orders, newest first', () => {
+  it('history is completed and cancelled orders, newest first', () => {
     const done2 = order(at(10, 9), { status: 'completed' });
-    expect(history([done2, ...all])).toEqual([done, done2]);
+    const off = order(at(12, 9), { status: 'cancelled', cancelledAt: at(11, 9) });
+    expect(history([done2, off, ...all])).toEqual([done, off, done2]);
   });
   it('groups every order by day, newest first', () => {
     const g = groupByDay(all, NOW);

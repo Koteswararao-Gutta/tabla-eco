@@ -18,6 +18,11 @@ describe('dueReminders', () => {
     const seen = order('seen', now + 1000, 'open', now + 1000);
     expect(dueReminders([done, seen], now)).toEqual([]);
   });
+  it('never rings for a cancelled or deleted order', () => {
+    const off = order('off', now + 1000, 'cancelled');
+    const gone = { ...order('gone', now + 1000), deletedAt: now - 5 };
+    expect(dueReminders([off, gone], now)).toEqual([]);
+  });
   it('the acknowledgement is stored as the due time it was for', () => {
     expect(ackPatch(order('x', now + 1000))).toEqual({ kitchenAckFor: now + 1000 });
   });

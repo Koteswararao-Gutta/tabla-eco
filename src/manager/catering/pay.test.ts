@@ -77,6 +77,10 @@ describe('unpaidDone', () => {
   it('waits while payments load', () => {
     expect(unpaidDone(orders, () => undefined)).toBeNull();
   });
+  it('leaves out cancelled and deleted orders', () => {
+    const more = [...orders, { id: '5', status: 'cancelled', dueAt: 1 }, { id: '6', status: 'completed', dueAt: 2, deletedAt: 9 }];
+    expect(unpaidDone(more, () => NO_PAY)?.map((o) => o.id)).toEqual(['2', '4', '1']);
+  });
 });
 
 describe('deposits that add up to the full amount', () => {

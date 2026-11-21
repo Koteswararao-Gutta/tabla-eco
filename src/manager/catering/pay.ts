@@ -1,7 +1,7 @@
 // Payments on catering orders: manager app only.
 // Everything here lives in orderAmounts/{order id}, never on the order, so the kitchen tablet never loads it
 // and it never reaches the WhatsApp message, the name tags or the order's change history.
-import type { Deposit, OrderAmount, PayMethod, StaffConfig } from '@shared/data';
+import type { Deposit, OrderAmount, PayEvent, PayMethod, StaffConfig } from '@shared/data';
 import { defaults, normalizeDB } from '../staff/model';
 import { amountLabel, parseAmount } from './orders';
 
@@ -21,8 +21,13 @@ export interface Pay {
   method: PayMethod | null;
   takenBy: string | null;
   deposits: Deposit[];
+  /** Every money action, oldest first (readable entries only; the saved log itself is never shortened). */
+  log: PayEvent[];
+  /** The items text when the amount was set or confirmed; null when unknown (older orders). */
+  itemsAt: string | null;
+  refundNote: string | null;
 }
-export const NO_PAY: Pay = { amount: null, paid: false, paidAt: null, method: null, takenBy: null, deposits: [] };
+export const NO_PAY: Pay = { amount: null, paid: false, paidAt: null, method: null, takenBy: null, deposits: [], log: [], itemsAt: null, refundNote: null };
 
 const isMethod = (m: unknown): m is PayMethod => PAY_METHODS.some((x) => x.value === m);
 
@@ -39,8 +44,53 @@ export function payFrom(doc: Partial<OrderAmount> | null | undefined): Pay {
     method: isMethod(doc.method) ? doc.method : null,
     takenBy: typeof doc.takenBy === 'string' && doc.takenBy.trim() ? doc.takenBy : null,
     deposits,
+    log: (Array.isArray(doc.log) ? doc.log : []).filter((e): e is PayEvent => !!e && typeof e.kind === 'string' && typeof e.at === 'number'),
+    itemsAt: typeof doc.itemsAt === 'string' ? doc.itemsAt : null,
+    refundNote: typeof doc.refundNote === 'string' && doc.refundNote.trim() ? doc.refundNote : null,
   };
 }
+
+// ---------- payment log (add-only) ----------
+
+export const REFUND_NOTE_MAX = 500;
+
+/** The saved log with new entries added at the end. Every old entry is kept exactly as it was. */
+export function appendLog(old: unknown, ...events: PayEvent[]): PayEvent[] {
+  const kept = Array.isArray(old) ? (old as PayEvent[]) : [];
+  return [...kept, ...events.map(cleanEvent)];
+}
+
+/** A log entry with no undefined fields (the store rejects them), and a short note only when there is one. */
+export function cleanEvent(e: PayEvent): PayEvent {
+  const out: PayEvent = { kind: e.kind, amount: e.amount ?? null, method: e.method ?? null, takenBy: e.takenBy ?? null, at: e.at };
+  const note = e.note?.trim().slice(0, REFUND_NOTE_MAX);
+  if (note) out.note = note;
+  return out;
+}
+
+/** One line of "Payment history", in plain words: "Deposit $100 · Cash · Ravi". */
+export function payEventText(e: PayEvent): string {
+  const amt = amountLabel(e.amount);
+  const head: Record<PayEvent['kind'], string> = {
+    amount: amt ? `Amount set to ${amt}` : 'Amount cleared',
+    deposit: `Deposit ${amt}`,
+    depositRemoved: `Deposit ${amt} removed`,
+    paid: amt ? `Paid in full (${amt})` : 'Paid in full',
+    unpaid: 'Marked not paid',
+    cancelled: amt ? `Order cancelled (${amt} paid so far)` : 'Order cancelled',
+    refund: 'Refund note',
+  };
+  const bits = [head[e.kind] ?? 'Payment change', methodLabel(e.method) || null, e.takenBy || null, e.note || null].filter(Boolean);
+  return bits.join(' · ');
+}
+
+/** True when the order has an amount, the price was set against its items, and the items changed since.
+ *  Older orders (no itemsAt) never warn. */
+export function itemsChangedSincePrice(items: string | null | undefined, pay: Pick<Pay, 'amount' | 'itemsAt'> | null | undefined): boolean {
+  if (!pay || pay.amount == null || pay.itemsAt == null) return false;
+  return norm(pay.itemsAt) !== norm(items ?? '');
+}
+const norm = (t: string) => t.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
 
 /** What has been paid in deposits so far. */
 export const depositTotal = (pay: Pick<Pay, 'deposits'>): number => Math.round(pay.deposits.reduce((a, d) => a + d.amount, 0) * 100) / 100;
@@ -92,7 +142,7 @@ export function staffNames(config: StaffConfig | null | undefined): string[] {
 export function unpaidDone<T extends { id: string; status: string; dueAt: number }>(orders: T[], payOf: (id: string) => Pay | undefined): T[] | null {
   const out: T[] = [];
   for (const o of orders) {
-    if (o.status !== 'completed') continue;
+    if (o.status !== 'completed' || typeof (o as { deletedAt?: unknown }).deletedAt === 'number') continue;
     const p = payOf(o.id);
     if (!p) return null;
     if (!isPaid(p)) out.push(o);

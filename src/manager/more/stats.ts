@@ -2,6 +2,7 @@
 import type { CateringOrder, OrderAmount, WithId } from '@shared/data';
 import { dayStart } from '../catering/orders';
 import { balance, depositTotal, isPaid, payFrom } from '../catering/pay';
+import { isCancelled, isDeleted } from '../catering/safety';
 
 /** Midnight on the Monday of the week that contains `ms`, moved by `addWeeks`. */
 export function weekStart(ms: number, addWeeks = 0): number {
@@ -28,7 +29,8 @@ export interface Week {
   noAmount: number;
 }
 
-/** Every order due Monday 00:00 to Sunday 23:59 of the week that contains `ms` (open or completed), earliest first. */
+/** Every order due Monday 00:00 to Sunday 23:59 of the week that contains `ms` (open or completed), earliest first.
+ *  Cancelled and deleted orders are left out. */
 export function weekStats(orders: WithId<CateringOrder>[], amounts: WithId<OrderAmount>[], ms: number): Week {
   const from = weekStart(ms);
   const to = weekStart(ms, 1);
@@ -38,7 +40,7 @@ export function weekStats(orders: WithId<CateringOrder>[], amounts: WithId<Order
   let unpaid = 0;
   let noAmount = 0;
   const rows = orders
-    .filter((o) => o.dueAt >= from && o.dueAt < to)
+    .filter((o) => o.dueAt >= from && o.dueAt < to && !isCancelled(o) && !isDeleted(o))
     .sort((a, b) => a.dueAt - b.dueAt)
     .map((order): WeekRow => {
       const pay = payFrom(byId.get(order.id));

@@ -44,9 +44,16 @@ export default function Payments() {
                   <span className="mo-row-main">
                     <b>{r.order.customerName || 'No name'}</b>
                     <span className="mo-row-time">{timeLabel(r.order.dueAt)}</span>
+                    {r.status === 'cancelled' && r.paidSoFar > 0 && (
+                      <span className="mo-row-time mo-refund" data-testid="refund-line">{r.refundNote ?? 'Refund? Add a note on the order.'}</span>
+                    )}
                   </span>
-                  <span className="mo-row-amt">{r.amount === null ? 'No amount' : amountLabel(r.amount)}</span>
-                  <span className={'t-badge ' + (r.status === 'paid' ? 'good' : r.status === 'part' ? '' : 'bad')}>{r.status === 'paid' ? 'Paid' : r.status === 'part' ? 'Part paid' : 'Unpaid'}</span>
+                  <span className="mo-row-amt">
+                    {r.status === 'cancelled' ? (r.paidSoFar > 0 ? `${amountLabel(r.paidSoFar)} paid` : 'Nothing paid') : r.amount === null ? 'No amount' : amountLabel(r.amount)}
+                  </span>
+                  <span className={'t-badge ' + (r.status === 'paid' ? 'good' : r.status === 'part' ? '' : 'bad')}>
+                    {r.status === 'paid' ? 'Paid' : r.status === 'part' ? 'Part paid' : r.status === 'cancelled' ? 'Cancelled' : 'Unpaid'}
+                  </span>
                 </Link>
               </li>
             ))}
@@ -55,6 +62,7 @@ export default function Payments() {
             <div><span>Paid</span><b className="mo-good">{amountLabel(data.paidTotal)}</b></div>
             <div><span>Unpaid</span><b className="mo-bad">{amountLabel(data.unpaidTotal)}</b></div>
           </div>
+          {data.rows.some((r) => r.status === 'cancelled') && <p className="mo-note mo-noamount">Cancelled orders are not in the totals.</p>}
         </>
       )}
     </main>

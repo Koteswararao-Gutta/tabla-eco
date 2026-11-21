@@ -20,7 +20,8 @@ export const ackPatch = (o: { dueAt: number }): Partial<KitchenOrder> => ({ kitc
 export function dueReminders<T extends KitchenOrder>(orders: readonly T[], now: number, staff?: unknown): T[] {
   return orders
     .filter((o) => {
-      if (o.status !== 'open' || o.kitchenAckFor === o.dueAt) return false;
+      // Only open orders ring: never a completed, cancelled or deleted one.
+      if (o.status !== 'open' || typeof o.deletedAt === 'number' || o.kitchenAckFor === o.dueAt) return false;
       const ring = ringAt(o.dueAt, staff);
       return now >= ring && now <= Math.max(o.dueAt, ring) + LATE_MS;
     })
