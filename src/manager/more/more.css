@@ -37,3 +37,10 @@
 .mo-noamount { margin-top: 12px; text-align: center; }
 .mo-week-list { margin-top: 16px; }
 .mo-row .t-badge { white-space: nowrap; }
+.mo-refund { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Export */
+.mo-export .t-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; border-radius: 22px; }
+.mo-export-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mo-export-dates .t-input { width: 100%; min-height: var(--tap); }
+.mo-export-help { font-size: 0.85rem; }

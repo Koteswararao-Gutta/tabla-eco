@@ -8,10 +8,12 @@ import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { editAlertFor, kitchenEdit } from './edits.js';
 import { checkRequest, LIMIT_REACHED, menuNames, readError, readOrderPhoto, takeDailyRead, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, sendShouldRetry, shouldSchedule, TIME_ZONE } from './reminders.js';
+import { restaurantDay, SUMMARY_WINDOW_MS, summaryFor, todaysOrders } from './summary.js';
 import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
 
 initializeApp();
@@ -113,9 +115,30 @@ export const orderReminder = onTaskDispatched(
 
     const result = await sendToAllDevices(alertFor(order, now), `order-${orderId}`, 'high');
     // Remember it was sent for this time, so a retry or a move away and back doesn't ring again.
-    if (result.sent > 0) await snap.ref.update({ remindedFor: dueAt });
-    // Nobody got it and the failure may pass (not just phones that are gone): throw, so Cloud Tasks tries again.
-    else if (sendShouldRetry(result)) throw new Error(`reminder for order ${orderId}: no phone got it (${result.failed} failed), trying again`);
+    if (result.sent > 0) return void (await snap.ref.update({ remindedFor: dueAt }));
+    // Nobody got it: an error in Cloud Logging, with the order id.
+    logger.error(`orderReminder: the 1-hour reminder for order ${orderId} reached no phone (${result.failed} failed)`);
+    // The failure may pass (not just phones that are gone): throw, so Cloud Tasks tries again.
+    if (sendShouldRetry(result)) throw new Error(`reminder for order ${orderId}: no phone got it (${result.failed} failed), trying again`);
+  },
+);
+
+// ---------- Morning summary ----------
+
+/** 9:00 AM restaurant time: one alert listing today's open catering orders. No orders today, no alert. */
+export const morningSummary = onSchedule(
+  { schedule: '0 9 * * *', timeZone: TIME_ZONE, retryCount: 1, maxInstances: 1 },
+  async () => {
+    const now = Date.now();
+    const snap = await getFirestore()
+      .collection('orders')
+      .where('dueAt', '>=', now - SUMMARY_WINDOW_MS)
+      .where('dueAt', '<=', now + SUMMARY_WINDOW_MS)
+      .get();
+    const today = todaysOrders(snap.docs.map((d) => ({ ...d.data(), id: d.id })), now);
+    const alert = summaryFor(today);
+    if (!alert) return void logger.info('morningSummary: no catering orders today');
+    await sendToAllDevices(alert, `summary-${restaurantDay(now)}`);
   },
 );
 
@@ -168,7 +191,8 @@ export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, ma
 async function sendToAllDevices(alert, tag, urgency = 'normal') {
   const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
   if (!docs.length) {
-    logger.info(`${tag} alert: no devices have alerts on`);
+    // An error (not info), so it shows among Cloud Logging's errors: with alerts on nowhere, nobody hears them.
+    logger.error(`${tag} alert reached no phone: no devices have alerts on (turn alerts on in the manager app on each phone)`);
     return { sent: 0, failed: 0, removed: 0 };
   }
   let sent = 0;
@@ -187,6 +211,7 @@ async function sendToAllDevices(alert, tag, urgency = 'normal') {
     removed += dead.length;
     await Promise.all(batch.filter((d) => dead.includes(d.get('token'))).map((d) => d.ref.delete().catch(() => {})));
   }
-  logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
+  if (sent === 0) logger.error(`${tag} alert reached no phone: all ${failed} sends failed (${removed} phones were gone)`);
+  else logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
   return { sent, failed, removed };
 }

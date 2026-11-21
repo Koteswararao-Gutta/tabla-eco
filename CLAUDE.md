@@ -48,6 +48,7 @@ npm run dev          # http://localhost:5173/#/  (open screens in separate windo
 npm run typecheck
 npm test             # unit tests (vitest)
 npm run e2e          # Chrome tests (Playwright). In the cloud container: PW_CHROMIUM=/opt/pw-browsers/chromium npm run e2e
+npm test --prefix rules-test   # Firestore rules on the emulator (needs Java 21)
 ```
 
 Parallel agents each use their own test port: `PW_PORT=4181` agent 1, `4182` agent 2, `4183` agent 3, `4184` agent 4, `4185` agent 5, `4190` integration.

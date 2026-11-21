@@ -3,18 +3,20 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useCollection, useNow } from '@shared/data';
 import { PageHeader } from '@shared/ui';
 import { amountLabel, dayStart, fromInputs, timeLabel, toDateInput } from '../catering/orders';
+import { useAmountsOf } from '../catering/data';
 import { weekStart, weekStats } from './stats';
 
 const STATUS = { paid: ['Paid', 'good'], part: ['Part paid', ''], unpaid: ['Unpaid', 'bad'] } as const;
 
 export default function Statistics() {
   const now = useNow(60_000);
-  const orders = useCollection('orders');
-  const amounts = useCollection('orderAmounts');
   // The week lives in the link (its Monday), so coming back from an order returns to the same week.
   const [params, setParams] = useSearchParams();
   const picked = fromInputs(params.get('week') ?? '', '12:00');
   const week = weekStart(picked ?? now);
+  // Only that week's orders and their amounts are loaded.
+  const orders = useCollection('orders', { dueFrom: week, dueTo: weekStart(week, 1) });
+  const amounts = useAmountsOf(orders).current;
   const go = (ms: number) => setParams({ week: toDateInput(ms) }, { replace: true });
   const data = orders && amounts ? weekStats(orders, amounts, week) : null;
 

@@ -52,6 +52,16 @@ describe('tagsForOrder', () => {
       { name: 'Andhra Chicken Curry', sub: 'Bone-in', diet: 'nonveg' },
     ]);
   });
+  it('takes the name and note from the saved lines, never from the text', () => {
+    const lines = [
+      { dishId: null, name: 'Goat Curry', qty: 1.5, unit: 'Half tray', note: 'bone-in', text: 'Goat curry 1 1/2 HT (bone-in)', check: true },
+      { dishId: null, name: 'Chicken Biryani', qty: 40, unit: 'Servings', note: '' },
+    ];
+    expect(tagsForOrder({ items: 'Chicken Biryani for 40 and more text', lines }, null)).toEqual([
+      { name: 'Goat Curry', sub: 'Bone-in', diet: 'nonveg' },
+      { name: 'Chicken Biryani', sub: '', diet: 'nonveg' },
+    ]);
+  });
   it('copes with missing items or menu', () => {
     expect(tagsForOrder({ items: '' }, null)).toEqual([]);
     expect(tagsForOrder({ items: 'Tea' }, { groups: undefined })).toEqual([{ name: 'Tea', sub: '', diet: 'veg' }]);

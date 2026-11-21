@@ -47,9 +47,10 @@ describe('grouping', () => {
     expect(g.later).toEqual([d]);
     expect(g.overdue).toEqual([old]);
   });
-  it('history is completed orders, newest first', () => {
+  it('history is completed and cancelled orders, newest first', () => {
     const done2 = order(at(10, 9), { status: 'completed' });
-    expect(history([done2, ...all])).toEqual([done, done2]);
+    const off = order(at(12, 9), { status: 'cancelled', cancelledAt: at(11, 9) });
+    expect(history([done2, off, ...all])).toEqual([done, off, done2]);
   });
   it('groups every order by day, newest first', () => {
     const g = groupByDay(all, NOW);
@@ -253,6 +254,13 @@ describe('shareText / whatsappHref', () => {
   it('says 1 person, and leaves out marks WhatsApp would format', () => {
     const text = shareText({ ...base, customerName: 'Priya *VIP* _Sharma_', type: 'pickup', people: 1, notes: 'Line 1 ~strike~' });
     expect(text).toBe('*Catering order*\nPriya VIP Sharma\nFri, Nov 20, 5:30 PM\nPickup\n1 person\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Line 1 strike');
+  });
+
+  it('lists the items from the saved lines when the order has them', () => {
+    const lines = [{ dishId: 'b1', name: 'Chicken Dum Biryani', qty: 1.5, unit: 'Full tray', note: 'mild' }];
+    const text = shareText({ ...base, items: 'stale text', lines, type: 'pickup', people: null });
+    expect(text).toContain('*Items*\n• Chicken Dum Biryani, 1-1/2 Full trays (mild)');
+    expect(text).not.toContain('stale');
   });
 
   it('makes a wa.me link with the message encoded', () => {

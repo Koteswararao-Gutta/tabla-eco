@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FirebaseStore } from './firebase';
 import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
-import type { CollectionFilter } from './filter';
+import { onSaveFailure, type SaveFailure } from './resync';
+import { filterKey, type CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
 
@@ -11,18 +12,25 @@ export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export type { CollectionFilter } from './filter';
+export type { SaveFailure } from './resync';
+export { recentSince, RECENT_DAYS } from './filter';
 
 /** The app-wide data store: Firebase (shared by every device) unless built with VITE_STORE=local,
  *  which keeps everything in one browser (tests and the offline Chrome preview). */
 export const store: DataStore =
   import.meta.env.VITE_STORE === 'local' ? new LocalStore() : new FirebaseStore(firebaseConfig);
 
-/** Live collection. `null` until the first value arrives.
- *  `filter` narrows it, e.g. 'openOrRecent' (open orders and the last 60 days) for the kitchen. */
+/** Live collection. `null` until the first value arrives (and again while a changed filter loads).
+ *  `filter` narrows it (see filter.ts), e.g. 'openOrRecent' (open orders and the last 60 days) for the kitchen,
+ *  { dueFrom, dueTo } for one week, or { ids } for the amounts of the orders on screen. A filter object may be
+ *  made anew on every render: the list only listens again when what it asks for changes. */
 export function useCollection<C extends CollectionName>(col: C, filter?: CollectionFilter): WithId<Collections[C]>[] | null {
-  const [docs, setDocs] = useState<WithId<Collections[C]>[] | null>(null);
-  useEffect(() => store.watchCollection(col, setDocs, filter), [col, filter]);
-  return docs;
+  const key = `${col}|${filterKey(filter)}`;
+  const [got, setGot] = useState<{ key: string; docs: WithId<Collections[C]>[] } | null>(null);
+  const latest = useRef(filter);
+  latest.current = filter;
+  useEffect(() => store.watchCollection(col, (docs) => setGot({ key, docs }), latest.current), [key]);
+  return got && got.key === key ? got.docs : null;
 }
 
 /** Live single document. `undefined` while loading, `null` if it doesn't exist. */
@@ -91,3 +99,11 @@ export function useHeartbeat(screenId: ScreenId): void {
 /** A screen counts as online if it reported in the last 5 minutes. */
 export const isOnline = (lastSeen: number | undefined, now: number): boolean =>
   !!lastSeen && now - lastSeen < 300_000;
+
+/** Saves the server refused after they already looked done (e.g. sent later, when the internet came back).
+ *  `failures` is empty until one happens; `dismiss` clears the list. Used once app-wide by the "Not saved" banner. */
+export function useSaveFailures(): { failures: SaveFailure[]; dismiss: () => void } {
+  const [failures, setFailures] = useState<SaveFailure[]>([]);
+  useEffect(() => onSaveFailure((f) => setFailures((list) => [...list.slice(-19), f])), []);
+  return { failures, dismiss: () => setFailures([]) };
+}

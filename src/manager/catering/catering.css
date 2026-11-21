@@ -182,3 +182,12 @@
 .c-methods .t-seg { display: flex; }
 .c-methods .t-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
 .c-pay .t-select[aria-invalid='true'] { border-color: var(--bad); }
+
+/* Cancelled orders, price check, duplicate warning */
+.c-drift { display: block; font-size: 0.9rem; }
+.c-drift-box { display: flex; flex-direction: column; gap: 8px; }
+.c-drift-box .c-check { margin: 0; }
+.c-cancelled-note { margin: 0; color: var(--muted); }
+.c-dup { padding: 12px 14px; border-radius: var(--radius); background: var(--bad-soft); }
+.c-dup p { margin: 0; }
+.c-older { margin-top: 4px; color: var(--muted); }

@@ -2,31 +2,36 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
+import { recentSince, store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
 import {
-  amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, itemLines, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
+  amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
 } from './orders';
 import { CalendarSheet } from './calendar';
 import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
-import { menuDishes, orderLines, qtyText, type Dish } from './lines';
+import { itemTexts, menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
-import { balance, depositError, depositTotal, isPaid, methodLabel, NO_PAY, PAY_METHODS, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
+import { savePay } from './payWrite';
+import { duplicateOf, isCancelled, notDeleted } from './safety';
 import './catering.css';
 import { Address } from './Address';
 import { EstimateSheet, EstimatesList, type Estimate } from './Estimates';
 import { orderFormFromEstimate } from './estimates';
+import { nearDay, olderStep, shortDate, useAmountsOf, useCateringOrders, useExplicitPaid, useOrder } from './data';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
 
 const SAVE_FAILED = 'Could not save. Please try again.';
 const DELETE_FAILED = 'Could not delete. Please try again.';
+const PRICE_DRIFT = 'Items changed since the price was set. Check the amount.';
 
+/** Open, completed or cancelled. Reopening (open) clears both the completed and the cancelled time. */
 const statusPatch = (status: CateringOrder['status']) => {
   const now = store.now();
-  return { status, completedAt: status === 'completed' ? now : null, updatedAt: now };
+  return { status, completedAt: status === 'completed' ? now : null, cancelledAt: status === 'cancelled' ? now : null, updatedAt: now };
 };
 const setOrderStatus = (id: string, status: CateringOrder['status']) => store.updateDoc('orders', id, statusPatch(status));
 
@@ -53,9 +58,20 @@ function useSaver() {
 }
 
 export default function Catering() {
-  const orders = useCollection('orders');
-  // Manager only: what each order costs (orderAmounts/{order id}). The kitchen never loads this.
-  const amounts = useCollection('orderAmounts');
+  // Open and recent orders, unpaid ones however old, and older history once asked for (see data.ts).
+  // Deleted orders (soft delete) are left out of everything here: list, calendar, Unpaid, details.
+  const [recentFrom] = useState(() => recentSince(store.now()));
+  const [olderFrom, setOlderFrom] = useState<number | null>(null);
+  const { orders: loadedOrders, recent, unpaidReady, olderLoading } = useCateringOrders(olderFrom, recentFrom);
+  const orders = useMemo(() => (loadedOrders ? notDeleted(loadedOrders) : loadedOrders), [loadedOrders]);
+  const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
+  // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
+  // completing it) shows in the sheet at once; an older order (e.g. opened from Payments) is read on its own.
+  const editOrder = useOrder(editing && editing !== 'new' ? editing : null, orders) ?? null;
+  const onScreen = useMemo(() => (orders && editOrder && !orders.some((o) => o.id === editOrder.id) ? [...orders, editOrder] : orders), [orders, editOrder]);
+  // Manager only: what each order costs (orderAmounts/{order id}), for the orders loaded. The kitchen never loads this.
+  const { shown: amounts, current: currentAmounts } = useAmountsOf(onScreen);
+  useExplicitPaid(recent, currentAmounts);
   // Read once per snapshot, so each card gets the same Pay object until its payment changes.
   const pays = useMemo(() => (amounts ? new Map(amounts.map((a) => [a.id, payFrom(a)])) : null), [amounts]);
   const payOf = useCallback((id: string): Pay | undefined => (pays ? pays.get(id) ?? NO_PAY : undefined), [pays]);
@@ -64,7 +80,6 @@ export default function Catering() {
   const today = dayStart(now);
   const menu = useDoc('toastMenu', 'current');
   useStructureOldOrders(orders, menu === undefined ? undefined : menuDishes(menu));
-  const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   // "?order=<id>" (e.g. from More > Payments) opens that order.
   const [params, setParams] = useSearchParams();
   useEffect(() => {
@@ -78,7 +93,8 @@ export default function Catering() {
   // "Estimates" (price quotes for customers), "Orders" (open ones; completed ones under History) or "Unpaid"
   // (completed by the kitchen, not yet paid).
   const [view, setView] = useState<'orders' | 'unpaid' | 'estimates'>('orders');
-  const estimates = useCollection('estimates');
+  const loadedEstimates = useCollection('estimates', 'openOrRecentlyUpdated');
+  const estimates = useMemo(() => (loadedEstimates ? notDeleted(loadedEstimates) : loadedEstimates), [loadedEstimates]);
   const [estimateId, setEstimateId] = useState<string | null>(null); // estimate id, 'new', or closed
   const openEstimate = estimateId && estimateId !== 'new' ? estimates?.find((e) => e.id === estimateId) ?? null : null;
   const openEstimates = estimates ? estimates.filter((e) => e.status !== 'ordered').length : 0;
@@ -88,20 +104,21 @@ export default function Catering() {
   const [newDay, setNewDay] = useState<number | undefined>(undefined);
   // "Print tags": the order's tag sheet replaces its summary; closing it goes back to the order.
   const [tagsFor, setTagsFor] = useState<Order | null>(null);
-  // "Marked completed" toast with Undo, for a few seconds.
-  const [done, setDone] = useState<{ id: string; name: string } | null>(null);
+  // "Marked completed" / "Deleted" toast with Undo, for a few seconds.
+  const [done, setDone] = useState<{ what: string; name: string; undo: () => Promise<void> } | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(doneTimer.current), []);
-  const markedCompleted = (o: Order) => {
+  const showUndo = (what: string, name: string, undo: () => Promise<void>) => {
     clearTimeout(doneTimer.current);
-    setDone({ id: o.id, name: o.customerName });
+    setDone({ what, name, undo });
     doneTimer.current = setTimeout(() => setDone(null), UNDO_MS);
   };
-  const undoCompleted = async () => {
-    const id = done?.id;
+  const markedCompleted = (o: Order) => showUndo('Marked completed', o.customerName, () => setOrderStatus(o.id, 'open'));
+  const undoDone = async () => {
+    const undo = done?.undo;
     clearTimeout(doneTimer.current);
     setDone(null);
-    if (id && orders?.some((o) => o.id === id)) await setOrderStatus(id, 'open').catch(() => {});
+    if (undo) await undo().catch(() => {});
   };
   // Delete -> "Keep it" goes back to the order.
   const remove = useSaver();
@@ -113,14 +130,14 @@ export default function Catering() {
 
   const groups = orders ? groupOpen(orders, now) : null;
   const past = orders ? history(orders) : [];
-  // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
-  // completing it) shows in the sheet at once. If it is deleted elsewhere, the sheet closes.
-  const editOrder = editing && editing !== 'new' ? orders?.find((o) => o.id === editing) ?? null : null;
+  // The calendar is for planning: cancelled orders are left out.
+  const calendarOrders = useMemo(() => (orders ? orders.filter((o) => !isCancelled(o)) : orders), [orders]);
+  // If the order being edited is deleted elsewhere, the sheet closes.
   const sheetOpen = editing === 'new' || !!editOrder;
   const openOrder = useCallback((o: Order) => setEditing(o.id), []);
   const openCount = groups ? groups.overdue.length + groups.today.length + groups.tomorrow.length + groups.later.length : 0;
   // A finished order stays in the list until it is paid.
-  const unpaid = orders && amounts ? unpaidDone(orders, payOf) ?? [] : [];
+  const unpaid = orders && amounts && unpaidReady ? unpaidDone(orders, payOf) ?? [] : [];
   const owedTotal = unpaid.reduce((a, o) => a + (balance(payOf(o.id) ?? NO_PAY) ?? 0), 0);
 
   return (
@@ -210,18 +227,22 @@ export default function Catering() {
           <Group title="Later" orders={groups.later} today={today} payOf={payOf} showDate onOpen={openOrder} />
           {/* Completed orders show only under History; the ones still to be paid are also under Unpaid. */}
 
-          {past.length > 0 && (
-            <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
-              {showHistory ? 'Hide history' : `History (${past.length})`}
+          <button className="t-btn block c-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
+            {showHistory ? 'Hide history' : past.length > 0 ? `History (${past.length})` : 'History'}
+          </button>
+          {showHistory && <Group title="History" orders={past} today={today} payOf={payOf} showDate onOpen={openOrder} />}
+          {/* Older orders are loaded only when asked for, 6 months at a time. */}
+          {showHistory && (
+            <button className="t-btn block ghost c-older" disabled={olderLoading} onClick={() => setOlderFrom(olderStep(olderFrom ?? recentFrom))} data-testid="show-older">
+              {olderLoading ? 'Loading…' : `Show orders before ${shortDate(olderFrom ?? recentFrom)}`}
             </button>
           )}
-          {showHistory && past.length > 0 && <Group title="History" orders={past} today={today} payOf={payOf} showDate onOpen={openOrder} />}
         </div>
       )}
 
-      {calendar && orders && (
+      {calendar && calendarOrders && (
         <CalendarSheet
-          orders={orders}
+          orders={calendarOrders}
           now={now}
           onClose={() => setCalendar(false)}
           onOpen={(o) => {
@@ -253,6 +274,7 @@ export default function Catering() {
             setEstimateId(null);
             setEditing(id);
           }}
+          onDeleted={(e) => showUndo('Estimate deleted', e.customerName, () => store.updateDoc('estimates', e.id, { deletedAt: null, updatedAt: store.now() }))}
         />
       )}
 
@@ -295,7 +317,8 @@ export default function Catering() {
         {deleting && (
           <>
             <p className="c-confirm">
-              {deleting.customerName} · {dayLabel(deleting.dueAt, now)}, {timeLabel(deleting.dueAt)}. This can't be undone.
+              {deleting.customerName} · {dayLabel(deleting.dueAt, now)}, {timeLabel(deleting.dueAt)}. It goes off every screen, the kitchen and the totals.
+              {deleting.status === 'open' && ' If the customer called it off, use “Cancel order” instead.'}
             </p>
             {remove.error && (
               <p className="c-err" role="alert">
@@ -307,9 +330,11 @@ export default function Catering() {
               disabled={remove.busy}
               onClick={() =>
                 remove.run(async () => {
-                  await store.deleteDoc('orders', deleting.id);
-                  await store.deleteDoc('orderAmounts', deleting.id).catch(() => {});
+                  // Soft delete: the order (and its payments) stay in the database, hidden everywhere.
+                  const o = deleting;
+                  await store.updateDoc('orders', o.id, { deletedAt: store.now(), updatedAt: store.now() });
                   setDeleting(null);
+                  showUndo('Deleted', o.customerName, () => store.updateDoc('orders', o.id, { deletedAt: null, updatedAt: store.now() }));
                 }, DELETE_FAILED)
               }
             >
@@ -325,9 +350,9 @@ export default function Catering() {
       {done && (
         <div className="c-toast" role="status">
           <span className="c-toast-text">
-            Marked completed: <b>{done.name}</b>
+            {done.what}: <b>{done.name}</b>
           </span>
-          <button className="t-btn accent" onClick={undoCompleted}>
+          <button className="t-btn accent" onClick={undoDone}>
             Undo
           </button>
         </div>
@@ -443,19 +468,24 @@ function Group(props: { title?: string; orders: Order[]; today: number; showDate
 
 /** Manager list card. The kitchen has its own cards (src/kitchen), which never show the amount. */
 const OrderCard = memo(function OrderCard({ order: o, pay, today, showDate, onOpen }: { order: Order; pay?: Pay; today: number; showDate?: boolean; onOpen: (o: Order) => void }) {
-  const n = itemLines(o.items).length;
+  const n = itemTexts(o).length;
+  const cancelled = isCancelled(o);
   const unpaidBadge = o.status === 'completed' && !!pay && !isPaid(pay);
+  const drift = !cancelled && itemsChangedSincePrice(o.items, pay);
   // A completed, unpaid order says "Unpaid" once, in its badge; the grey line keeps only the amount.
-  const payText = unpaidBadge && depositTotal(pay) === 0 ? amountLabel(pay.amount) : payLabel(pay);
+  // A cancelled order shows only what was already paid (a refund may be due).
+  const payText = cancelled ? (pay && depositTotal(pay) > 0 ? `${amountLabel(depositTotal(pay))} paid` : '') : unpaidBadge && depositTotal(pay) === 0 ? amountLabel(pay.amount) : payLabel(pay);
   const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, payText || null].filter(Boolean);
   return (
-    <button className={'c-card' + (o.status === 'completed' ? ' done' : '')} onClick={() => onOpen(o)} data-testid="order-card">
+    <button className={'c-card' + (o.status !== 'open' ? ' done' : '')} onClick={() => onOpen(o)} data-testid="order-card">
       <span className="c-card-top">
         <span className="c-time">
           {showDate && <span className="c-date">{dayLabel(o.dueAt, today)} · </span>}
           {timeLabel(o.dueAt)}
         </span>
-        {o.status === 'completed' ? (
+        {cancelled ? (
+          <span className="t-badge bad" data-testid="cancelled-badge">Cancelled</span>
+        ) : o.status === 'completed' ? (
           <span className="c-badges">
             <span className="t-badge good">✓ Completed</span>
             {unpaidBadge && <span className="t-badge bad">Unpaid</span>}
@@ -466,6 +496,11 @@ const OrderCard = memo(function OrderCard({ order: o, pay, today, showDate, onOp
       </span>
       <span className="c-name">{o.customerName}</span>
       <span className="c-meta">{bits.join(' · ')}</span>
+      {drift && (
+        <span className="c-check c-drift" data-testid="price-drift">
+          {PRICE_DRIFT}
+        </span>
+      )}
     </button>
   );
 });
@@ -488,7 +523,19 @@ function OrderSheet(props: SheetProps) {
   const [saved, setSaved] = useState<string | null>(null);
   // "Mark paid" (manager only) replaces the summary until it is saved or cancelled.
   const [paying, setPaying] = useState(false);
-  const title = saved ? 'Order saved' : paying && order ? 'Mark paid' : !editing ? 'Order details' : order ? 'Edit order' : 'New order';
+  // "Cancel order" asks first (with an optional refund note), in place of the summary.
+  const [cancelling, setCancelling] = useState(false);
+  const title = saved
+    ? 'Order saved'
+    : paying && order
+      ? 'Mark paid'
+      : cancelling && order
+        ? 'Cancel this order?'
+        : !editing
+          ? 'Order details'
+          : order
+            ? 'Edit order'
+            : 'New order';
   const confirm = () => (!saved && editing && dirty.current ? (order ? 'Discard your changes?' : 'Discard this order?') : null);
   return (
     <Sheet open title={title} onClose={props.onClose} confirmClose={confirm}>
@@ -496,8 +543,10 @@ function OrderSheet(props: SheetProps) {
         <SavedView text={saved} onClose={props.onClose} />
       ) : paying && order && props.pay ? (
         <PayView order={order} pay={props.pay} now={props.now} onBack={() => setPaying(false)} />
+      ) : cancelling && order && props.pay ? (
+        <CancelView order={order} pay={props.pay} now={props.now} onBack={() => setCancelling(false)} />
       ) : !editing && order ? (
-        <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} onPay={() => setPaying(true)} />
+        <OrderSummary {...props} order={order} onEdit={() => setEditing(true)} onPay={() => setPaying(true)} onCancelOrder={() => setCancelling(true)} />
       ) : (
         <OrderFormView {...props} dirty={dirty} onSaved={setSaved} />
       )}
@@ -529,11 +578,21 @@ function SavedView({ text, onClose }: { text: string; onClose: () => void }) {
   );
 }
 
-function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPrintTags, onEdit, onPay }: SheetProps & { order: Order; onEdit: () => void; onPay: () => void }) {
+function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPrintTags, onEdit, onPay, onCancelOrder }: SheetProps & { order: Order; onEdit: () => void; onPay: () => void; onCancelOrder: () => void }) {
   const { busy, error, run } = useSaver();
   const lines = orderLines(o);
   const toCheck = lines.filter((l) => l.check).length;
   const open = o.status === 'open';
+  const cancelled = isCancelled(o);
+  const drift = !cancelled && itemsChangedSincePrice(o.items, pay);
+  // "Price is right": the amount stays, and it now counts for the items as they are.
+  const priceIsRight = () =>
+    run(() =>
+      savePay(o.id, (cur) => ({
+        patch: { itemsAt: o.items },
+        events: [{ kind: 'amount', amount: cur.amount, method: null, takenBy: null, note: 'Checked after items changed' }],
+      })),
+    );
   const setStatus = (status: CateringOrder['status']) =>
     run(async () => {
       await setOrderStatus(o.id, status);
@@ -548,11 +607,18 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
         </span>
         {open ? (
           <span className={'t-badge' + (o.type === 'delivery' ? ' accent' : '')}>{o.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+        ) : cancelled ? (
+          <span className="t-badge bad" data-testid="cancelled-badge">Cancelled</span>
         ) : (
           <span className="t-badge good">✓ Completed</span>
         )}
       </div>
       <div className="c-sum-name">{o.customerName}</div>
+      {cancelled && (
+        <p className="c-cancelled-note" data-testid="cancelled-note">
+          Cancelled{typeof o.cancelledAt === 'number' ? ` ${whenLabel(o.cancelledAt, now)}` : ''}. Not shown on the kitchen tablet or in the totals.
+        </p>
+      )}
       {o.phone && (
         <a className="t-btn block c-call" href={telHref(o.phone)}>
           Call {o.phone}
@@ -573,12 +639,21 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
           <div data-testid="order-amount">
             <dt>Amount</dt>
             <dd>
-              {amountLabel(pay.amount) || 'Not set'} <PayBadge pay={pay} />
+              {amountLabel(pay.amount) || 'Not set'} {!cancelled && <PayBadge pay={pay} />}
             </dd>
           </div>
         )}
       </dl>
+      {drift && (
+        <div className="c-drift-box" data-testid="price-drift">
+          <p className="c-check">{PRICE_DRIFT}</p>
+          <button type="button" className="t-btn block" disabled={busy} onClick={priceIsRight}>
+            Price is right
+          </button>
+        </div>
+      )}
       {pay && <PaymentsList order={o} pay={pay} now={now} />}
+      {pay && cancelled && <RefundNote order={o} pay={pay} />}
       <div>
         <h3 className="c-sum-h">Items</h3>
         <ItemList lines={lines} className="c-sum-items" showChecks />
@@ -602,15 +677,20 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
       <button type="button" className={'t-btn block ' + (open ? 'primary' : '')} disabled={busy} onClick={() => setStatus(open ? 'completed' : 'open')}>
         {open ? '✓ Mark completed' : 'Reopen'}
       </button>
-      {pay && !isPaid(pay) && (
+      {pay && !cancelled && !isPaid(pay) && (
         <button type="button" className={'t-btn block' + (open ? '' : ' primary')} onClick={onPay}>
           Mark paid
         </button>
       )}
       {open && <ShareLink text={shareText(o)} />}
-      {onPrintTags && (
+      {onPrintTags && !cancelled && (
         <button type="button" className="t-btn block" onClick={() => onPrintTags(o)}>
           Print name tags
+        </button>
+      )}
+      {open && pay && (
+        <button type="button" className="t-btn block danger" onClick={onCancelOrder} data-testid="cancel-order">
+          Cancel order
         </button>
       )}
       <div className="t-grid2">
@@ -621,6 +701,7 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
           Delete
         </button>
       </div>
+      {pay && <PayHistory pay={pay} now={now} />}
       <EditHistory history={o.history} now={now} />
       <button type="button" className="t-btn ghost block" onClick={onClose}>
         Close
@@ -647,14 +728,25 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
   // A tap on Remove asks once more, on the same button.
   const [confirm, setConfirm] = useState<string | null>(null);
   if (!pay.paid && pay.deposits.length === 0) return null;
-  const removeDeposit = (i: number) =>
+  // Removing a deposit or a payment is written to the payment history first-hand, so nothing is lost.
+  const removeDeposit = (d: (typeof pay.deposits)[number]) =>
     run(async () => {
-      await store.updateDoc('orderAmounts', order.id, { deposits: pay.deposits.filter((_, j) => j !== i), updatedAt: store.now() });
+      await savePay(order.id, (cur) => {
+        const i = cur.deposits.findIndex((x) => x.at === d.at && x.amount === d.amount);
+        if (i < 0) return { events: [] };
+        return {
+          patch: { deposits: cur.deposits.filter((_, j) => j !== i) },
+          events: [{ kind: 'depositRemoved', amount: d.amount, method: d.method, takenBy: d.takenBy }],
+        };
+      });
       setConfirm(null);
     });
   const markNotPaid = () =>
     run(async () => {
-      await store.updateDoc('orderAmounts', order.id, { paid: false, paidAt: null, method: null, takenBy: null, updatedAt: store.now() });
+      await savePay(order.id, (cur) => ({
+        patch: { paid: false, paidAt: null, method: null, takenBy: null },
+        events: [{ kind: 'unpaid', amount: null, method: cur.method, takenBy: cur.takenBy, note: cur.paidAt != null ? `Was paid ${whenLabel(cur.paidAt, now)}` : undefined }],
+      }));
       setConfirm(null);
     });
   const owed = balance(pay);
@@ -668,7 +760,7 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
               <b>Deposit {amountLabel(d.amount)}</b> · {methodLabel(d.method)} · {d.takenBy}
               <small>{whenLabel(d.at, now)}</small>
             </span>
-            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === `d${i}` ? removeDeposit(i) : setConfirm(`d${i}`))}>
+            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === `d${i}` ? removeDeposit(d) : setConfirm(`d${i}`))}>
               {confirm === `d${i}` ? 'Tap to remove' : 'Remove'}
             </button>
           </li>
@@ -687,7 +779,7 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
           </li>
         )}
       </ul>
-      {!isPaid(pay) && owed != null && (
+      {!isPaid(pay) && owed != null && !isCancelled(order) && (
         <p className="c-owed" data-testid="still-owed">
           Paid so far {amountLabel(depositTotal(pay))} · <b>{amountLabel(owed)} still owed</b>
         </p>
@@ -725,9 +817,15 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
       const at = store.now();
       if (kind === 'deposit') {
         const amount = parseAmount(depositText)!;
-        await store.updateDoc('orderAmounts', order.id, { deposits: [...pay.deposits, { amount, method, takenBy, at }], updatedAt: at });
+        await savePay(order.id, (cur) => ({
+          patch: { deposits: [...cur.deposits, { amount, method, takenBy, at }] },
+          events: [{ kind: 'deposit', amount, method, takenBy }],
+        }));
       } else {
-        await store.updateDoc('orderAmounts', order.id, { paid: true, paidAt: at, method, takenBy, updatedAt: at });
+        await savePay(order.id, (cur) => ({
+          patch: { paid: true, paidAt: at, method, takenBy },
+          events: [{ kind: 'paid', amount: balance(cur), method, takenBy }],
+        }));
       }
       onBack();
     });
@@ -829,6 +927,134 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
   );
 }
 
+/** "Cancel order": asks first. The order leaves the kitchen and the totals; deposits stay in Payments,
+ *  with an optional note on the refund. "Reopen" on the order undoes it. */
+function CancelView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: number; onBack: () => void }) {
+  const [note, setNote] = useState('');
+  const { busy, error, run } = useSaver();
+  const dep = depositTotal(pay);
+  const cancel = () =>
+    run(async () => {
+      const text = note.trim().slice(0, REFUND_NOTE_MAX);
+      // The payment record first: if the order save fails, trying again only adds a second entry, never loses one.
+      await savePay(order.id, (cur) => ({
+        patch: text ? { refundNote: text } : {},
+        events: [
+          { kind: 'cancelled', amount: depositTotal(cur) || null, method: null, takenBy: null },
+          ...(text ? [{ kind: 'refund' as const, amount: null, method: null, takenBy: null, note: text }] : []),
+        ],
+      }));
+      await setOrderStatus(order.id, 'cancelled');
+      onBack();
+    });
+  return (
+    <div className="t-stack c-form" data-testid="cancel-view">
+      <div className="c-pay-head">
+        <div className="c-sum-name">{order.customerName}</div>
+        <div className="c-meta">
+          {dayLabel(order.dueAt, now)}, {timeLabel(order.dueAt)}
+        </div>
+      </div>
+      <p className="c-confirm">
+        The kitchen stops seeing it and it leaves the totals. It stays under History, and “Reopen” brings it back.
+        {dep > 0 && ` ${amountLabel(dep)} was paid as a deposit: it stays in Payments.`}
+      </p>
+      <Field label={dep > 0 ? 'Refund note (optional)' : 'Note (optional)'}>
+        <textarea
+          className="t-textarea"
+          rows={2}
+          maxLength={REFUND_NOTE_MAX}
+          placeholder={dep > 0 ? `e.g. Refunded ${amountLabel(dep)} by Zelle` : 'e.g. Customer called to cancel'}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          data-testid="refund-note-input"
+        />
+      </Field>
+      {error && (
+        <p className="c-err" role="alert">
+          {error}
+        </p>
+      )}
+      <button type="button" className="t-btn block c-danger-solid" disabled={busy} onClick={cancel} data-testid="confirm-cancel">
+        {busy ? 'Saving…' : 'Cancel order'}
+      </button>
+      <button type="button" className="t-btn ghost block" onClick={onBack}>
+        Keep the order
+      </button>
+    </div>
+  );
+}
+
+/** On a cancelled order: the note about the refund, which can be added or changed later. */
+function RefundNote({ order, pay }: { order: Order; pay: Pay }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(pay.refundNote ?? '');
+  const { busy, error, run } = useSaver();
+  const save = () =>
+    run(async () => {
+      const t = text.trim().slice(0, REFUND_NOTE_MAX);
+      await savePay(order.id, () => ({ patch: { refundNote: t || null }, events: [{ kind: 'refund', amount: null, method: null, takenBy: null, note: t || 'Note cleared' }] }));
+      setEditing(false);
+    });
+  return (
+    <section className="c-pays" data-testid="refund-note" aria-label="Refund">
+      <h3 className="c-sum-h">Refund</h3>
+      {editing ? (
+        <>
+          <textarea className="t-textarea" rows={2} maxLength={REFUND_NOTE_MAX} placeholder="e.g. Refunded $200 deposit by Zelle" value={text} onChange={(e) => setText(e.target.value)} aria-label="Refund note" />
+          <div className="t-grid2">
+            <button type="button" className="t-btn ghost" onClick={() => setEditing(false)}>
+              Back
+            </button>
+            <button type="button" className="t-btn primary" disabled={busy} onClick={save}>
+              {busy ? 'Saving…' : 'Save note'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="c-sum-notes">{pay.refundNote ?? 'No refund note yet.'}</p>
+          <button
+            type="button"
+            className="t-btn block"
+            onClick={() => {
+              setText(pay.refundNote ?? '');
+              setEditing(true);
+            }}
+          >
+            {pay.refundNote ? 'Change refund note' : 'Add refund note'}
+          </button>
+        </>
+      )}
+      {error && (
+        <p className="c-err" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** "Payment history": every money action on the order, newest first, from its add-only log.
+ *  Manager and front apps only; the kitchen never loads payments. */
+function PayHistory({ pay, now }: { pay: Pay; now: number }) {
+  if (pay.log.length === 0) return null;
+  const list = [...pay.log].reverse();
+  return (
+    <section className="c-hist" data-testid="pay-history" aria-label="Payment history">
+      <h3 className="c-sum-h">Payment history</h3>
+      <ol className="c-hist-list">
+        {list.map((e, i) => (
+          <li key={`${e.at}-${i}`} className="c-hist-entry">
+            <div className="c-hist-who">{whenLabel(e.at, now)}</div>
+            <div>{payEventText(e)}</div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 /** "Changes": who edited the order (Kitchen or Manager), when, and what changed. Newest first. Nothing when never edited. */
 export function EditHistory({ history, now }: { history?: OrderEdit[]; now: number }) {
   const list = Array.isArray(history) ? [...history].reverse() : [];
@@ -889,7 +1115,12 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
     return { ...f, lines: [{ ...f.lines[0], unit: lastUnit() }] };
   });
   const [f, setF] = useState<OrderForm>(start);
-  const allOrders = useCollection('orders');
+  // Orders a day either side of the picked date (the same-day list), not every order ever saved.
+  const loadedOrders = useCollection('orders', nearDay(f.date));
+  const allOrders = useMemo(() => (loadedOrders ? notDeleted(loadedOrders) : loadedOrders), [loadedOrders]);
+  // A new order for a phone that already has an order that day: asks "Save anyway?" first.
+  const [dup, setDup] = useState<Order | null>(null);
+  const dupOk = useRef(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [tried, setTried] = useState(false);
   const { busy, error, run } = useSaver();
@@ -924,10 +1155,12 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   };
   // A new order already added (its amount save failed): Save again retries the amount only, never a second order.
   const created = useRef<string | null>(null);
-  /** Saves the amount for this order id (manager only), when it changed. A merge, so payments stay as they are. */
-  const saveAmount = async (id: string) => {
+  /** Saves the amount for this order id (manager only), when it changed. A merge, so payments stay as they are.
+   *  The items it was priced for are kept with it (for the "items changed" check), and the change is logged. */
+  const saveAmount = async (id: string, items: string) => {
     if (!amountChanged) return;
-    await store.updateDoc('orderAmounts', id, { amount: parseAmount(amount), updatedAt: store.now() });
+    const n = parseAmount(amount);
+    await savePay(id, () => ({ patch: { amount: n, itemsAt: n === null ? null : items }, events: [{ kind: 'amount', amount: n, method: null, takenBy: null }] }));
   };
 
   const changed = JSON.stringify(f) !== JSON.stringify(start) || (!!props.fromEstimate && !order);
@@ -982,16 +1215,21 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
 
   const save = () => {
     if (!check()) return;
+    if (!order && !created.current && !dupOk.current) {
+      const other = duplicateOf(allOrders ?? [], f.phone, orderFields(f).dueAt);
+      if (other) return setDup(other);
+    }
     run(async () => {
       const now = store.now();
       if (order) {
-        await store.updateDoc('orders', order.id, editFields());
-        await saveAmount(order.id);
+        const fields = editFields();
+        await store.updateDoc('orders', order.id, fields);
+        await saveAmount(order.id, typeof fields.items === 'string' ? fields.items : order.items);
         return onClose();
       }
       const fields = orderFields(f);
       const id = created.current ?? (created.current = await store.addDoc('orders', { ...fields, status: 'open', createdAt: now, updatedAt: now }));
-      await saveAmount(id);
+      await saveAmount(id, fields.items);
       // The estimate it came from is kept, marked as made into this order.
       if (props.fromEstimate) await store.updateDoc('estimates', props.fromEstimate.id, { status: 'ordered', orderId: id, updatedAt: store.now() }).catch(() => {});
       props.onSaved(shareText(fields, 'New catering order'));
@@ -1011,8 +1249,33 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
   const pastTime = whenChanged && at !== null && at < store.now();
 
   return (
+    <>
+    {dup && (
+      <div className="t-stack c-dup" role="alert" data-testid="duplicate-warning" ref={(el) => el?.scrollIntoView({ block: 'start' })}>
+        <h3 className="c-sum-h">Possible double order</h3>
+        <p>
+          There's already an order for this phone on this day: <b>{dup.customerName}</b>, {timeLabel(dup.dueAt)}. Save anyway?
+        </p>
+        <button
+          type="button"
+          className="t-btn primary block"
+          onClick={() => {
+            dupOk.current = true;
+            setDup(null);
+            save();
+          }}
+        >
+          Save anyway
+        </button>
+        <button type="button" className="t-btn block" onClick={() => setDup(null)}>
+          Go back
+        </button>
+      </div>
+    )}
     <form
       ref={form}
+      // Kept mounted (with what was typed) behind the warning; .t-stack would override the hidden attribute.
+      style={dup ? { display: 'none' } : undefined}
       className="t-stack c-form"
       noValidate
       onSubmit={(e) => {
@@ -1115,6 +1378,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
         Cancel
       </button>
     </form>
+    </>
   );
 }
 

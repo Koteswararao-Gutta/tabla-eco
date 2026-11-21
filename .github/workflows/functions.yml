@@ -1,5 +1,5 @@
 name: Deploy server code
-# Deploys functions/ (photo-to-order, reminders, Toast menu sync) and firestore.rules to Firebase
+# Deploys functions/ (photo-to-order, reminders, morning summary, Toast menu sync) and firestore.rules to Firebase
 # after the Tests workflow passed on main (Firebase skips functions whose code didn't change).
 # Needs two repository secrets: FIREBASE_SERVICE_ACCOUNT (JSON key) and ANTHROPIC_API_KEY.
 on:
@@ -79,6 +79,15 @@ jobs:
           node-version: 22
       - if: steps.check.outputs.ready == 'true'
         run: npm ci --prefix functions && npm test --prefix functions
+      # The rules are checked on the Firestore emulator right before they go live, so broken rules are never deployed.
+      - if: steps.check.outputs.ready == 'true'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - if: steps.check.outputs.ready == 'true'
+        name: Check the Firestore rules
+        run: npm ci --prefix rules-test && npm test --prefix rules-test
       - if: steps.check.outputs.ready == 'true'
         name: Sign in to Google Cloud
         env:

@@ -41,3 +41,22 @@ describe('paymentsOn with deposits', () => {
     expect([day.paidTotal, day.unpaidTotal]).toEqual([300, 0]);
   });
 });
+
+describe('paymentsOn with cancelled and deleted orders', () => {
+  it('lists a cancelled order with what was paid, outside the totals; leaves deleted ones out', () => {
+    const o = [
+      { ...order('off', at(20, 12)), status: 'cancelled' } as WithId<CateringOrder>,
+      { ...order('gone', at(20, 13)), deletedAt: 5 } as WithId<CateringOrder>,
+      order('ok', at(20, 14)),
+    ];
+    const a = [
+      { id: 'off', amount: 300, deposits: [{ amount: 100, method: 'cash', takenBy: 'X', at: 1 }], refundNote: 'Refunded by Zelle', updatedAt: 0 } as WithId<OrderAmount>,
+      amt('gone', 500),
+      amt('ok', 80),
+    ];
+    const day = paymentsOn(o, a, at(20, 9));
+    expect(day.rows.map((r) => [r.order.id, r.status])).toEqual([['off', 'cancelled'], ['ok', 'unpaid']]);
+    expect(day.rows[0]).toMatchObject({ paidSoFar: 100, refundNote: 'Refunded by Zelle' });
+    expect([day.paidTotal, day.unpaidTotal]).toEqual([0, 80]);
+  });
+});

@@ -1,0 +1,74 @@
+name: Set up database backups
+# Run by hand once (Actions > Set up database backups > Run workflow). Safe to run again: it only adds what is missing.
+# Turns on, for the Firestore database:
+#  - point-in-time recovery (go back to any minute of the last 7 days),
+#  - delete protection (the database itself can't be deleted by mistake),
+#  - a daily backup kept for 12 weeks.
+# How to restore: docs/backups.md.
+# Uses the FIREBASE_SERVICE_ACCOUNT secret (same as the server deploy). That account needs the
+# "Cloud Datastore Owner" role (Google Cloud console > IAM).
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  PROJECT: tabla-eco-2e94b
+  DATABASE: '(default)'
+jobs:
+  backups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the secret
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret first (same one the server deploy uses)."
+            exit 1
+          fi
+      - name: Sign in to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Point-in-time recovery and delete protection
+        run: |
+          if ! out=$(gcloud firestore databases update --database="$DATABASE" --enable-pitr --delete-protection --project "$PROJECT" --quiet 2>&1); then
+            echo "$out"
+            if echo "$out" | grep -qiE 'PERMISSION_DENIED|permission|403'; then
+              echo "::error::The service account may not change the database. In Google Cloud console > IAM, give it the \"Cloud Datastore Owner\" role, then run this again."
+            else
+              echo "::error::Could not turn on point-in-time recovery and delete protection (see the message above)."
+            fi
+            exit 1
+          fi
+          gcloud firestore databases describe --database="$DATABASE" --project "$PROJECT" \
+            --format='value(pointInTimeRecoveryEnablement,deleteProtectionState,versionRetentionPeriod)'
+      - name: Daily backup, kept 12 weeks
+        run: |
+          if ! list=$(gcloud firestore backups schedules list --database="$DATABASE" --project "$PROJECT" --format='value(name,dailyRecurrence)' 2>&1); then
+            echo "$list"
+            if echo "$list" | grep -qiE 'PERMISSION_DENIED|permission|403'; then
+              echo "::error::The service account may not read backup schedules. In Google Cloud console > IAM, give it the \"Cloud Datastore Owner\" role, then run this again."
+            else
+              echo "::error::Could not list backup schedules (see the message above)."
+            fi
+            exit 1
+          fi
+          if [ -n "$list" ]; then
+            echo "A backup schedule already exists; nothing to add:"
+            gcloud firestore backups schedules list --database="$DATABASE" --project "$PROJECT"
+            exit 0
+          fi
+          if ! out=$(gcloud firestore backups schedules create --database="$DATABASE" --recurrence=daily --retention=12w --project "$PROJECT" 2>&1); then
+            echo "$out"
+            if echo "$out" | grep -qiE 'PERMISSION_DENIED|permission|403'; then
+              echo "::error::The service account may not create backups. In Google Cloud console > IAM, give it the \"Cloud Datastore Owner\" role, then run this again."
+            else
+              echo "::error::Could not create the daily backup schedule (see the message above)."
+            fi
+            exit 1
+          fi
+          echo "$out"
+          echo "Daily backups are on (kept 12 weeks)."

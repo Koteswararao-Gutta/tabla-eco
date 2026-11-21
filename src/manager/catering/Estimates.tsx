@@ -93,7 +93,9 @@ function EstimateCard({ e, now, onOpen }: { e: Estimate; now: number; onOpen: (e
 
 // ---------- the sheet ----------
 
-type SheetProps = { estimate: Estimate | null; now: number; onClose: () => void; onCreated: (id: string) => void; onMakeOrder: (e: Estimate) => void; onOpenOrder: (orderId: string) => void };
+type SheetProps = { estimate: Estimate | null; now: number; onClose: () => void; onCreated: (id: string) => void; onMakeOrder: (e: Estimate) => void; onOpenOrder: (orderId: string) => void;
+  /** After a delete (soft: the estimate is hidden, not removed), e.g. to offer Undo. */
+  onDeleted?: (e: Estimate) => void };
 
 /** A saved estimate opens on its summary; a new one on the form. After saving, the summary shows (with Send). */
 export function EstimateSheet(props: SheetProps) {
@@ -112,7 +114,7 @@ export function EstimateSheet(props: SheetProps) {
   );
 }
 
-function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, onEdit }: SheetProps & { estimate: Estimate; onEdit: () => void }) {
+function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, onDeleted, onEdit }: SheetProps & { estimate: Estimate; onEdit: () => void }) {
   const settings = useSingleton('settings');
   const { busy, error, run } = useBusy();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -204,7 +206,7 @@ function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, 
       )}
       {confirmDelete && (
         <div className="e-confirm" role="alert">
-          <p>Delete this estimate? This can't be undone.</p>
+          <p>Delete this estimate? It goes off the list.</p>
           <div className="t-grid2">
             <button type="button" className="t-btn" onClick={() => setConfirmDelete(false)}>
               Keep it
@@ -215,8 +217,10 @@ function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, 
               disabled={busy}
               onClick={() =>
                 run(async () => {
-                  await store.deleteDoc('estimates', e.id);
+                  // Soft delete: hidden everywhere, still in the database.
+                  await store.updateDoc('estimates', e.id, { deletedAt: store.now(), updatedAt: store.now() });
                   onClose();
+                  onDeleted?.(e);
                 }, 'Could not delete. Please try again.')
               }
             >

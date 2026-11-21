@@ -1,7 +1,7 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
 import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
-import { cleanLine, findDish, itemLines, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
+import { cleanLine, findDish, itemLines, itemTexts, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
 
 export { itemLines };
 
@@ -44,9 +44,9 @@ export function groupOpen<T extends Order>(orders: T[], now: number): OpenGroups
   return g;
 }
 
-/** Completed orders, newest due first. */
+/** Completed and cancelled orders, newest due first. */
 export function history<T extends Order>(orders: T[]): T[] {
-  return orders.filter((o) => o.status === 'completed').sort(byDueDesc);
+  return orders.filter((o) => o.status === 'completed' || o.status === 'cancelled').sort(byDueDesc);
 }
 
 /** Every order grouped by its due day, newest day (and newest order) first. */
@@ -366,14 +366,14 @@ export function telHref(phone: string): string {
 /** The order as a WhatsApp message for the front staff group, so they can get sides ready.
  *  The date is written out ("Fri, Nov 20"), since the message is read later. The customer's
  *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
-export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'>, heading = 'Catering order'): string {
+export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order'): string {
   const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   // WhatsApp would turn *, _ and ~ in typed text into bold, italic or struck-out words: leave them out.
   const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
   const lines = [`*${heading}*`, plain(o.customerName ?? ''), `${date}, ${timeLabel(o.dueAt)}`];
   lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${plain(o.address)}` : ''}` : 'Pickup');
   if (o.people) lines.push(`${o.people} ${o.people === 1 ? 'person' : 'people'}`);
-  lines.push('', '*Items*', ...itemLines(o.items).map((l) => `• ${l}`));
+  lines.push('', '*Items*', ...itemTexts(o).map((l) => `• ${l}`));
   if (o.notes?.trim()) lines.push('', `*Notes:* ${plain(o.notes)}`);
   return lines.join('\n');
 }
@@ -407,7 +407,7 @@ function missing(a: string[], b: string[]): string[] {
   });
 }
 
-type EditFields = Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items'> & Partial<Pick<Order, 'address' | 'notes' | 'people'>>;
+type EditFields = Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items'> & Partial<Pick<Order, 'address' | 'notes' | 'people' | 'lines'>>;
 
 /** What an edit changes, in plain words, e.g. ["Time: 5:00 PM → 6:00 PM", "Items: 20 samosas → 25 samosas"]. Empty when nothing changed. */
 export function describeChanges(before: EditFields, after: EditFields): string[] {
@@ -420,8 +420,8 @@ export function describeChanges(before: EditFields, after: EditFields): string[]
   if (after.type === 'delivery' && (before.address ?? '').trim() !== (after.address ?? '').trim()) out.push(`Address: ${shown(before.address ?? '')} → ${shown(after.address ?? '')}`);
   if ((before.people || null) !== (after.people || null)) out.push(`People: ${before.people || '(none)'} → ${after.people || '(none)'}`);
   // Items: a changed line reads "old → new"; extra lines read as added or removed.
-  const was = itemLines(before.items);
-  const now = itemLines(after.items);
+  const was = itemTexts(before);
+  const now = itemTexts(after);
   const removed = missing(was, now);
   const added = missing(now, was);
   const paired = Math.min(removed.length, added.length);

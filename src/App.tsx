@@ -1,7 +1,7 @@
 // Routes. Owned by the foundation. Each area's screen lives in its own folder.
 import { lazy } from 'react';
-import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { PageHeader } from '@shared/ui';
+import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { PageHeader, SaveFailedBanner } from '@shared/ui';
 import type { ScreenId } from '@shared/data';
 import { LazyScreen } from './LazyScreen';
 
@@ -47,6 +47,11 @@ function Home() {
   );
 }
 
+/** The red "Not saved" banner, once for the whole app. TVs never show it. */
+function SaveFailed() {
+  return <SaveFailedBanner hidden={useLocation().pathname.startsWith('/tv/')} />;
+}
+
 export function App() {
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -58,6 +63,7 @@ export function App() {
         <Route path="/manager/*" element={<LazyScreen fallback={<div />}><ManagerShell mode="manager" /></LazyScreen>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <SaveFailed />
     </HashRouter>
   );
 }
