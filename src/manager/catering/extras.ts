@@ -26,7 +26,7 @@ export interface ExtraRule {
 /** First matching rule wins, so "Chicken 65 Biryani" gets the biryani extras, not the dry-item dip. */
 export const EXTRA_RULES: ExtraRule[] = [
   // Half tray: 24 oz each. Full tray: 1/4 tray each.
-  { dishes: ['biryani', 'biriyani', 'biriani'], extras: ['Raita', 'Salan'], ozPerTray: 48 },
+  { dishes: ['biryani', 'biriyani', 'biriani', 'briyani', 'biryan'], extras: ['Raita', 'Salan'], ozPerTray: 48 },
   // 2 oz of each for every 2 samosas.
   { dishes: ['samosa'], except: ['chaat'], extras: ['Mint Chutney', 'Tamarind Chutney'], ozPerPiece: 1 },
   // 2 oz for every 4 tikkis.
@@ -93,16 +93,22 @@ export interface Extra {
   unit: string;
 }
 
-/** The extras for the order's dish lines, in rule order, each added up over all its dishes. */
-export function extrasFor(lines: { name: string; qty: number | null; unit: string }[]): Extra[] {
+const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/** The extras for the order's dish lines, in rule order, each added up over all its dishes. When one of
+ *  its dishes has no amount that can be worked out, the extra's amount is left empty to fill in (a part
+ *  sum would be too little). An extra that is already ordered as a dish of its own ("Raita") isn't added. */
+export function extrasFor(lines: { name: string; qty: number | null; unit: string }[], skipOrdered = true): Extra[] {
   const total = new Map<string, number | null>();
+  const ordered = new Set(skipOrdered ? lines.map((l) => plain(l.name)) : []);
   for (const l of lines) {
     const rule = l.name.trim() ? ruleFor(l.name) : null;
     if (!rule) continue;
     const oz = extraOz(rule, l.qty, l.unit);
     for (const e of rule.extras) {
+      if (ordered.has(plain(e))) continue;
       const had = total.get(e);
-      total.set(e, oz === null ? had ?? null : (had ?? 0) + oz);
+      total.set(e, oz === null || had === null ? null : (had ?? 0) + oz);
     }
   }
   const order = EXTRA_RULES.flatMap((r) => r.extras);
@@ -117,10 +123,11 @@ const parsed = (text: string) => {
   return q === null || Number.isNaN(q) ? null : q;
 };
 
-/** The extras a row list should have but doesn't: what counts as "taken off" when an order is opened. */
+/** The extras a row list should have but doesn't: what counts as "taken off" when an order is opened.
+ *  One ordered as a dish counts too, so taking that dish row off later doesn't bring the extra in. */
 export function missingExtras(drafts: LineDraft[]): string[] {
   const have = new Set(drafts.filter((d) => d.extra).map((d) => d.extra));
-  return extrasFor(drafts.filter((d) => !d.extra).map((d) => ({ name: d.name, qty: parsed(d.qty), unit: d.unit })))
+  return extrasFor(drafts.filter((d) => !d.extra).map((d) => ({ name: d.name, qty: parsed(d.qty), unit: d.unit })), false)
     .map((e) => e.key)
     .filter((k) => !have.has(k));
 }
