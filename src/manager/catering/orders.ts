@@ -178,6 +178,9 @@ export interface LineDraft {
   text?: string;
   /** Read by a guess and not checked yet: the row asks to be checked. */
   check?: boolean;
+  /** An auto extra: see OrderLine.extra and OrderLine.extraEdited. */
+  extra?: string;
+  extraEdited?: boolean;
 }
 
 export const blankLine = (unit = ''): LineDraft => ({ dishId: null, name: '', qty: '', unit, note: '' });
@@ -188,6 +191,8 @@ export function draftFromLine(l: OrderLine): LineDraft {
   const d: LineDraft = { dishId: l.dishId ?? null, name: l.name, qty: qtyInput(l.qty), unit: l.unit, note: l.note };
   if (l.text) d.text = l.text;
   if (l.check) d.check = true;
+  if (l.extra) d.extra = l.extra;
+  if (l.extra && l.extraEdited) d.extraEdited = true;
   return d;
 }
 
@@ -208,6 +213,8 @@ export function linesFromForm(drafts: LineDraft[]): OrderLine[] {
     const qty = parseQty(d.qty);
     const line: OrderLine = { dishId: d.dishId, name: d.name.trim(), qty: qty === null || Number.isNaN(qty) ? null : qty, unit: d.unit, note: d.note };
     if (d.text) line.text = d.text;
+    if (d.extra) line.extra = d.extra;
+    if (d.extra && d.extraEdited) line.extraEdited = true;
     return cleanLine(line);
   });
 }

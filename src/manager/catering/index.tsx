@@ -309,6 +309,7 @@ export function ItemList({ lines, className, showChecks }: { lines: OrderLine[];
     <ul className={className}>
       {lines.map((l, i) => {
         const check = showChecks && l.check ? <span className="t-badge c-check-badge">Check</span> : null;
+        const extra = l.extra ? <span className="t-badge accent c-extra-badge">Extra</span> : null;
         if (l.text) {
           return (
             <li key={i}>
@@ -324,6 +325,7 @@ export function ItemList({ lines, className, showChecks }: { lines: OrderLine[];
             {q && ' '}
             {l.name}
             {l.note.trim() && <span className="c-item-note"> · {l.note.trim()}</span>}
+            {extra && <> {extra}</>}
             {check && <> {check}</>}
           </li>
         );

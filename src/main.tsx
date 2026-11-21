@@ -55,7 +55,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   let hiddenAt = 0;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') return void (hiddenAt = Date.now());
-    if (!location.hash.startsWith('#/manager') || !hiddenAt || Date.now() - hiddenAt < 60_000) return;
+    if (!/^#\/(manager|front)/.test(location.hash) || !hiddenAt || Date.now() - hiddenAt < 60_000) return;
     touchedAt = 0; // coming back to the app is not a tap on it
     void loadNewVersion();
   });

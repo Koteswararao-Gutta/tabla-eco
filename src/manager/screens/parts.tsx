@@ -4,15 +4,17 @@ import { Link } from 'react-router-dom';
 import { isOnline, store, useCollection, useNow, usePictureUrl, type MusicSettings, type ScreenId, type Slot } from '@shared/data';
 import { PageHeader } from '@shared/ui';
 import { pictureInUse, pictureWarnings, screenName } from './logic';
+import { useAppBase } from '../mode';
 
 /** Page frame for one screen: back link, title, online badge. */
 export function ScreenPage({ id, sub, children }: { id: ScreenId; sub?: string; children: ReactNode }) {
   const beats = useCollection('heartbeats');
   const now = useNow(5000);
   const online = isOnline(beats?.find((x) => x.id === id)?.lastSeen, now);
+  const base = useAppBase();
   return (
     <main className="t-page sc-page">
-      <Link className="sc-back" to="/manager/screens">‹ Screens</Link>
+      <Link className="sc-back" to={base + '/screens'}>‹ Screens</Link>
       <PageHeader
         title={screenName(id)}
         sub={sub}

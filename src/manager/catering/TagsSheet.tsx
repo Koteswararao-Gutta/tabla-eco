@@ -38,6 +38,7 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
 
   // While this sheet is open, printing shows only the tag sheets.
   useEffect(() => {
+    loadTagAssets();
     document.body.classList.add('nt-printing');
     return () => document.body.classList.remove('nt-printing');
   }, []);
@@ -127,17 +128,28 @@ function shortDate(ms: number): string {
   return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '');
 }
 
-/** Fonts and the logo only load once used, and the print sheets are hidden on screen: load them first. */
+/** The tag fonts and logo, loaded once per app run. The print sheets are hidden on screen, so nothing would
+ *  load them until printing: start as soon as the tags sheet opens, so Print has nothing left to wait for.
+ *  (Safari never finishes decoding an image that isn't shown, so the logo is loaded on its own here.) */
+let assets: Promise<unknown> | null = null;
+function loadTagAssets(): Promise<unknown> {
+  if (!assets) {
+    const fonts = document.fonts;
+    const logoImg = new Image();
+    logoImg.src = logo;
+    assets = Promise.all([
+      fonts?.load('700 20px "Tabla Playfair"'),
+      fonts?.load('700 10px "Tabla Montserrat"'),
+      fonts?.load('600 10px "Tabla Montserrat"'),
+      logoImg.decode?.() ?? new Promise((r) => (logoImg.onload = logoImg.onerror = r)),
+    ]).catch(() => {});
+  }
+  return assets;
+}
+
+/** Waits for the fonts and logo, but never long (offline with nothing cached): prints with what there is. */
 async function readyToPrint(): Promise<void> {
-  const fonts = document.fonts;
-  const wait = Promise.all([
-    fonts?.load('700 20px "Tabla Playfair"'),
-    fonts?.load('700 10px "Tabla Montserrat"'),
-    fonts?.load('600 10px "Tabla Montserrat"'),
-    ...Array.from(document.querySelectorAll<HTMLImageElement>('.nt-print img')).map((img) => img.decode?.().catch(() => {})),
-  ]).catch(() => {});
-  // Never hold the print up for long (offline with nothing cached): print with what there is.
-  await Promise.race([wait, new Promise((r) => setTimeout(r, 3000))]);
+  await Promise.race([loadTagAssets(), new Promise((r) => setTimeout(r, 800))]);
 }
 
 /** The printed sheets: hidden on screen, the only thing shown when printing. */

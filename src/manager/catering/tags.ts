@@ -27,6 +27,36 @@ const NON_VEG_RE = new RegExp(`\\b(?:${NON_VEG.join('|')})\\b`, 'i');
 
 type ToastItem = Pick<Dish, 'name' | 'description' | 'group'>;
 
+// What a tag leaves out of a dish name: portion counts and sizes ("(6 pcs)", "(Serves 2)", "(16 oz)") and
+// menu markers ("(V)", "(GF)", "(Spicy)"). A marker still tells veg or non-veg.
+const PORTION = /^(?:\d+(?:[.-]\d+(?:\/\d+)?)?\s*(?:pcs?|pieces?|nos|ct|count|oz|ounces?|lbs?|ml|l|qts?|quarts?|gal|gallons?|inch|in|"|ft|ht|full\s+trays?|half\s+trays?|trays?|plates?|servings?)?\.?|serves?\s*\d+(?:\s*-\s*\d+)?|(?:small|medium|large|regular|family(?:\s+pack)?|half|full)(?:\s+(?:size|tray|pack))?)$/i;
+const MARKER = /^(?:v|vg|veg|vegan|vegetarian|nv|non[\s-]?veg(?:etarian)?|gf|df|jain|spicy|mild|hot|new|chef'?s\s+special|special|signature|popular)$/i;
+const VEG_MARK = /^(?:v|vg|veg|vegan|vegetarian|jain)$/i;
+const NONVEG_MARK = /^(?:nv|non[\s-]?veg(?:etarian)?)$/i;
+// A note in brackets on a typed line ("extra spicy", "cut in 4", "on the side") is for the kitchen, not the tag.
+const KITCHEN_NOTE = /\b(?:spicy|spice|mild|medium|hot|less|more|extra|no|without|add|side|separate|separately|cut|sliced|pack|packed|sauce|gravy|oil|salt|sweet|onion|garlic|cilantro|chutney|hold|please|pls|deliver|pickup|warm|cold)\b/i;
+
+/** A dish name for a tag, and its small line: "Onion Samosa (6 pcs) (V)" → "Onion Samosa"; "Andhra Chicken Curry (Bone-in)" →
+ *  "Andhra Chicken Curry" with "Bone-in" under it. `mark` is the veg or non-veg a menu marker gave, if any. */
+export function tagName(raw: string): { name: string; sub: string; mark: Diet | null } {
+  const subs: string[] = [];
+  let mark: Diet | null = null;
+  const name = raw
+    .replace(/\s*[([]([^)\]]*)[)\]]/g, (_, inner: string) => {
+      const t = inner.trim();
+      if (VEG_MARK.test(t)) mark = 'veg';
+      else if (NONVEG_MARK.test(t)) mark = 'nonveg';
+      if (t && !PORTION.test(t) && !MARKER.test(t) && !KITCHEN_NOTE.test(t)) subs.push(t);
+      return ' ';
+    })
+    // "Spring Rolls - 6 pc", "Gulab Jamun 4pc" at the end of a menu name
+    .replace(/\s*[-–—,]?\s*\d+\s*(?:pcs?|pieces?)\.?\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[-–—:,\s]+|[-–—:,\s]+$/g, '')
+    .trim();
+  return { name: tidyCase(name), sub: tidyCase(subs.join(', ')), mark };
+}
+
 /** Veg or non-veg: from the Toast menu group ("Non-Veg Starters"), else from the words in the dish. Veg when nothing says meat. */
 export function guessDiet(name: string, toast: ToastItem | null): Diet {
   const group = toast?.group.toLowerCase() ?? '';
@@ -35,20 +65,25 @@ export function guessDiet(name: string, toast: ToastItem | null): Diet {
   return 'veg';
 }
 
-/** One tag per dish of the order, in order, without repeats. The menu dish (when the line was picked
- *  from the menu) gives the name and veg or non-veg; the note gives the small line. */
+/** One tag per dish of the order, in order, without repeats: just the dish, never the quantity, unit or the
+ *  line's note (notes like "extra spicy" are for the kitchen). The menu dish, when the line has one, gives
+ *  the name and veg or non-veg. */
 export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines'>>, menu?: ToastMenu | null): NameTag[] {
   const dishes = menuDishes(menu);
   const seen = new Set<string>();
   const tags: NameTag[] = [];
   for (const line of orderLines(order, dishes)) {
-    // A line kept as typed (an old order) reads its name and small line from the text, as before.
-    const { name, sub } = line.text ? dishFromLine(line.text) : { name: line.dishId ? line.name.trim() : tidyCase(line.name.trim()), sub: tidyCase(line.note.trim()) };
-    const key = (name + sub).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const menuDish = dishById(line.dishId, dishes);
+    // The menu's name when the line is a menu dish; else the name typed (an old order's line: without its amount).
+    const raw = menuDish?.name ?? (line.dishId ? line.name : line.text ? dishFromLine(line.text).name : line.name);
+    const fromText = !menuDish && !line.dishId && line.text ? dishFromLine(line.text).sub : '';
+    const { name, sub: nameSub, mark } = tagName(raw);
+    const sub = nameSub || (fromText && !KITCHEN_NOTE.test(fromText) ? fromText : '');
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (!name || seen.has(key)) continue;
     seen.add(key);
-    const dish = dishById(line.dishId, dishes) ?? findDish(name, dishes);
-    tags.push({ name, sub, diet: guessDiet(name, dish) });
+    const dish = menuDish ?? findDish(raw, dishes) ?? findDish(name, dishes);
+    tags.push({ name, sub, diet: mark ?? guessDiet(name, dish) });
   }
   return tags;
 }
