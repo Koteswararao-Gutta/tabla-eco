@@ -75,11 +75,13 @@ test.describe('screen code fails to load', () => {
   test('reloads once and opens', async ({ browser }) => {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();
-    let failed = 0;
-    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => (failed++ === 0 ? route.abort() : route.continue()));
+    // Count page loads, not file requests: a browser may fetch the same file twice in one load (preload, then import).
+    let loads = 0;
+    page.on('request', (r) => { if (r.resourceType() === 'document' && r.frame() === page.mainFrame()) loads++; });
+    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => (loads <= 1 ? route.abort() : route.continue()));
     await page.goto('/#/kitchen');
     await expect(page.getByTestId('kitchen')).toBeVisible();
-    expect(failed).toBe(2);
+    expect(loads).toBe(2);
     await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
     await context.close();
   });
@@ -87,12 +89,13 @@ test.describe('screen code fails to load', () => {
   test('still missing after the reload: the calm crash screen, no reload loop', async ({ browser }) => {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();
-    let tries = 0;
-    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => (tries++, route.abort()));
+    let loads = 0;
+    page.on('request', (r) => { if (r.resourceType() === 'document' && r.frame() === page.mainFrame()) loads++; });
+    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => route.abort());
     await page.goto('/#/kitchen');
     await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
     await page.waitForTimeout(1500);
-    expect(tries).toBe(2);
+    expect(loads).toBe(2); // the first load, then exactly one reload
     await context.close();
   });
 });
