@@ -189,7 +189,53 @@ export function normalizeDB(input: unknown): PlannerDB | null {
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-/** A week with this phone's changes (by day and person) put on top of the stored one. */
+const overlap = (a: Shift, b: Shift): number => Math.min(a[1], b[1]) - Math.max(a[0], b[0]);
+
+/** How one side changed each base shift: kept (same), changed (to another shift) or removed; plus the shifts it added. */
+function diffShifts(base: Shift[], side: Shift[]): { to: (Shift | null)[]; added: Shift[] } {
+  const to: (Shift | null | undefined)[] = base.map(() => undefined);
+  const free = side.slice();
+  base.forEach((b, i) => {
+    const j = free.findIndex((x) => same(x, b));
+    if (j >= 0) to[i] = free.splice(j, 1)[0];
+  });
+  // A base shift with no exact match was edited if a leftover shift overlaps it; otherwise it was removed.
+  base.forEach((b, i) => {
+    if (to[i] !== undefined) return;
+    let best = -1, most = 0;
+    free.forEach((x, j) => {
+      const o = overlap(x, b);
+      if (o > most) (most = o), (best = j);
+    });
+    to[i] = best >= 0 ? free.splice(best, 1)[0] : null;
+  });
+  return { to: to as (Shift | null)[], added: free };
+}
+
+/** One person's shifts on one day, merged shift by shift. Shifts added or removed on either side stick; a shift changed on both sides takes this phone's version. */
+export function mergeShifts(base: Shift[] | undefined, local: Shift[] | undefined, latest: Shift[] | undefined): Shift[] {
+  const b = base || [], lc = local || [], lt = latest || [];
+  if (same(lc, b)) return clone(lt);
+  if (same(lt, b)) return clone(lc);
+  const mine = diffShifts(b, lc), theirs = diffShifts(b, lt);
+  const first: Shift[] = [], second: Shift[] = []; // first: this phone's own changes, they win an overlap
+  b.forEach((x, i) => {
+    const m = mine.to[i], t = theirs.to[i];
+    if (!m || !t) return; // removed on one side
+    if (!same(m, x)) first.push(m);
+    else if (!same(t, x)) second.push(t);
+    else first.push(x);
+  });
+  first.push(...mine.added);
+  second.push(...theirs.added);
+  const out: Shift[] = [];
+  [...first, ...second].forEach((x) => {
+    if (!out.some((y) => overlap(x, y) > 0)) out.push(clone(x));
+  });
+  return out.sort((x, y) => x[0] - y[0]);
+}
+
+/** A week with this phone's changes (shift by shift) put on top of the stored one. */
 export function mergeWeek(base: Week | undefined, local: Week, latest: Week | undefined): Week {
   if (!latest) return clone(local);
   const b = base ?? emptyWeek();
@@ -198,12 +244,32 @@ export function mergeWeek(base: Week | undefined, local: Week, latest: Week | un
     const day: Record<string, Shift[]> = {};
     const ids = new Set([...Object.keys(local.shifts[d] || {}), ...Object.keys(latest.shifts[d] || {}), ...Object.keys(b.shifts[d] || {})]);
     ids.forEach((pid) => {
-      const mine = local.shifts[d]?.[pid], theirs = latest.shifts[d]?.[pid];
-      const pick = same(mine, b.shifts[d]?.[pid]) ? theirs : mine;
-      if (pick && pick.length) day[pid] = clone(pick);
+      const pick = mergeShifts(b.shifts[d]?.[pid], local.shifts[d]?.[pid], latest.shifts[d]?.[pid]);
+      if (pick.length) day[pid] = pick;
     });
     out.shifts.push(day);
   }
+  return out;
+}
+
+/** Field by field: whatever this phone changed wins, the rest comes from latest. */
+const pick3 = <T>(base: T, local: T, latest: T): T => clone(same(local, base) ? latest : local);
+
+/** Settings merged field by field (each day's open, close and break; the staffing rules). */
+export function mergeSettings(base: Settings, local: Settings, latest: Settings): Settings {
+  const days = local.days.map((lc, d): DayHours => {
+    const b = base.days[d] ?? lc, lt = latest.days[d] ?? lc;
+    const h: DayHours = { open: pick3(b.open, lc.open, lt.open), close: pick3(b.close, lc.close, lt.close), brk: pick3(b.brk, lc.brk, lt.brk) };
+    const ok = h.close > h.open && (!h.brk || (h.brk[0] > h.open && h.brk[1] > h.brk[0] && h.brk[1] < h.close));
+    return ok ? h : clone(lc);
+  });
+  const out: Settings = {
+    prepStart: pick3(base.prepStart, local.prepStart, latest.prepStart),
+    secondAt: pick3(base.secondAt, local.secondAt, latest.secondAt),
+    minStaff: pick3(base.minStaff, local.minStaff, latest.minStaff),
+    days,
+  };
+  if (out.secondAt < out.prepStart) (out.prepStart = local.prepStart), (out.secondAt = local.secondAt);
   return out;
 }
 
@@ -235,5 +301,5 @@ export function mergeConfig(base: Config, local: Config, latest: Config): Config
     const pick = same(local.special[k], base.special[k]) ? latest.special[k] : local.special[k];
     if (pick) special[k] = clone(pick);
   });
-  return { people, settings: clone(same(local.settings, base.settings) ? latest.settings : local.settings), special };
+  return { people, settings: mergeSettings(base.settings, local.settings, latest.settings), special };
 }
