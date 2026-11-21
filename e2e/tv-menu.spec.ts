@@ -72,6 +72,28 @@ test('TV 3 mirrors TV 1 and TV 4 mirrors TV 2', async ({ context }) => {
   expect(left).not.toBe(right);
 });
 
+test('a picture on TV 3 alone never blanks TV 1 / TV 2; TV 3 falls back to TV 1\'s pictures', async ({ context }) => {
+  const { control, tvs } = await openTvs(context);
+  await control.evaluate(() => {
+    const screens = JSON.parse(localStorage.getItem('tabla:screens') || '{}');
+    screens.tv3 = { ...screens.tv3, mirrorOf: null };
+    localStorage.setItem('tabla:screens', JSON.stringify(screens));
+  });
+  const all = await slots(control);
+  const own = all['slot-menu-1'].pictures.tv1;
+  // the only spot is TV 3's own: TV 1 / TV 2 play nothing new, TV 3 shows it
+  await setLoop(control, { replace: true, patch: { a: { order: 1, seconds: 30, transition: 'fade', kind: 'menu', pictures: { tv1: own } }, b: { order: 2, seconds: 30, transition: 'fade', kind: 'menu', pictures: { tv3: own } } }, firstSlotId: 'b' });
+  const [tv1, , tv3] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-slot-id', 'a');
+  await expect(now(tv1)).toHaveAttribute('data-picture-id', own);
+  await expect(now(tv3)).toHaveAttribute('data-slot-id', 'b');
+  await expect(now(tv3)).toHaveAttribute('data-picture-id', own);
+  // in TV 1's spot, TV 3 (no own picture) shows TV 1's
+  await setLoop(control, { firstSlotId: 'a' });
+  await expect(now(tv3)).toHaveAttribute('data-slot-id', 'a', { timeout: 2_000 });
+  await expect(now(tv3)).toHaveAttribute('data-picture-id', own);
+});
+
 test('a reloaded TV lands on the right slot at once', async ({ context }) => {
   const { control, tvs } = await openTvs(context);
   await setLoop(control, { seconds: 3 });

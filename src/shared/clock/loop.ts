@@ -33,7 +33,10 @@ export function loopPosition(slots: readonly Slot[], now: number, loop?: LoopAnc
   if (!list.length) return null;
   const first = loop?.firstSlotId ? list.findIndex((s) => s.id === loop.firstSlotId) : -1;
   if (first > 0) list = [...list.slice(first), ...list.slice(0, first)];
-  const anchor = loop?.anchor ?? 0;
+  // A special that just ended shortens the loop; counting from the end time (when it is later than the
+  // anchor) restarts the loop there, so TVs don't jump mid-picture. Same on every device.
+  let anchor = loop?.anchor ?? 0;
+  for (const s of slots) if (s.seconds > 0 && s.endsAt != null && s.endsAt <= now && s.endsAt > anchor) anchor = s.endsAt;
   const lengths = list.map((s) => Math.round(s.seconds * 1000));
   const total = lengths.reduce((a, b) => a + b, 0);
   const elapsed = now - anchor;
@@ -57,25 +60,44 @@ export function loopPosition(slots: readonly Slot[], now: number, loop?: LoopAnc
 
 /** The two TVs that stand together, by side. TV 3 and TV 4 normally mirror TV 1 and TV 2. */
 export const PARTNER: Partial<Record<ScreenId, ScreenId>> = { tv1: 'tv2', tv2: 'tv1', tv3: 'tv4', tv4: 'tv3' };
+/** The main TV that TV 3 / TV 4 follow (mirror, or fall back to when they have no picture of their own). */
+export const MAIN_OF: Partial<Record<ScreenId, ScreenId>> = { tv3: 'tv1', tv4: 'tv2' };
 
-/** The screen whose pictures this screen shows (follows mirrorOf, one level). */
-export function sourceScreen(screenId: ScreenId, screens: readonly Screen[]): ScreenId {
-  const s = screens.find((x) => x.id === screenId);
-  return s?.mirrorOf ?? screenId;
+const mirrors = (screenId: ScreenId, screens: readonly Screen[]) => !!screens.find((x) => x.id === screenId)?.mirrorOf;
+
+/** The screens whose pictures this screen may show, in order of preference (not counting the partner).
+ *  TV 1 / TV 2: only their own. TV 3 / TV 4 when mirroring: their main TV's. When not mirroring:
+ *  their own picture, else their main TV's, so their own pictures replace TV 1 / TV 2's on that TV only. */
+export function pictureSources(screenId: ScreenId, screens: readonly Screen[]): ScreenId[] {
+  const main = MAIN_OF[screenId];
+  if (!main) return [screenId];
+  return mirrors(screenId, screens) ? [main] : [screenId, main];
+}
+
+/**
+ * The slots in this screen's loop. TV 1 and TV 2 play only spots with a TV 1 or TV 2 picture, so a
+ * picture added to TV 3 / TV 4 never blanks them. TV 3 and TV 4 play those same spots plus spots with
+ * a picture of their own (when not mirroring). Both TVs of a pair always get the same list, so a pair
+ * stays in step; with TV 3 / TV 4 mirroring, all four TVs get the same list.
+ */
+export function loopSlots<T extends Slot>(slots: readonly T[], screenId: ScreenId, screens: readonly Screen[]): T[] {
+  const ids: ScreenId[] = ['tv1', 'tv2'];
+  if (screenId === 'tv3' || screenId === 'tv4') for (const tv of ['tv3', 'tv4'] as const) if (!mirrors(tv, screens)) ids.push(tv);
+  return slots.filter((s) => ids.some((id) => s.pictures?.[id]));
 }
 
 /**
  * The picture a screen shows in a slot:
- * 1. its own picture (or its mirror source's), else
+ * 1. its own picture (TV 3 / TV 4: see pictureSources), else
  * 2. for special and catering slots only: its partner's picture, so one picture fills both
  *    TVs of a pair. Menu slots never borrow: a menu picture added to TV 1 stays on TV 1.
  * 3. otherwise null (the screen shows its idle look).
  */
 export function pictureFor(slot: Slot, screenId: ScreenId, screens: readonly Screen[]): string | null {
-  const src = sourceScreen(screenId, screens);
-  const own = slot.pictures[src];
+  const first = (ids: ScreenId[]) => ids.map((id) => slot.pictures[id]).find(Boolean) ?? null;
+  const own = first(pictureSources(screenId, screens));
   if (own) return own;
   if ((slot.kind ?? 'menu') === 'menu') return null;
-  const partner = PARTNER[src];
-  return (partner && slot.pictures[partner]) || null;
+  const partner = PARTNER[screenId];
+  return partner ? first(pictureSources(partner, screens)) : null;
 }
