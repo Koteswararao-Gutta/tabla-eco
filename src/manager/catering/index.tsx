@@ -13,6 +13,7 @@ import { menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
 import { balance, depositError, depositTotal, methodLabel, NO_PAY, PAY_METHODS, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 import './catering.css';
+import { Address } from './Address';
 
 type Order = WithId<CateringOrder>;
 const UNDO_MS = 6000;
@@ -502,7 +503,7 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
       <dl className="c-sum-facts">
         <div>
           <dt>{o.type === 'delivery' ? 'Delivery to' : 'Pickup'}</dt>
-          <dd>{o.type === 'delivery' ? o.address || 'No address yet' : 'At the restaurant'}</dd>
+          <dd>{o.type === 'delivery' ? o.address ? <Address address={o.address} maps /> : 'No address yet' : 'At the restaurant'}</dd>
         </div>
         {!!o.people && (
           <div>

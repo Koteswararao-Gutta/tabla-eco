@@ -5,6 +5,7 @@ import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow
 import { byDueAsc, countdown, dayLabel, isSoon, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
+import { Address } from '../manager/catering/Address';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
@@ -388,7 +389,7 @@ function OrderCard({ order: o, now, showDay, onTap, onDoubleTap }: { order: Orde
 
       <div className="k-who">
         <div className="k-name">{o.customerName}</div>
-        {o.type === 'delivery' && o.address && <div className="k-address">{o.address}</div>}
+        {o.type === 'delivery' && o.address && <Address className="k-address" address={o.address} />}
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
 

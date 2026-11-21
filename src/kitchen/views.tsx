@@ -5,6 +5,7 @@ import { countdown, dayLabel, dayStart, itemLines, ordersByDay, showsCountdown, 
 import { MonthCalendar } from '../manager/catering/calendar';
 import { ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
+import { Address } from '../manager/catering/Address';
 import { kitchenGroups, weekdayLabel } from './days';
 
 type Order = WithId<CateringOrder>;
@@ -95,7 +96,7 @@ export function OrderDetails({ order: o, now }: { order: Order; now: number }) {
       </div>
       <div className="k-who">
         <div className="k-phone">{o.phone}</div>
-        {o.type === 'delivery' && o.address && <div className="k-address">{o.address}</div>}
+        {o.type === 'delivery' && o.address && <Address className="k-address" address={o.address} />}
         {!!o.people && <div className="k-people">{o.people} people</div>}
       </div>
       <ItemList lines={orderLines(o)} className="k-items" />
