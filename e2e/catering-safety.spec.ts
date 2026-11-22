@@ -64,7 +64,7 @@ test('cancel an order: off the kitchen and the totals, deposit and refund note s
   // Cancel, with a refund note.
   await details.getByTestId('cancel-order').click();
   const cancel = manager.getByRole('dialog', { name: 'Cancel this order?' });
-  await expect(cancel).toContainText('$100 was paid as a deposit');
+  await expect(cancel).toContainText('$100 was already paid');
   await cancel.getByTestId('refund-note-input').fill('Refunded $100 by Zelle');
   await manager.waitForTimeout(300);
   await shot(manager, 'cancel-sheet');

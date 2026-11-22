@@ -104,6 +104,12 @@ test('orderAmounts: a log over 500 entries is refused', async () => {
   await assertFails(setDoc(doc(db, 'orderAmounts/o1'), { ...amount, log }));
 });
 
+test('orderAmounts: paid can be null (out of the unpaid look-up), never another kind of value', async () => {
+  await seed('orderAmounts/o1', amount);
+  await assertSucceeds(updateDoc(doc(db, 'orderAmounts/o1'), { paid: null, updatedAt: 2 }));
+  await assertFails(updateDoc(doc(db, 'orderAmounts/o1'), { paid: 'no', updatedAt: 3 }));
+});
+
 test('orderAmounts: an old amount without a log can start one', async () => {
   await seed('orderAmounts/o1', amount);
   await assertSucceeds(updateDoc(doc(db, 'orderAmounts/o1'), { log: [pay('paid', 3)], updatedAt: 3 }));

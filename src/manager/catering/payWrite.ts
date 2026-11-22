@@ -10,5 +10,8 @@ export async function savePay(id: string, build: (cur: Pay) => { patch?: Partial
   const doc = await store.getDoc('orderAmounts', id);
   const at = store.now();
   const { patch = {}, events } = build(payFrom(doc));
-  await store.updateDoc('orderAmounts', id, { ...patch, log: appendLog(doc?.log, ...events.map((e) => ({ ...e, at }))), updatedAt: at });
+  // A new amount doc says paid: false from the start, so the 'notPaid' look-up finds it and no phone has to add
+  // the flag later (see useExplicitPaid).
+  const flag = !doc && patch.paid === undefined ? { paid: false } : {};
+  await store.updateDoc('orderAmounts', id, { ...flag, ...patch, log: appendLog(doc?.log, ...events.map((e) => ({ ...e, at }))), updatedAt: at });
 }

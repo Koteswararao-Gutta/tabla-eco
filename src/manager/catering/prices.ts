@@ -61,8 +61,11 @@ export function priceList(saved: Partial<CateringPrices> | null | undefined): Ca
 /** The kind of dish, from its name: goat, lamb or fish (and other seafood); chicken, egg or paneer; else veg. */
 export function kindOf(name: string): Kind {
   const n = name.toLowerCase();
-  if (/goat|lamb|mutton|fish|shrimp|prawn|seafood|crab|apollo/.test(n)) return 'meat';
-  if (/chicken|\bchk\b|\begg\b|\bwings?\b|paneer|panner|paner/.test(n)) return 'chicken';
+  // Telugu names too (the name tags know the same words): mamsam (goat), chepa (fish), royyala (shrimp),
+  // kodi (chicken), guddu (egg). Keema, haleem and the like are meat unless the name says chicken.
+  if (/goat|lamb|mutton|fish|shrimp|prawn|seafood|crab|apollo|mamsam|\bchepa|\bchapa\b|\broyya|pomfret|tilapia|salmon|\btuna\b/.test(n)) return 'meat';
+  if (/chicken|\bchk\b|\beggs?\b|\bwings?\b|paneer|panner|paner|\bkodi|guddu/.test(n)) return 'chicken';
+  if (/k[h]?eema|haleem|nihari|\bpaya\b|\bboti\b|\bbeef\b|\bpork\b|\bmeat\b/.test(n)) return 'meat';
   return 'veg';
 }
 

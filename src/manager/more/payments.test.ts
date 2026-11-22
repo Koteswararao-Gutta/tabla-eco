@@ -60,3 +60,13 @@ describe('paymentsOn with cancelled and deleted orders', () => {
     expect([day.paidTotal, day.unpaidTotal]).toEqual([0, 80]);
   });
 });
+
+describe('paymentsOn: a cancelled order that was paid in full', () => {
+  it('shows the whole amount as paid, so the refund is not missed', () => {
+    const o = [{ ...order('full', at(20, 12)), status: 'cancelled' } as WithId<CateringOrder>];
+    const a = [{ id: 'full', amount: 500, paid: true, paidAt: 1, method: 'zelle', takenBy: 'X', updatedAt: 0 } as WithId<OrderAmount>];
+    const day = paymentsOn(o, a, at(20, 9));
+    expect(day.rows[0]).toMatchObject({ status: 'cancelled', paidSoFar: 500 });
+    expect([day.paidTotal, day.unpaidTotal]).toEqual([0, 0]);
+  });
+});

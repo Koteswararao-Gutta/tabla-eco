@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { store, useCollection, type CateringOrder, type CollectionFilter, type OrderAmount, type WithId } from '@shared/data';
 import { dayStart, fromInputs } from './orders';
+import { isPaid, payFrom } from './pay';
 
 type Order = WithId<CateringOrder>;
 type Amount = WithId<OrderAmount>;
@@ -71,14 +72,15 @@ export function useCateringOrders(olderFrom: number | null, recentFrom: number) 
 }
 
 /** One order, from the list when it is there, else read on its own (e.g. an old order opened from Payments).
- *  undefined while loading, null when it doesn't exist. */
+ *  undefined while loading, null when it doesn't exist or was deleted. */
 export function useOrder(id: string | null, list: Order[] | null): Order | null | undefined {
   const inList = id && list ? list.find((o) => o.id === id) : undefined;
   const want = id && list && !inList ? id : null;
   const [alone, setAlone] = useState<{ id: string; doc: Order | null } | null>(null);
   useEffect(() => {
     if (!want) return undefined;
-    const stop = store.watchDoc('orders', want, (doc) => setAlone({ id: want, doc }));
+    // A deleted order (soft delete) reads as missing, the same as in the list: it can't be opened or edited.
+    const stop = store.watchDoc('orders', want, (doc) => setAlone({ id: want, doc: doc && isDeleted(doc) ? null : doc }));
     return () => {
       stop();
       setAlone(null);
@@ -92,38 +94,65 @@ export function useOrder(id: string | null, list: Order[] | null): Order | null 
   return found === undefined && id && last.current?.id === id ? last.current : found;
 }
 
-/** Orders that need an explicit `paid: false` on their amount so the 'notPaid' query finds them later:
- *  a missing amount doc is created (never overwriting one), and a doc without `paid` gets it. Paid docs
- *  and docs that already say paid: false are left alone. Pure, for tests. */
-export function needsPaidFlag(orders: Order[], amounts: Amount[]): { create: string[]; mark: string[] } {
+/** Keeps each amount's `paid` flag right for the 'notPaid' look-up. Pure, for tests.
+ *  - create: an order still waiting for money with no amount doc yet gets one with paid: false (never overwriting).
+ *  - mark: an order still waiting for money whose doc has no flag (missing or null) gets paid: false.
+ *  - unmark: a doc saying paid: false whose order no longer waits for money (cancelled, deleted, or deposits that
+ *    cover the whole amount) gets paid: null, so the look-up stops loading it every time a phone opens.
+ *  "Paid in full" docs (paid: true) are always left alone. */
+export function needsPaidFlag(orders: Order[], amounts: Amount[]): { create: string[]; mark: string[]; unmark: string[] } {
   const byId = new Map(amounts.map((a) => [a.id, a]));
   const create: string[] = [];
   const mark: string[] = [];
+  const unmark: string[] = [];
   for (const o of orders) {
-    if (isDeleted(o) || (o.status as string) === 'cancelled') continue;
     const a = byId.get(o.id);
-    if (!a) create.push(o.id);
-    else if (typeof a.paid !== 'boolean' && a.paidAt == null) mark.push(o.id);
+    if (waitsForMoney(o, a ?? null)) {
+      if (!a) create.push(o.id);
+      else if (a.paid !== true && a.paid !== false && a.paidAt == null) mark.push(o.id);
+    } else if (a && a.paid === false) unmark.push(o.id);
   }
-  return { create, mark };
+  return { create, mark, unmark };
+}
+
+/** True while an order may still be owed money: not cancelled or deleted, not paid in full, not paid off by deposits. */
+function waitsForMoney(o: object & { status?: unknown }, a: Amount | null): boolean {
+  if (isDeleted(o) || o.status === 'cancelled') return false;
+  return !isPaid(payFrom(a));
 }
 
 /** Once per order on this phone: see needsPaidFlag. `amounts` must be the current amounts of (at least) these
- *  orders, never ones still loading, or a loading amount would look missing. */
+ *  orders, never ones still loading, or a loading amount would look missing. Each change re-checks the order and
+ *  its amount as saved on the server right then, so a stale copy on this phone never undoes another phone's
+ *  "Paid in full" (or a reopen, or a removed deposit). */
 export function useExplicitPaid(orders: Order[] | null, amounts: Amount[] | null) {
   const done = useRef(new Set<string>());
   useEffect(() => {
     if (!orders || !amounts) return;
-    const { create, mark } = needsPaidFlag(orders, amounts);
+    const { create, mark, unmark } = needsPaidFlag(orders, amounts);
+    // m: and u: undo each other (an order cancelled, then reopened), so doing one lets the other run again.
+    const once = (key: string, save: () => Promise<unknown>) => {
+      if (done.current.has(key)) return;
+      done.current.add(key);
+      done.current.delete(key.startsWith('m:') ? 'u:' + key.slice(2) : key.startsWith('u:') ? 'm:' + key.slice(2) : '');
+      save().catch(() => done.current.delete(key));
+    };
     for (const id of create) {
-      if (done.current.has(id)) continue;
-      done.current.add(id);
-      store.createIfMissing('orderAmounts', id, { amount: null, paid: false, updatedAt: store.now() }).catch(() => done.current.delete(id));
+      once(`c:${id}`, () => store.createIfMissing('orderAmounts', id, { amount: null, paid: false, updatedAt: store.now() }));
     }
     for (const id of mark) {
-      if (done.current.has(id)) continue;
-      done.current.add(id);
-      store.updateDoc('orderAmounts', id, { paid: false }).catch(() => done.current.delete(id));
+      once(`m:${id}`, async () => {
+        const o = await store.getDoc('orders', id);
+        if (!o) return;
+        await store.updateIf('orderAmounts', id, (cur) => !!cur && cur.paid !== true && cur.paid !== false && cur.paidAt == null && waitsForMoney(o, cur), { paid: false });
+      });
+    }
+    for (const id of unmark) {
+      once(`u:${id}`, async () => {
+        const o = await store.getDoc('orders', id);
+        if (!o) return;
+        await store.updateIf('orderAmounts', id, (cur) => !!cur && cur.paid === false && !waitsForMoney(o, cur), { paid: null });
+      });
     }
   }, [orders, amounts]);
 }

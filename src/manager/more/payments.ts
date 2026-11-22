@@ -1,7 +1,7 @@
 // Payments list (pure): the catering orders on one day, with amount and Paid / Unpaid, and the day's totals.
 import type { CateringOrder, OrderAmount, WithId } from '@shared/data';
 import { dayStart } from '../catering/orders';
-import { balance, depositTotal, isPaid, payFrom } from '../catering/pay';
+import { balance, depositTotal, isPaid, paidSoFar, payFrom } from '../catering/pay';
 import { isCancelled, isDeleted } from '../catering/safety';
 
 export interface PayRow {
@@ -34,7 +34,7 @@ export function paymentsOn(orders: WithId<CateringOrder>[], amounts: WithId<Orde
     .map((order) => {
       const pay = payFrom(byId.get(order.id));
       const status: PayRow['status'] = isCancelled(order) ? 'cancelled' : isPaid(pay) ? 'paid' : depositTotal(pay) > 0 ? 'part' : 'unpaid';
-      return { order, amount: pay.amount, paid: isPaid(pay), status, paidSoFar: depositTotal(pay), refundNote: pay.refundNote, pay };
+      return { order, amount: pay.amount, paid: isPaid(pay), status, paidSoFar: paidSoFar(pay), refundNote: pay.refundNote, pay };
     });
   // Deposits count as paid, and only what is still owed as unpaid (the same as Statistics).
   let paidTotal = 0;

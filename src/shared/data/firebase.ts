@@ -236,6 +236,18 @@ export class FirebaseStore implements DataStore {
     });
   }
 
+  async updateIf<C extends CollectionName>(col: C, id: string, test: (cur: WithId<Collections[C]> | null) => boolean, patch: Partial<Collections[C]>): Promise<boolean> {
+    await this.ready;
+    const ref = this.ref(col, id);
+    return runTransaction(this.db, async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists() ? ({ ...snap.data(), id } as WithId<Collections[C]>) : null;
+      if (!test(cur)) return false;
+      tx.set(ref, { ...clean(patch as object), id }, { merge: true });
+      return true;
+    });
+  }
+
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     await this.ready;
     await queued(fsSet(this.ref(col, id), { ...clean(data as object), id }), `setDoc ${col}/${id}`);

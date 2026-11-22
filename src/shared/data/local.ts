@@ -102,6 +102,13 @@ export class LocalStore implements DataStore {
     return true;
   }
 
+  async updateIf<C extends CollectionName>(col: C, id: string, test: (cur: WithId<Collections[C]> | null) => boolean, patch: Partial<Collections[C]>): Promise<boolean> {
+    const cur = (this.read(col)[id] as WithId<Collections[C]> | undefined) ?? null;
+    if (!test(cur)) return false;
+    await this.updateDoc(col, id, patch);
+    return true;
+  }
+
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     const t = this.read(col);
     t[id] = { ...clean(data as object), id };
