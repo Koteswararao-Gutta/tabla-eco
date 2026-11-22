@@ -148,6 +148,21 @@ describe('review fixes', () => {
     ]);
   });
 
+  it('keeps notes from reading the paper order off the tag, but keeps a short word like Dry', () => {
+    const lines = [
+      { dishId: null, name: 'Chilli Fish', qty: 1, unit: 'Half tray', note: 'dry' },
+      { dishId: null, name: 'Baby Corn Manchurian', qty: 1, unit: 'Half tray', note: 'veg crossed out, written as baby corn above it' },
+      { dishId: null, name: 'Veg Chowmein', qty: 1, unit: 'Half tray', note: 'not on menu as written' },
+      { dishId: null, name: 'Goat Curry (looks like goat?)', qty: 1, unit: 'Half tray', note: '' },
+    ];
+    expect(tagsForOrder({ items: linesText(lines), lines }).map((t) => [t.name, t.sub])).toEqual([
+      ['Chilli Fish', 'Dry'],
+      ['Baby Corn Manchurian', ''],
+      ['Veg Chowmein', ''],
+      ['Goat Curry', ''],
+    ]);
+  });
+
   it('makes one tag for Samosa and Samosas', () => {
     expect(tagsForOrder({ items: 'Samosa 40 pcs\n2 dozen samosas' }).map((t) => t.name)).toEqual(['Samosa']);
   });
