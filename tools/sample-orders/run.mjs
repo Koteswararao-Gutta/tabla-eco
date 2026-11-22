@@ -69,6 +69,20 @@ async function main() {
       console.log(`${mode === 'delete' ? 'deleted' : 'found'} ${d.id} | ${d.get('customerName')}`);
     }
     console.log(`${mode === 'delete' ? 'deleted' : 'found'} ${n} sample orders`);
+  } else if (mode === 'check') {
+    // Read only: the same queries the kitchen and catering list use, to see whether the samples come back.
+    const { Filter } = await import('firebase-admin/firestore');
+    const since = Date.now() - 60 * 24 * 3600_000;
+    const q = await db.collection('orders').where(Filter.or(Filter.where('status', '==', 'open'), Filter.where('dueAt', '>=', since))).get();
+    console.log(`openOrRecent query: ${q.size} orders`);
+    const day = await db.collection('orders').where('dueAt', '>=', phoenix('2026-11-22', '00:00')).where('dueAt', '<', phoenix('2026-11-23', '00:00')).get();
+    for (const d of day.docs) console.log(`Sun 11-22: ${d.id} | ${d.get('customerName')} | ${d.get('status')} | deleted=${d.get('deletedAt') ?? null} | inOpenOrRecent=${q.docs.some((x) => x.id === d.id)}`);
+    for (const s of SAMPLES.filter((x) => x.batch === 2)) {
+      const id = `sample-${s.date}-${s.slug}-${s.time.replace(':', '')}`;
+      const o = await db.doc(`orders/${id}`).get();
+      console.log(id, JSON.stringify(o.data()));
+      console.log('amount', JSON.stringify((await db.doc(`orderAmounts/${id}`).get()).data()));
+    }
   } else throw new Error(`unknown mode ${mode}`);
 }
 
