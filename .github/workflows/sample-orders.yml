@@ -2,7 +2,7 @@ name: Sample orders (testing only)
 # Runs tools/sample-orders on pushes to this branch only. Never merged to main.
 on:
   push:
-    branches: [claude/project-thread-gnzmrt]
+    branches: [claude/project-thread-gnzmrt, claude/project-thread-54wltl]
     paths: [tools/sample-orders/**]
 permissions:
   contents: read

@@ -1,7 +1,8 @@
 // Sample (test) catering orders for trying the app. Runs only from .github/workflows/sample-orders.yml
 // on its own branch (needs the service account). Never merge.
 // mode.json "mode":
-//   insert - adds the 10 orders in orders.mjs (and their orderAmounts). Never overwrites: an existing id is skipped.
+//   insert - adds the orders in orders.mjs (and their orderAmounts). Never overwrites: an existing id is skipped.
+//            With "batch": N, adds only that batch (orders without a batch are batch 1).
 //   delete - deletes every order with sample: true whose id starts "sample-" and name starts "TEST", and its orderAmounts.
 //   list   - read only: prints the sample orders now in the database.
 import { readFileSync } from 'node:fs';
@@ -14,8 +15,8 @@ const lineText = (l) => `${l.name}, ${qtyText(l)}${l.note ? ` (${l.note})` : ''}
 const phoenix = (date, time) => Date.parse(`${date}T${time}:00-07:00`);
 const isSample = (id, o) => id.startsWith('sample-') && o.sample === true && String(o.customerName).startsWith('TEST');
 
-export function build(now, staff) {
-  return SAMPLES.map((s) => {
+export function build(now, staff, batch) {
+  return SAMPLES.filter((s) => !batch || (s.batch ?? 1) === batch).map((s) => {
     const id = `sample-${s.date}-${s.slug}-${s.time.replace(':', '')}`;
     const dueAt = phoenix(s.date, s.time);
     const order = {
@@ -39,7 +40,7 @@ export function build(now, staff) {
 async function main() {
   const { initializeApp, cert } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
-  const mode = JSON.parse(readFileSync(new URL('mode.json', import.meta.url), 'utf8')).mode;
+  const { mode, batch } = JSON.parse(readFileSync(new URL('mode.json', import.meta.url), 'utf8'));
   initializeApp({ credential: cert(JSON.parse(process.env.SA)), projectId: 'tabla-eco-2e94b' });
   const db = getFirestore();
   if (mode === 'insert') {
@@ -47,7 +48,7 @@ async function main() {
     const staff = (cfg?.people ?? []).filter((p) => p?.active !== false && typeof p?.name === 'string' && p.name.trim()).map((p) => p.name.trim());
     if (!staff.length) staff.push('Manager');
     console.log(`staff names used for "taken by": ${staff.slice(0, 2).join(', ')}`);
-    for (const { id, order, amount } of build(Date.now(), staff)) {
+    for (const { id, order, amount } of build(Date.now(), staff, batch)) {
       const ref = db.doc(`orders/${id}`), aRef = db.doc(`orderAmounts/${id}`);
       const res = await db.runTransaction(async (tx) => {
         const [o, a] = await Promise.all([tx.get(ref), tx.get(aRef)]);

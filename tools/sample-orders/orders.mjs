@@ -80,4 +80,15 @@ export const SAMPLES = [
   { slug: 'suresh', name: 'TEST Suresh Babu', phone: '6025550110', date: '2026-11-28', time: '18:30', type: 'delivery', people: 80,
     address: '9000 W Glendale Ave, Glendale, AZ 85305 (wedding reception)', notes: 'Mild to medium. Serve 7:00 to 9:00 PM.',
     lines: [L('gonguraChicken', 2, FT), L('ulavaVeg', 1.5, FT), L('apolloFish', 1, FT), L('gobi65', 1, FT), L('pepperFry', 1, HT), L('cutMirchi', 1, HT), L('butterNaan', 80, PCS), L('mysorePak', 80, PCS)] },
+  // Batch 2 (added 2026-11-21): three Sunday-evening orders that share dishes, so the kitchen prep totals combine.
+  { batch: 2, slug: 'kavya', name: 'TEST Kavya Sharma', phone: '6025550111', date: '2026-11-22', time: '17:30', type: 'pickup', people: 20,
+    lines: [L('chickenDum', 1, FT), L('paneerTikkaMasala', 1, HT), L('butterNaan', 25, PCS), L('gulab', 20, PCS)],
+    money: { amount: 310 } },
+  { batch: 2, slug: 'rahul', name: 'TEST Rahul Verma', phone: '6025550112', date: '2026-11-22', time: '18:30', type: 'delivery', people: 35,
+    address: '3300 E Indian School Rd, Phoenix, AZ 85018 (birthday party)', notes: 'Medium spicy.',
+    lines: [L('chickenDum', 1.5, FT), L('butterChicken', 1, FT), L('paneerTikkaMasala', 1, HT), L('butterNaan', 40, PCS), L({ name: 'Raita' }, 2, 'Quarts')],
+    money: { amount: 610, deposits: [[200, 'zelle']] } },
+  { batch: 2, slug: 'neha', name: 'TEST Neha Gupta', phone: '6025550113', date: '2026-11-22', time: '19:30', type: 'pickup', people: 15,
+    lines: [L('chickenDum', 1, HT), L('butterChicken', 1, HT), L('samosa', 30, PCS), L('gulab', 15, PCS)],
+    money: { amount: 230, paid: 'card' } },
 ];
