@@ -1,5 +1,6 @@
 name: Deploy server code
-# Deploys functions/ (photo-to-order, reminders, morning summary, Toast menu sync) and firestore.rules to Firebase
+# Deploys functions/ (photo-to-order, reminders, morning summary, Toast menu sync), firestore.rules and
+# firestore.indexes.json to Firebase, then checks the apps' list queries work on the live database
 # after the Tests workflow passed on main (Firebase skips functions whose code didn't change).
 # Needs two repository secrets: FIREBASE_SERVICE_ACCOUNT (JSON key) and ANTHROPIC_API_KEY.
 on:
@@ -106,6 +107,11 @@ jobs:
           fi
       - if: steps.check.outputs.ready == 'true'
         run: $FIREBASE deploy --only functions,firestore:rules,firestore:indexes --project $PROJECT --non-interactive --force
+      - if: steps.check.outputs.ready == 'true'
+        name: Check the apps' list queries work on the live database (catches a missing index)
+        run: |
+          [ -d functions/node_modules/firebase-admin ] || npm ci --prefix functions --no-audit --no-fund
+          node tools/check-live-queries.mjs
       - if: steps.check.outputs.ready == 'true'
         name: Remove old key versions
         continue-on-error: true
