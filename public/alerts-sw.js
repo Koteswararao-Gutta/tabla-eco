@@ -47,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Icons and the manifest: network first, cached copy when offline.
-  if (/^(icon-\d+\.png|manifest\.webmanifest)$/.test(rel)) event.respondWith(networkFirst(event));
+  if (/^(icon-(\w+-)?\d+\.png|(front-)?manifest\.webmanifest)$/.test(rel)) event.respondWith(networkFirst(event));
 });
 
 async function networkFirst(event, shellKey) {

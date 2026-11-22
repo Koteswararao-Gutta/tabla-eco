@@ -5,14 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
     <title>Tabla</title>
-    <!-- Add to Home Screen: opens full screen like an app (iPhone and Android) -->
-    <link rel="manifest" href="./manifest.webmanifest?v=2" />
-    <!-- ?v=2: the Tabla logo icons. iPhones keep an icon by its address, so a new picture needs a new address. -->
-    <link rel="apple-touch-icon" sizes="180x180" href="./icon-180.png?v=2" />
+    <!-- Add to Home Screen: opens full screen like an app (iPhone and Android). The front app and the manager
+         app are one page, so the install details (manifest, icon, name) are picked from the link: a phone
+         added from #/front opens the front app, everything else opens the manager app. iPhones keep an icon
+         by its address, so a new picture needs a new file name. -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./icon-manager-180.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png?v=2" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Tabla" />
+    <meta name="apple-mobile-web-app-title" content="Manager" />
+    <script>
+      (function () {
+        function install() {
+          var front = location.hash.indexOf('#/front') === 0;
+          document.querySelector('link[rel="manifest"]').href = front ? './front-manifest.webmanifest' : './manifest.webmanifest';
+          document.querySelector('link[rel="apple-touch-icon"]').href = front ? './icon-front-180.png' : './icon-manager-180.png';
+          document.querySelector('meta[name="apple-mobile-web-app-title"]').content = front ? 'Front' : 'Manager';
+        }
+        install();
+        window.addEventListener('hashchange', install);
+      })();
+    </script>
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- TVs: paint black from the very first frame (no white flash on load or reload). -->
     <style>html.t-dark, html.t-dark body { background: #000; }</style>

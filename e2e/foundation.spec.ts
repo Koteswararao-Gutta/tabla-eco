@@ -120,3 +120,28 @@ test('a reload that gets a server error still opens the app', async ({ browser }
   await expect(page.locator('#root > *').first()).toBeAttached();
   await context.close();
 });
+
+test('Add to Home Screen: the front link installs the front app, the manager link the manager app', async ({ page }) => {
+  const install = () =>
+    page.evaluate(async () => {
+      const href = (document.querySelector('link[rel="manifest"]') as HTMLLinkElement).href;
+      return {
+        manifest: await (await fetch(href)).json(),
+        icon: (document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement).href,
+        title: (document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement).content,
+      };
+    });
+  await page.goto('/#/front/catering');
+  let a = await install();
+  expect(a.manifest.start_url).toBe('./#/front');
+  expect(a.icon).toContain('icon-front-180.png');
+  expect(a.title).toBe('Front');
+  expect((await page.request.get(a.icon)).ok()).toBe(true);
+
+  await page.goto('/#/manager/catering');
+  a = await install();
+  expect(a.manifest.start_url).toBe('./#/manager');
+  expect(a.icon).toContain('icon-manager-180.png');
+  expect(a.title).toBe('Manager');
+  expect((await page.request.get(a.icon)).ok()).toBe(true);
+});
