@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { store } from '@shared/data';
+import { isFrontPage, store, swUrl } from '@shared/data';
 import { seedIfEmpty } from '@shared/seed/seed';
 import { ErrorBoundary, TimeZoneNote } from '@shared/ui';
 
@@ -36,7 +36,15 @@ else {
 // Production builds only (the dev server changes files constantly). Same file as the push reminders use.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./alerts-sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register(swUrl())
+      .then(async () => {
+        // Tell the worker which phone app this is, so tapping a catering alert opens this app
+        // (a front phone must never land in the manager app).
+        const app = isFrontPage() || location.hash.startsWith('#/front') ? 'front' : location.hash.startsWith('#/manager') ? 'manager' : null;
+        if (app) (await navigator.serviceWorker.ready).active?.postMessage({ app });
+      })
+      .catch(() => {});
   });
   // When a new version is out (after a merge), load it, but never in someone's way: not while a sheet,
   // the kitchen alarm or a text box is open, and not within 2 minutes of a tap.
@@ -50,7 +58,8 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     if (busy() || !navigator.onLine) return;
     try {
       const html = await (await fetch('./', { cache: 'no-cache' })).text();
-      const latest = html.match(/assets\/index-[\w-]+\.js/)?.[0];
+      // The page's own start-up file (named after the page entry; both pages share it).
+      const latest = html.match(/<script[^>]+src="[^"]*(assets\/[\w-]+\.js)"/)?.[1];
       const current = [...document.scripts].some((s) => latest && s.src.endsWith(latest));
       if (latest && !current && !busy()) location.reload();
     } catch {

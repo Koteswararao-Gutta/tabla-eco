@@ -11,6 +11,7 @@ export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
+export { swUrl, isFrontPage } from './sw';
 export type { CollectionFilter } from './filter';
 export type { SaveFailure } from './resync';
 export { recentSince, RECENT_DAYS } from './filter';

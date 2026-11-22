@@ -2,19 +2,26 @@
 // 1. Keeps the app opening when the internet is down: the page and its built files are cached.
 // 2. Shows the 1-hour catering reminders sent by the server, even when the app is closed.
 const CACHE = 'tabla-shell-v2';
+// The two pages: the manager app, TVs and kitchen at the top folder, and the front app's own page in front/.
+const PAGES = ['', 'front/'];
 
 // On install, keep a copy of the page and the built files it names, so the very next reload works offline.
 self.addEventListener('install', (e) => {
   self.skipWaiting();
   e.waitUntil(
-    fetch(self.registration.scope, { cache: 'no-cache' })
-      .then(async (res) => {
-        if (!res.ok || res.redirected) return;
-        const cache = await caches.open(CACHE);
-        await cache.put(self.registration.scope, res.clone());
-        await keepShellAssets(cache, res);
-      })
-      .catch(() => {}),
+    Promise.all(
+      PAGES.map((p) => {
+        const url = new URL(p, self.registration.scope).href;
+        return fetch(url, { cache: 'no-cache' })
+          .then(async (res) => {
+            if (!res.ok || res.redirected) return;
+            const cache = await caches.open(CACHE);
+            await cache.put(url, res.clone());
+            await keepShellAssets(cache, res);
+          })
+          .catch(() => {});
+      }),
+    ),
   );
 });
 self.addEventListener('activate', (e) =>
@@ -37,8 +44,10 @@ self.addEventListener('fetch', (event) => {
   const rel = url.pathname.slice(scope.pathname.length);
 
   // The page itself: always try the network first so a new version shows at once; fall back to the copy.
-  if (req.mode === 'navigate' || rel === '' || rel === 'index.html') {
-    event.respondWith(networkFirst(event, scope.href));
+  // Each page is kept under its own folder's address (the front app's page is front/).
+  const page = rel === 'front' || rel.startsWith('front/') ? 'front/' : '';
+  if (req.mode === 'navigate' || rel === page || rel === page + 'index.html') {
+    event.respondWith(networkFirst(event, new URL(page, scope).href));
     return;
   }
   // Built files have the version in their name, so a cached copy never goes stale.
@@ -47,7 +56,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Icons and the manifest: network first, cached copy when offline.
-  if (/^(icon-(\w+-)?\d+\.png|(front-)?manifest\.webmanifest)$/.test(rel)) event.respondWith(networkFirst(event));
+  if (/^(icon-(\w+-)?\d+\.png|(front\/)?manifest\.webmanifest)$/.test(rel)) event.respondWith(networkFirst(event));
 });
 
 async function networkFirst(event, shellKey) {
@@ -59,7 +68,7 @@ async function networkFirst(event, shellKey) {
     const res = shellKey ? await fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : await fetch(req);
     if (res.ok && !res.redirected) {
       const copy = res.clone();
-      // Every route is the same page (routes live after the #), so keep one copy under the app's address.
+      // Every route of a page lives after the #, so keep one copy per page under its folder's address.
       event.waitUntil(cache.put(shellKey || req, copy).catch(() => {}));
       if (shellKey) event.waitUntil(keepShellAssets(cache, res.clone()));
       return res;
@@ -152,11 +161,33 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Which phone app this is ('front' or 'manager'), as the page last said. Kept in the cache so it survives
+// the worker being stopped.
+const APP_KEY = new URL('tabla-app', self.registration.scope).href;
+self.addEventListener('message', (event) => {
+  const app = event.data && event.data.app;
+  if (app !== 'front' && app !== 'manager') return;
+  event.waitUntil(caches.open('tabla-app').then((c) => c.put(APP_KEY, new Response(app))).catch(() => {}));
+});
+
+// Alerts link to the manager app. On a front phone they open the front app's Catering instead: the front app
+// never shows manager things (Screens, Staff, ☰).
+async function linkFor(link) {
+  let app = 'manager';
+  try {
+    const hit = await (await caches.open('tabla-app')).match(APP_KEY);
+    if (hit) app = await hit.text();
+  } catch {
+    /* no record: the alert's own link */
+  }
+  return app === 'front' ? new URL('front/#/front/catering', self.registration.scope).href : link;
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = (event.notification.data && event.notification.data.link) || './#/manager/catering';
+  const given = (event.notification.data && event.notification.data.link) || './#/manager/catering';
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    Promise.all([linkFor(given), self.clients.matchAll({ type: 'window', includeUncontrolled: true })]).then(([link, wins]) => {
       for (const w of wins) {
         if ('focus' in w) {
           w.navigate(link).catch(() => {});

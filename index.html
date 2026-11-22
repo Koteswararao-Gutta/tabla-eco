@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
     <title>Tabla</title>
-    <!-- Add to Home Screen: opens full screen like an app (iPhone and Android). The front app and the manager
-         app are one page, so the install details (manifest, icon, name) are picked from the link: a phone
-         added from #/front opens the front app, everything else opens the manager app. iPhones keep an icon
-         by its address, so a new picture needs a new file name. -->
+    <!-- Add to Home Screen: this page installs the MANAGER app. The front app has its own page, front/index.html,
+         because iPhone Safari reads the manifest once, as the page loads, and ignores later changes: a script
+         that swapped the details by the # link gave a FRONT icon on an app called Manager that opened Manager.
+         iPhones keep an icon by its address, so a new picture needs a new file name. -->
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="./icon-manager-180.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png?v=2" />
@@ -16,15 +16,14 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Manager" />
     <script>
+      // Old front links (…/tabla-eco/#/front…) move to the front app's own page, so saving them to the
+      // Home Screen gives the Front app. Runs before anything else loads, and again when the # link changes.
       (function () {
-        function install() {
-          var front = location.hash.indexOf('#/front') === 0;
-          document.querySelector('link[rel="manifest"]').href = front ? './front-manifest.webmanifest' : './manifest.webmanifest';
-          document.querySelector('link[rel="apple-touch-icon"]').href = front ? './icon-front-180.png' : './icon-manager-180.png';
-          document.querySelector('meta[name="apple-mobile-web-app-title"]').content = front ? 'Front' : 'Manager';
+        function toFront() {
+          if (location.hash.indexOf('#/front') === 0) location.replace('./front/' + location.search + location.hash);
         }
-        install();
-        window.addEventListener('hashchange', install);
+        toFront();
+        window.addEventListener('hashchange', toFront);
       })();
     </script>
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />

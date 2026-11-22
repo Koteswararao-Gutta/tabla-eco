@@ -122,26 +122,46 @@ test('a reload that gets a server error still opens the app', async ({ browser }
 });
 
 test('Add to Home Screen: the front link installs the front app, the manager link the manager app', async ({ page }) => {
-  const install = () =>
-    page.evaluate(async () => {
-      const href = (document.querySelector('link[rel="manifest"]') as HTMLLinkElement).href;
-      return {
-        manifest: await (await fetch(href)).json(),
-        icon: (document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement).href,
-        title: (document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement).content,
-      };
-    });
-  await page.goto('/#/front/catering');
-  let a = await install();
-  expect(a.manifest.start_url).toBe('./#/front');
-  expect(a.icon).toContain('icon-front-180.png');
-  expect(a.title).toBe('Front');
-  expect((await page.request.get(a.icon)).ok()).toBe(true);
-
+  // iPhone Safari reads these once, as the page loads, so they must be written into each page, not set by a script.
+  const install = async (url: string) => {
+    const html = await (await page.request.get(url)).text();
+    const manifestHref = html.match(/<link rel="manifest" href="([^"]+)"/)![1];
+    const iconHref = html.match(/<link rel="apple-touch-icon"[^>]* href="([^"]+)"/)![1];
+    const manifestUrl = new URL(manifestHref, new URL(url, page.url() || 'http://x/')).href;
+    return {
+      manifestUrl,
+      manifest: await (await page.request.get(manifestUrl)).json(),
+      icon: new URL(iconHref, new URL(url, page.url())).href,
+      title: html.match(/<meta name="apple-mobile-web-app-title" content="([^"]+)"/)![1],
+    };
+  };
   await page.goto('/#/manager/catering');
-  a = await install();
-  expect(a.manifest.start_url).toBe('./#/manager');
-  expect(a.icon).toContain('icon-manager-180.png');
-  expect(a.title).toBe('Manager');
-  expect((await page.request.get(a.icon)).ok()).toBe(true);
+  const base = new URL('./', page.url()).href;
+  const front = await install(base + 'front/');
+  expect(front.manifestUrl).toBe(base + 'front/manifest.webmanifest');
+  expect(front.manifest.short_name).toBe('Front');
+  expect(new URL(front.manifest.start_url, front.manifestUrl).href).toBe(base + 'front/#/front');
+  expect(new URL(front.manifest.scope, front.manifestUrl).href).toBe(base + 'front/');
+  expect(front.icon).toBe(base + 'icon-front-180.png');
+  expect(front.title).toBe('Front');
+  for (const i of front.manifest.icons) expect((await page.request.get(new URL(i.src, front.manifestUrl).href)).ok()).toBe(true);
+  expect((await page.request.get(front.icon)).ok()).toBe(true);
+
+  const manager = await install(base);
+  expect(manager.manifest.short_name).toBe('Manager');
+  expect(new URL(manager.manifest.start_url, manager.manifestUrl).href).toBe(base + '#/manager');
+  expect(manager.icon).toBe(base + 'icon-manager-180.png');
+  expect(manager.title).toBe('Manager');
+  // Different ids (a # in an id is dropped), or phones treat both as one app.
+  expect(front.manifest.id).not.toBe(manager.manifest.id);
+  expect(front.manifest.id).not.toContain('#');
+  expect(manager.manifest.id).not.toContain('#');
+  expect((await page.request.get(manager.icon)).ok()).toBe(true);
+
+  // Old front links move to the front page; the front page always shows the front app.
+  await page.goto('/#/front/catering');
+  await expect(page).toHaveURL(base + 'front/#/front/catering');
+  await expect(page).toHaveTitle('Tabla Front');
+  await page.goto(base + 'front/');
+  await expect(page).toHaveURL(/\/front\/#\/front\/catering$/);
 });
