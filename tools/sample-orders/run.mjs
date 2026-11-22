@@ -91,7 +91,11 @@ async function main() {
     // Read only: the same queries the kitchen and catering list use, to see whether the samples come back.
     const { Filter } = await import('firebase-admin/firestore');
     const since = Date.now() - 60 * 24 * 3600_000;
-    const q = await db.collection('orders').where(Filter.or(Filter.where('status', '==', 'open'), Filter.where('dueAt', '>=', since))).get();
+    let q;
+    for (let i = 0; ; i++) {
+      try { q = await db.collection('orders').where(Filter.or(Filter.where('status', '==', 'open'), Filter.where('dueAt', '>=', since))).get(); break; }
+      catch (e) { if (e.code !== 9 || i >= 40) throw e; console.log('index still building, waiting 30 s'); await new Promise((r) => setTimeout(r, 30_000)); }
+    }
     console.log(`openOrRecent query: ${q.size} orders`);
     const day = await db.collection('orders').where('dueAt', '>=', phoenix('2026-11-22', '00:00')).where('dueAt', '<', phoenix('2026-11-23', '00:00')).get();
     for (const d of day.docs) console.log(`Sun 11-22: ${d.id} | ${d.get('customerName')} | ${d.get('status')} | deleted=${d.get('deletedAt') ?? null} | inOpenOrRecent=${q.docs.some((x) => x.id === d.id)}`);
@@ -100,6 +104,10 @@ async function main() {
       const o = await db.doc(`orders/${id}`).get();
       console.log(id, JSON.stringify(o.data()));
       console.log('amount', JSON.stringify((await db.doc(`orderAmounts/${id}`).get()).data()));
+    }
+    for (let i = 0; i < 40; i++) {
+      try { const e = await db.collection('estimates').where(Filter.or(Filter.where('status', '==', 'open'), Filter.where('updatedAt', '>=', since))).get(); console.log(`estimates openOrRecentlyUpdated query works: ${e.size}`); break; }
+      catch (err) { if (err.code !== 9) throw err; console.log('estimates index still building, waiting 30 s'); await new Promise((r) => setTimeout(r, 30_000)); }
     }
   } else throw new Error(`unknown mode ${mode}`);
 }
