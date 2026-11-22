@@ -120,7 +120,6 @@ export function TagsSheet({ order, onClose }: { order: Order; now?: number; onCl
                 </button>
               </div>
               {tooLong(t.name) && <span className="nt-row-warn">Too long for the tag</span>}
-              {t.sub && <span className="nt-row-sub">{t.sub}</span>}
               <Segmented<Diet>
                 label={`Veg or non-veg: ${t.name}`}
                 value={t.diet ?? 'veg'}
@@ -250,7 +249,6 @@ export function Tag({ tag, brand }: { tag: NameTag; brand: string }) {
       <div className="nt-mid">
         <div className={'nt-name ' + nameSize(tag.name)}>{tag.name}</div>
         <Divider />
-        {tag.sub && <div className="nt-sub">{tag.sub}</div>}
       </div>
       {diet && (
         <div className={'nt-diet ' + diet}>

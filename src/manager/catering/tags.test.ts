@@ -49,16 +49,16 @@ describe('tagsForOrder', () => {
     expect(tags).toEqual([
       { name: 'Rose Milk', sub: '', diet: 'veg' },
       { name: 'Apollo Special', sub: '', diet: 'nonveg' },
-      { name: 'Andhra Chicken Curry', sub: 'Bone-in', diet: 'nonveg' },
+      { name: 'Andhra Chicken Curry', sub: '', diet: 'nonveg' },
     ]);
   });
-  it('takes the name and note from the saved lines, never from the text', () => {
+  it('takes the name from the saved lines, never the note,, never from the text', () => {
     const lines = [
       { dishId: null, name: 'Goat Curry', qty: 1.5, unit: 'Half tray', note: 'bone-in', text: 'Goat curry 1 1/2 HT (bone-in)', check: true },
       { dishId: null, name: 'Chicken Biryani', qty: 40, unit: 'Servings', note: '' },
     ];
     expect(tagsForOrder({ items: 'Chicken Biryani for 40 and more text', lines }, null)).toEqual([
-      { name: 'Goat Curry', sub: 'Bone-in', diet: 'nonveg' },
+      { name: 'Goat Curry', sub: '', diet: 'nonveg' },
       { name: 'Chicken Biryani', sub: '', diet: 'nonveg' },
     ]);
   });
@@ -123,7 +123,7 @@ describe('tags show just the dish', () => {
     expect(tags.map((t) => [t.name, t.sub])).toEqual([
       ['Chicken 65', ''],
       ['Veg Biryani', ''],
-      ['Andhra Chicken Curry', 'Bone-in'],
+      ['Andhra Chicken Curry', ''],
       ['Mirchi Bajji', ''],
     ]);
   });
@@ -137,18 +137,18 @@ describe('review fixes', () => {
     expect(tagsForOrder({ items }).map((t) => t.name)).toEqual(['Chicken Biryani', 'Veg Biryani', 'Gulab Jamun', '7 Up', 'Chicken 65', 'Murgh ka Salan']);
   });
 
-  it('keeps the line note under a menu dish, but not a kitchen note', () => {
+  it('prints no line note under a menu dish', () => {
     const lines = [
       { dishId: 'a', name: 'Andhra Chicken Curry', qty: 2, unit: 'Full tray', note: 'bone-in' },
       { dishId: null, name: 'Veg Biryani', qty: 1, unit: 'Full tray', note: 'extra spicy' },
     ];
     expect(tagsForOrder({ items: linesText(lines), lines }, menu).map((t) => [t.name, t.sub])).toEqual([
-      ['Andhra Chicken Curry', 'Bone-in'],
+      ['Andhra Chicken Curry', ''],
       ['Veg Biryani', ''],
     ]);
   });
 
-  it('keeps notes from reading the paper order off the tag, but keeps a short word like Dry', () => {
+  it('prints just the dish name: no scan notes, no Dry', () => {
     const lines = [
       { dishId: null, name: 'Chilli Fish', qty: 1, unit: 'Half tray', note: 'dry' },
       { dishId: null, name: 'Baby Corn Manchurian', qty: 1, unit: 'Half tray', note: 'veg crossed out, written as baby corn above it' },
@@ -156,14 +156,14 @@ describe('review fixes', () => {
       { dishId: null, name: 'Goat Curry (looks like goat?)', qty: 1, unit: 'Half tray', note: '' },
     ];
     expect(tagsForOrder({ items: linesText(lines), lines }).map((t) => [t.name, t.sub])).toEqual([
-      ['Chilli Fish', 'Dry'],
+      ['Chilli Fish', ''],
       ['Baby Corn Manchurian', ''],
       ['Veg Chowmein', ''],
       ['Goat Curry', ''],
     ]);
   });
 
-  it('never puts a number under the name', () => {
+  it('never puts anything under the name', () => {
     expect(tagsForOrder({ items: 'Chicken Biryani (50 people)\nGoat Curry (cut 2 inch)\nChicken 65' }).map((t) => [t.name, t.sub])).toEqual([
       ['Chicken Biryani', ''],
       ['Goat Curry', ''],
