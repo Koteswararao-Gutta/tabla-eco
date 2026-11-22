@@ -186,7 +186,7 @@ export class FirebaseStore implements DataStore {
       return () => stops.forEach((stop) => stop());
     }
     return this.later(() => {
-      // The same rules as matchesFilter (filter.ts). Each part uses Firestore's automatic one-field index.
+      // The same rules as matchesFilter (filter.ts). The or() queries need the composite indexes in firestore.indexes.json.
       const all = collection(this.db, col);
       const since = recentSince(this.now());
       const source =

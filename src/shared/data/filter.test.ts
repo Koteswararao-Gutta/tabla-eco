@@ -76,3 +76,17 @@ describe('filterKey', () => {
     expect(filterKey('openOrRecent')).toBe('openOrRecent');
   });
 });
+
+describe('composite indexes for the or() queries', () => {
+  // Firestore refuses status == 'open' OR date >= since without a composite index; the deploy creates them from this file.
+  it('firestore.indexes.json has status + dueAt (orders) and status + updatedAt (estimates)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const file = JSON.parse(readFileSync(new URL('../../../firestore.indexes.json', import.meta.url), 'utf8')) as {
+      indexes: { collectionGroup: string; queryScope: string; fields: { fieldPath: string }[] }[];
+    };
+    const has = (group: string, field: string) =>
+      file.indexes.some((ix) => ix.collectionGroup === group && ix.queryScope === 'COLLECTION' && ix.fields.map((f) => f.fieldPath).join() === `status,${field}`);
+    expect(has('orders', 'dueAt')).toBe(true);
+    expect(has('estimates', 'updatedAt')).toBe(true);
+  });
+});
