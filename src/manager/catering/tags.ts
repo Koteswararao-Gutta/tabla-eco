@@ -38,9 +38,10 @@ const KITCHEN_NOTE = /\b(?:spicy|spice|mild|medium|hot|less|more|extra|no|withou
 // A note from reading a paper order ("Veg crossed out, written as Baby Corn above it", "Not on menu as written")
 // is for the staff checking the scan, not the guest.
 const SCAN_NOTE = /\b(?:menu|written|writing|wrote|crossed|cross|scratched|unclear|illegible|unreadable|readable|maybe|probably|likely|guess|check|confirm|verify|ask|above|below|margin|paper|handwriting|scan|scanned|typo|spelled|spelling|not|unsure|unknown)\b|\?/i;
-/** A tag's small line holds only a short describing word or two ("Dry", "Bone-in", "Boneless"), never a sentence or a note. */
+/** A tag's small line holds only a short describing word or two ("Dry", "Bone-in", "Boneless"), never a sentence, a note
+ *  or a number ("50 people"). */
 const tagNote = (t: string) =>
-  !!t && t.split(/\s+/).length <= 3 && t.length <= 24 && !PORTION.test(t) && !MARKER.test(t) && !KITCHEN_NOTE.test(t) && !SCAN_NOTE.test(t);
+  !!t && !/\d/.test(t) && t.split(/\s+/).length <= 3 && t.length <= 24 && !PORTION.test(t) && !MARKER.test(t) && !KITCHEN_NOTE.test(t) && !SCAN_NOTE.test(t);
 
 /** A dish name for a tag, and its small line: "Onion Samosa (6 pcs) (V)" → "Onion Samosa"; "Andhra Chicken Curry (Bone-in)" →
  *  "Andhra Chicken Curry" with "Bone-in" under it. `mark` is the veg or non-veg a menu marker gave, if any. */

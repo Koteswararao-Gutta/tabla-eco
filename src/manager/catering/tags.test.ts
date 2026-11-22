@@ -163,6 +163,14 @@ describe('review fixes', () => {
     ]);
   });
 
+  it('never puts a number under the name', () => {
+    expect(tagsForOrder({ items: 'Chicken Biryani (50 people)\nGoat Curry (cut 2 inch)\nChicken 65' }).map((t) => [t.name, t.sub])).toEqual([
+      ['Chicken Biryani', ''],
+      ['Goat Curry', ''],
+      ['Chicken 65', ''],
+    ]);
+  });
+
   it('makes one tag for Samosa and Samosas', () => {
     expect(tagsForOrder({ items: 'Samosa 40 pcs\n2 dozen samosas' }).map((t) => t.name)).toEqual(['Samosa']);
   });
