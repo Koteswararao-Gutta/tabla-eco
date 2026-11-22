@@ -135,3 +135,67 @@ export function singleFlight<T>(job: () => Promise<T>): () => Promise<T> | null 
     return p;
   };
 }
+
+/** How long a save waits for the server before it counts as done. Firestore has already put the change in
+ *  this device's copy (screens show it at once) and sends it when the internet is back. */
+export const SAVE_WAIT_MS = 2500;
+
+/** A save the server refused after the screen had already counted it as done. */
+export interface SaveFailure {
+  /** e.g. "updateDoc orders/abc" */
+  what: string;
+  message: string;
+}
+
+const saveFailureListeners = new Set<(f: SaveFailure) => void>();
+
+/** Calls `listener` for every late refusal (see `queued`). Returns a function that stops listening. */
+export function onSaveFailure(listener: (f: SaveFailure) => void): () => void {
+  saveFailureListeners.add(listener);
+  return () => void saveFailureListeners.delete(listener);
+}
+
+/** Tells every listener (the red "Not saved" banner) that a save was refused. */
+export function reportSaveFailure(what: string, e: unknown): void {
+  const f: SaveFailure = { what, message: String((e as { message?: unknown })?.message ?? e) };
+  for (const l of [...saveFailureListeners]) {
+    try {
+      l(f);
+    } catch (err) {
+      console.error('save failure listener', err);
+    }
+  }
+}
+
+/**
+ * A save as the screens see it: done once the server confirms it, or once it has waited SAVE_WAIT_MS (or at once
+ * when the device knows it is offline), because Firestore keeps the change and sends it later. So "Saving…" never
+ * hangs without internet. A refusal (e.g. the rules) that comes back in that time still fails the save as before;
+ * one that comes back later is written to the console and reported with `reportSaveFailure`, so the app shows
+ * a red "Not saved" banner.
+ */
+export function queued(write: Promise<void>, what: string, waitMs = SAVE_WAIT_MS, offline = isOffline()): Promise<void> {
+  let settled = false;
+  const sent = write.then(
+    () => void (settled = true),
+    (e) => {
+      if (settled) {
+        console.error(`${what}: the server refused this save`, e);
+        reportSaveFailure(what, e);
+      }
+      settled = true;
+      throw e;
+    },
+  );
+  sent.catch(() => {}); // a late refusal is reported above, never an unhandled rejection
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      settled = true;
+      resolve();
+    }, offline ? 0 : waitMs);
+  });
+  return Promise.race([sent, waited]).finally(() => clearTimeout(timer));
+}
+
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;

@@ -7,9 +7,14 @@ export const MAX_AHEAD_MS = 29 * 24 * 60 * 60_000;
 export const TIME_ZONE = 'America/Phoenix';
 export const APP_LINK = 'https://koteswararao-gutta.github.io/tabla-eco/#/manager/catering';
 
+/** True for an order that should still ring: open (not completed or cancelled) and not deleted. */
+export function isLive(order) {
+  return !!order && order.status === 'open' && !(typeof order.deletedAt === 'number');
+}
+
 /** When to wake up for this order, or null if it needs no reminder. `id` makes re-saves of the same order not ring twice. */
 export function planReminder(orderId, order, now) {
-  if (!order || order.status !== 'open' || typeof order.dueAt !== 'number') return null;
+  if (!isLive(order) || typeof order.dueAt !== 'number') return null;
   if (order.dueAt <= now) return null;
   const at = Math.min(Math.max(now, order.dueAt - REMIND_MS), now + MAX_AHEAD_MS);
   return { at, dueAt: order.dueAt, id: `${orderId}-${order.dueAt}-${Math.round(at / 60_000)}`.replace(/[^A-Za-z0-9_-]/g, '_') };
@@ -21,14 +26,16 @@ export function planReminder(orderId, order, now) {
  * the kitchen's "Got it") don't set a new alarm.
  */
 export function shouldSchedule(before, after) {
-  if (!after || after.status !== 'open') return false;
-  if (before && before.status === after.status && before.dueAt === after.dueAt) return false;
+  if (!isLive(after)) return false;
+  // Same time, still open and not deleted before: the alarm already set still holds. (Undo delete sets it again.)
+  if (isLive(before) && before.dueAt === after.dueAt) return false;
   return true;
 }
 
-/** What to do when the alarm rings: 'send', 'later' (still more than an hour away: plan again) or 'skip'. */
+/** What to do when the alarm rings: 'send', 'later' (still more than an hour away: plan again) or 'skip'.
+ *  Checked again when it rings, so a cancelled or deleted order never rings. */
 export function onRing(order, task, now) {
-  if (!order || order.status !== 'open' || order.dueAt !== task.dueAt) return 'skip'; // completed, deleted or moved
+  if (!isLive(order) || order.dueAt !== task.dueAt) return 'skip'; // completed, cancelled, deleted or moved
   if (order.remindedFor === task.dueAt) return 'skip'; // already sent for this time (a retry, or moved away and back)
   if (order.dueAt <= now) return 'skip';
   if (order.dueAt - now > REMIND_MS + 5 * 60_000) return 'later';
@@ -68,4 +75,12 @@ export function chunks(list, size = FCM_BATCH) {
   const out = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
   return out;
+}
+
+/**
+ * Whether a reminder send should be tried again (Cloud Tasks retries when the task throws): nobody got it,
+ * and at least one phone failed for a reason that may pass (not a phone that is gone for good).
+ */
+export function sendShouldRetry({ sent, failed, removed }) {
+  return sent === 0 && failed - removed > 0;
 }

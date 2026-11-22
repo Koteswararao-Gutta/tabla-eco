@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
 import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, telHref, validate, whatsappHref, NAME_MAX } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -47,9 +47,10 @@ describe('grouping', () => {
     expect(g.later).toEqual([d]);
     expect(g.overdue).toEqual([old]);
   });
-  it('history is completed orders, newest first', () => {
+  it('history is completed and cancelled orders, newest first', () => {
     const done2 = order(at(10, 9), { status: 'completed' });
-    expect(history([done2, ...all])).toEqual([done, done2]);
+    const off = order(at(12, 9), { status: 'cancelled', cancelledAt: at(11, 9) });
+    expect(history([done2, off, ...all])).toEqual([done, off, done2]);
   });
   it('groups every order by day, newest first', () => {
     const g = groupByDay(all, NOW);
@@ -250,6 +251,18 @@ describe('shareText / whatsappHref', () => {
     expect(text).toBe('*Catering order*\nAnika Wedding\nFri, Nov 20, 5:30 PM\nPickup\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150');
   });
 
+  it('says 1 person, and leaves out marks WhatsApp would format', () => {
+    const text = shareText({ ...base, customerName: 'Priya *VIP* _Sharma_', type: 'pickup', people: 1, notes: 'Line 1 ~strike~' });
+    expect(text).toBe('*Catering order*\nPriya VIP Sharma\nFri, Nov 20, 5:30 PM\nPickup\n1 person\n\n*Items*\n• Chicken biryani, 4 trays\n• Garlic naan, 150\n\n*Notes:* Line 1 strike');
+  });
+
+  it('lists the items from the saved lines when the order has them', () => {
+    const lines = [{ dishId: 'b1', name: 'Chicken Dum Biryani', qty: 1.5, unit: 'Full tray', note: 'mild' }];
+    const text = shareText({ ...base, items: 'stale text', lines, type: 'pickup', people: null });
+    expect(text).toContain('*Items*\n• Chicken Dum Biryani, 1-1/2 Full trays (mild)');
+    expect(text).not.toContain('stale');
+  });
+
   it('makes a wa.me link with the message encoded', () => {
     expect(whatsappHref('a & b\n*c*')).toBe('https://wa.me/?text=a%20%26%20b%0A*c*');
   });
@@ -325,5 +338,28 @@ describe('order amount (manager only)', () => {
     expect(shareText(withExtra)).not.toMatch(/\$|200/);
     expect(describeChanges(o, withExtra)).toEqual([]);
     expect(Object.keys(orderFields(formFromOrder(withExtra)))).not.toContain('amount');
+  });
+});
+
+describe('1½ trays in the share text and a scan', () => {
+  it('shares old typed "11/2" lines as "1-1/2"', () => {
+    const o = order(at(20, 12), { items: 'Chicken biryani 11/2 trays\nNaan, 1-1/2 Full trays' });
+    expect(shareText(o)).toContain('• Chicken biryani 1-1/2 trays\n• Naan, 1-1/2 Full trays');
+  });
+
+  it('reads a scanned "1 1/2" as 1.5, not 112', () => {
+    const scan = { lines: [{ dish: 'Chicken biryani', qty: '1 1/2', unit: 'full tray', note: '', unsure: false }] } as unknown as ScannedOrder;
+    expect(formFromScan(scan, emptyForm(at(20, 12))).form.lines[0].qty).toBe('1.5');
+  });
+});
+
+describe('showsCountdown', () => {
+  it('shows only in the last hour and after the time', () => {
+    const NOW = new Date(2026, 10, 20, 12, 0).getTime();
+    expect(showsCountdown(NOW + 61 * 60_000, NOW)).toBe(false);
+    expect(showsCountdown(NOW + 3 * 86_400_000, NOW)).toBe(false);
+    expect(showsCountdown(NOW + 60 * 60_000, NOW)).toBe(true);
+    expect(showsCountdown(NOW + 5 * 60_000, NOW)).toBe(true);
+    expect(showsCountdown(NOW - 25 * 60_000, NOW)).toBe(true);
   });
 });

@@ -1,11 +1,12 @@
 // "Print tags" for one catering order: a name tag per dish, printed on plain letter paper
 // (10 per sheet, cut along the marks). Used by the manager Catering tab and the kitchen tablet.
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LOGO_URL as logo, Segmented, Sheet } from '@shared/ui';
 import { useDoc, useSingleton, type CateringOrder } from '@shared/data';
 import { dayLabel, timeLabel } from './orders';
-import { DIET_LABEL, nameSize, sheets, tagsForOrder, TAG_SITE, type Diet, type NameTag } from './tags';
+import { DIET_LABEL, nameSize, sheets, tagsForOrder, TAG_SITE, tooLong, type Diet, type NameTag } from './tags';
+import { printsAsPdf, tagsPdf } from './tagsPdf';
 import './tags.css';
 
 declare global {
@@ -27,6 +28,12 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
   const [tags, setTags] = useState<NameTag[] | null>(null);
   const [waited, setWaited] = useState(false);
   const [printing, setPrinting] = useState(false);
+  // Phones print through a PDF: made on the first tap, then handed to the phone's Share or saved.
+  const [asPdf] = useState(printsAsPdf);
+  const [pdf, setPdf] = useState<{ file: File; url: string } | null>(null);
+  const [pdfError, setPdfError] = useState(false);
+  const pagesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => () => void (pdf && URL.revokeObjectURL(pdf.url)), [pdf]);
 
   useEffect(() => {
     const t = setTimeout(() => setWaited(true), MENU_WAIT_MS);
@@ -38,6 +45,7 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
 
   // While this sheet is open, printing shows only the tag sheets.
   useEffect(() => {
+    loadTagAssets();
     document.body.classList.add('nt-printing');
     return () => document.body.classList.remove('nt-printing');
   }, []);
@@ -48,15 +56,36 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
   const when = `${dayLabel(order.dueAt, now) === 'Today' ? 'Today' : shortDate(order.dueAt)} · ${timeLabel(order.dueAt)} ${order.type}`;
   const pageNote = `Catering · ${order.customerName} · ${when}`;
 
-  const change = (i: number, patch: Partial<NameTag>) => setTags(list.map((t, j) => (j === i ? { ...t, ...patch } : t)));
-  const remove = (i: number) => setTags(list.filter((_, j) => j !== i));
-  const add = () => setTags([...list, { name: '', sub: '', diet: 'veg' }]);
+  // Any change to the tags makes a new PDF next time.
+  const edit = (next: NameTag[]) => {
+    setTags(next);
+    setPdf(null);
+  };
+  const change = (i: number, patch: Partial<NameTag>) => edit(list.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  const remove = (i: number) => edit(list.filter((_, j) => j !== i));
+  const add = () => edit([...list, { name: '', sub: '', diet: 'veg' }]);
+  const job = `Tags ${order.customerName} ${shortDate(order.dueAt)}`;
+
+  const makePdf = async () => {
+    setPrinting(true);
+    setPdfError(false);
+    try {
+      await readyToPrint();
+      if (!pagesRef.current) return;
+      const file = await tagsPdf(pagesRef.current, `${job.replace(/[\\/:*?"<>|]+/g, ' ').trim()}.pdf`);
+      setPdf({ file, url: URL.createObjectURL(file) });
+      await sharePdf(file); // straight to the phone's Share sheet when the phone allows it
+    } catch {
+      setPdfError(true);
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const print = async () => {
     setPrinting(true);
     try {
       await readyToPrint();
-      const job = `Tags ${order.customerName} ${shortDate(order.dueAt)}`;
       if (window.TablaPrint?.print) window.TablaPrint.print(job);
       else {
         const title = document.title;
@@ -93,6 +122,7 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
                   ✕
                 </button>
               </div>
+              {tooLong(t.name) && <span className="nt-row-warn">Too long for the tag</span>}
               {t.sub && <span className="nt-row-sub">{t.sub}</span>}
               <Segmented<Diet>
                 label={`Veg or non-veg: ${t.name}`}
@@ -111,13 +141,34 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
       <button type="button" className="t-btn block" onClick={add}>
         + Add a tag
       </button>
-      <button type="button" className="t-btn primary block" disabled={!ready.length || printing} onClick={print}>
-        {ready.length ? `Print ${ready.length} ${ready.length === 1 ? 'tag' : 'tags'} (${pages.length} ${pages.length === 1 ? 'sheet' : 'sheets'})` : 'Print tags'}
-      </button>
+      {asPdf && pdf ? (
+        <>
+          <p className="nt-pdf-note" role="status">
+            The PDF is ready. Share it to print (choose Print or your printer's app), or save it and print from Files.
+          </p>
+          {canShare(pdf.file) && (
+            <button type="button" className="t-btn primary block" onClick={() => void sharePdf(pdf.file)}>
+              Share PDF to print
+            </button>
+          )}
+          <a className={'t-btn block' + (canShare(pdf.file) ? '' : ' primary')} href={pdf.url} download={pdf.file.name}>
+            Save PDF
+          </a>
+        </>
+      ) : (
+        <button type="button" className="t-btn primary block" disabled={!ready.length || printing} onClick={asPdf ? makePdf : print}>
+          {printing && asPdf
+            ? 'Making the PDF…'
+            : ready.length
+              ? `Print ${ready.length} ${ready.length === 1 ? 'tag' : 'tags'} (${pages.length} ${pages.length === 1 ? 'sheet' : 'sheets'})`
+              : 'Print tags'}
+        </button>
+      )}
+      {pdfError && <p className="nt-row-warn" role="alert">Couldn't make the PDF. Try again, or print from a computer.</p>}
       <button type="button" className="t-btn ghost block" onClick={onClose}>
         Close
       </button>
-      {createPortal(<TagPages pages={pages} note={pageNote} brand={brand} />, document.body)}
+      {createPortal(<TagPages ref={pagesRef} pages={pages} note={pageNote} brand={brand} />, document.body)}
     </Sheet>
   );
 }
@@ -127,23 +178,53 @@ function shortDate(ms: number): string {
   return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '');
 }
 
-/** Fonts and the logo only load once used, and the print sheets are hidden on screen: load them first. */
+/** The tag fonts and logo, loaded once per app run. The print sheets are hidden on screen, so nothing would
+ *  load them until printing: start as soon as the tags sheet opens, so Print has nothing left to wait for.
+ *  (Safari never finishes decoding an image that isn't shown, so the logo is loaded on its own here.) */
+let assets: Promise<unknown> | null = null;
+function loadTagAssets(): Promise<unknown> {
+  if (!assets) {
+    const fonts = document.fonts;
+    const logoImg = new Image();
+    logoImg.src = logo;
+    assets = Promise.all([
+      fonts?.load('700 20px "Tabla Playfair"'),
+      fonts?.load('700 10px "Tabla Montserrat"'),
+      fonts?.load('600 10px "Tabla Montserrat"'),
+      logoImg.decode?.() ?? new Promise((r) => (logoImg.onload = logoImg.onerror = r)),
+    ]).catch(() => {});
+  }
+  return assets;
+}
+
+/** Waits for the fonts and logo, but never long (offline with nothing cached): prints with what there is. */
 async function readyToPrint(): Promise<void> {
-  const fonts = document.fonts;
-  const wait = Promise.all([
-    fonts?.load('700 20px "Tabla Playfair"'),
-    fonts?.load('700 10px "Tabla Montserrat"'),
-    fonts?.load('600 10px "Tabla Montserrat"'),
-    ...Array.from(document.querySelectorAll<HTMLImageElement>('.nt-print img')).map((img) => img.decode?.().catch(() => {})),
-  ]).catch(() => {});
-  // Never hold the print up for long (offline with nothing cached): print with what there is.
-  await Promise.race([wait, new Promise((r) => setTimeout(r, 3000))]);
+  await Promise.race([loadTagAssets(), new Promise((r) => setTimeout(r, 800))]);
+}
+
+/** The phone's Share sheet with the PDF (Print, WhatsApp, Files). Quietly does nothing when the phone has none,
+ *  when the person closes it, or when the phone wants a fresh tap first: the Share and Save buttons stay. */
+async function sharePdf(file: File): Promise<void> {
+  if (!canShare(file)) return;
+  try {
+    await navigator.share({ files: [file], title: file.name });
+  } catch {
+    /* closed, or needs a tap on Share */
+  }
+}
+
+function canShare(file: File): boolean {
+  try {
+    return !!navigator.canShare?.({ files: [file] });
+  } catch {
+    return false;
+  }
 }
 
 /** The printed sheets: hidden on screen, the only thing shown when printing. */
-export function TagPages({ pages, note, brand }: { pages: NameTag[][]; note: string; brand: string }) {
+export const TagPages = forwardRef<HTMLDivElement, { pages: NameTag[][]; note: string; brand: string }>(function TagPages({ pages, note, brand }, ref) {
   return (
-    <div className="nt-print" aria-hidden="true">
+    <div className="nt-print" aria-hidden="true" ref={ref}>
       {pages.map((tags, p) => (
         <section className="nt-page" key={p}>
           <CropMarks />
@@ -164,7 +245,7 @@ export function TagPages({ pages, note, brand }: { pages: NameTag[][]; note: str
       ))}
     </div>
   );
-}
+});
 
 export function Tag({ tag, brand }: { tag: NameTag; brand: string }) {
   const diet = tag.diet;

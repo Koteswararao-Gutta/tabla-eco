@@ -53,3 +53,20 @@ describe('weekStats', () => {
     expect(weekStats(orders, amounts, at(2, 9))).toEqual({ rows: [], total: 0, paid: 0, unpaid: 0, noAmount: 0 });
   });
 });
+
+describe('weekStats with deposits', () => {
+  it('shows an order paid by deposits in full as Paid', () => {
+    const w = weekStats([order('a', at(18, 12))], [amt('a', { amount: 200, deposits: [{ amount: 200, method: 'cash', takenBy: 'X', at: 1 }] })], at(18, 9));
+    expect(w.rows[0].status).toBe('paid');
+    expect([w.paid, w.unpaid]).toEqual([200, 0]);
+  });
+});
+
+describe('weekStats leaves out cancelled and deleted orders', () => {
+  it('counts neither in the rows nor the totals', () => {
+    const o = [order('a', at(18, 12)), { ...order('off', at(18, 13)), status: 'cancelled' } as WithId<CateringOrder>, { ...order('gone', at(18, 14)), deletedAt: 1 } as WithId<CateringOrder>];
+    const w = weekStats(o, [amt('a', { amount: 100 }), amt('off', { amount: 200, deposits: [{ amount: 50, method: 'cash', takenBy: 'X', at: 0 }] }), amt('gone', { amount: 300 })], at(18, 9));
+    expect(w.rows.map((r) => r.order.id)).toEqual(['a']);
+    expect([w.total, w.paid, w.unpaid]).toEqual([100, 0, 100]);
+  });
+});

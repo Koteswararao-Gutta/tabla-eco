@@ -2,6 +2,7 @@ package com.tabla.tv;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.media.AudioManager;
 import android.content.Intent;
@@ -52,6 +53,9 @@ import java.util.regex.Pattern;
  */
 public class MainActivity extends Activity {
     static final String SITE = "https://koteswararao-gutta.github.io/tabla-eco/#/";
+    /** Pages on this host and path stay inside the app; every other link opens outside (see openOutside). */
+    static final String SITE_HOST = "koteswararao-gutta.github.io";
+    static final String SITE_PATH = "/tabla-eco";
     static final String[][] SCREENS = {
         {"TV 1 (front, left)", "tv/1"},
         {"TV 2 (front, right)", "tv/2"},
@@ -59,6 +63,7 @@ public class MainActivity extends Activity {
         {"TV 4 (mirrors TV 2)", "tv/4"},
         {"TV 5 (music)", "tv/5"},
         {"Kitchen tablet", "kitchen"},
+        {"Front app (front staff phone)", "front"},
         {"Manager app", "manager"},
     };
     static final long RETRY_MS = 15_000;
@@ -272,6 +277,9 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         if (Build.VERSION.SDK_INT >= 21) CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
+        // Links with target="_blank" or window.open() stay in this one view (no new windows), so they too
+        // pass through shouldOverrideUrlLoading below.
+        s.setSupportMultipleWindows(false);
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new PrintBridge(), "TablaPrint");
         web.addJavascriptInterface(new AlarmBridge(), "TablaAlarm");
@@ -279,6 +287,19 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (!loadFailed) lastLoadAt = System.currentTimeMillis();
+            }
+
+            // Phone, WhatsApp, maps and other sites open in their own app; only the Tabla site stays in here.
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return openOutside(url); // Android 6 and older
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                if (!req.isForMainFrame()) return false; // e.g. inside the YouTube player on TV 5
+                return openOutside(req.getUrl().toString());
             }
 
             @Override
@@ -300,6 +321,41 @@ public class MainActivity extends Activity {
             toast = new ToastReader(this, report -> deliverToast(report, 1));
             toast.start();
         }
+    }
+
+    /**
+     * A link that leaves the Tabla site (tel:, whatsapp:, intent:, mailto:, geo:, wa.me, Google Maps, any other
+     * site): hand it to Android, which opens the phone app, WhatsApp, Maps or the browser. Returns true when it
+     * was handed over (the web view stays on Tabla). Nothing installed for it: nothing happens.
+     */
+    private boolean openOutside(String url) {
+        if (url == null) return false;
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+        if (scheme.equals("about") || scheme.equals("data") || scheme.equals("blob") || scheme.equals("javascript")) return false;
+        if (scheme.equals("https") && SITE_HOST.equalsIgnoreCase(uri.getHost())
+            && uri.getPath() != null && uri.getPath().startsWith(SITE_PATH)) return false; // the Tabla site itself
+        try {
+            Intent intent;
+            if (scheme.equals("intent")) {
+                intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                intent.addCategory(Intent.CATEGORY_BROWSABLE);
+                intent.setComponent(null); // only apps that open links, never a hidden part of some app
+                intent.setSelector(null);
+            } else {
+                intent = new Intent(Intent.ACTION_VIEW, uri);
+            }
+            try {
+                startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                // e.g. WhatsApp not installed: an intent: link may name a web page to use instead.
+                String fallback = intent.getStringExtra("browser_fallback_url");
+                if (fallback != null && fallback.startsWith("https://")) startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fallback)));
+            }
+        } catch (Exception ignored) {
+            // Nothing on this device opens it (or a bad link): stay on the Tabla page.
+        }
+        return true;
     }
 
     /** window.TablaPrint.print(name): opens Android's print screen for the page as it prints (letter paper). */

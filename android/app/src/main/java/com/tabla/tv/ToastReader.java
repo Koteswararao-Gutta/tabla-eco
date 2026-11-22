@@ -23,6 +23,8 @@ class ToastReader {
         "https://order.toasttab.com/online/tabla-indian-restaurant-phoenix-az-2501-w-happy-valley-rd-suite-50-1240";
     static final long FIRST_MS = 2 * 60_000;
     static final long EVERY_MS = 60 * 60_000;
+    /** After a failed read, try again sooner (a slow network or a busy Toast page usually passes). */
+    static final long RETRY_MS = 10 * 60_000;
     static final long GIVE_UP_MS = 90_000;
     static final long POLL_MS = 3_000;
 
@@ -64,8 +66,8 @@ class ToastReader {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
+            handler.postDelayed(this, EVERY_MS); // replaced by send() with the right wait once this read ends
             read();
-            handler.postDelayed(this, EVERY_MS);
         }
     };
 
@@ -80,6 +82,13 @@ class ToastReader {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setBlockNetworkImage(true); // the menu data is in the page itself; no need for the photos
+        // Look like the tablet's normal Chrome: some sites turn away Android's in-app web view ("; wv").
+        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll(" Version/[\\d.]+", ""));
+        // A view that is never shown has no size, and some pages never finish drawing without one.
+        view.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(1280, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(800, android.view.View.MeasureSpec.EXACTLY));
+        view.layout(0, 0, 1280, 800);
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onReceivedHttpError(WebView v, WebResourceRequest req, WebResourceResponse res) {
@@ -104,7 +113,7 @@ class ToastReader {
             view.evaluateJavascript(EXTRACT, result -> {
                 if (done) return;
                 if (result != null && !"null".equals(result)) {
-                    send(result); // already a JavaScript string literal
+                    send(result, true); // already a JavaScript string literal
                 } else if (System.currentTimeMillis() - startedAt < GIVE_UP_MS) {
                     handler.postDelayed(poll, POLL_MS);
                 }
@@ -117,13 +126,15 @@ class ToastReader {
         String why = lastStatus >= 400
             ? "Toast page answered " + lastStatus + " on the kitchen tablet"
             : "Toast page had no menu on the kitchen tablet";
-        send(JSONObject.quote("{\"error\":" + JSONObject.quote(why) + "}"));
+        send(JSONObject.quote("{\"error\":" + JSONObject.quote(why) + "}"), false);
     };
 
-    private void send(String literal) {
+    private void send(String literal, boolean ok) {
         done = true;
         sink.report(literal);
         handler.post(this::finish);
+        handler.removeCallbacks(tick);
+        handler.postDelayed(tick, ok ? EVERY_MS : RETRY_MS);
     }
 
     private void finish() {

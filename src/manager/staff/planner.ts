@@ -653,7 +653,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       const t = R.start + i * STEP, n = need(h, t), c = cov[i].length;
       const cls = !n ? 'closed' : c < n ? 'short' : 'ok';
       const lab = n && (i === 0 || need(h, t - STEP) !== n || cov[i - 1].length !== c || (t - R.start) % 60 === 0);
-      covCells += `<button class="${cls} ${selSlot === i ? 'sel' : ''}" data-i="${i}" ${n ? '' : 'tabindex="-1" aria-hidden="true"'} aria-label="${fmt(t)}: ${c} of ${n} working">${lab && hw >= 40 ? c : ''}</button>`;
+      covCells += `<button class="${cls} ${selSlot === i ? 'sel' : ''}" data-i="${i}" ${n ? (zoom ? '' : 'tabindex="-1"') : 'tabindex="-1" aria-hidden="true"'} aria-label="${fmt(t)}: ${c} of ${n} working">${lab && hw >= 40 ? c : ''}</button>`;
     }
     const tstep = hw < 45 ? 120 : 60;
     let ticks = '';
@@ -1164,7 +1164,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     const apply = () => {
       saveWeek(wk);
       render();
-      openEdit(pid, k);
+      // Saving may merge in shifts from another phone, so find this shift again.
+      const k2 = (Wk(wk).shifts[d][pid] || []).findIndex((x) => x[0] === v[0] && x[1] === v[1]);
+      openEdit(pid, k2 >= 0 ? k2 : k);
     };
     all('.poschoice button', el).forEach(
       (b) =>
@@ -1593,10 +1595,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       <div class="field"><label for="prepStart">Before opening, first person starts at</label><input type="time" step="900" id="prepStart" value="${toHM(S.prepStart)}"></div>
       <div class="field"><label for="secondAt">Second person starts at</label><input type="time" step="900" id="secondAt" value="${toHM(S.secondAt)}"></div>
       <div class="field"><label for="minStaff">People you need while open</label><select id="minStaff">${[1, 2, 3, 4, 5, 6].map((n) => `<option ${n === S.minStaff ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    </section>
-    <section class="card"><h2>Backup</h2>
-      <p class="sub">Staff data already syncs to every phone with this app. To keep an extra copy somewhere safe, copy it as text and paste it into a note or email.</p>
-      <div class="choices"><button class="t-btn" id="dataCopy">Copy backup</button></div></section>${bar}`;
+    </section>${bar}`;
     const updBar = () => {
       const dty = settingsDirty();
       must('savebar').hidden = !dty;
@@ -1646,8 +1645,6 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       S.minStaff = +ms.value;
       touch();
     };
-    must('dataCopy').onclick = (e) =>
-      copyText(JSON.stringify({ app: 'shift-planner', v: 1, config: db().config, weeks: db().weeks }), e.currentTarget as HTMLElement, 'Copy backup');
     must('discard').onclick = () => {
       draft = null;
       renderSettings();

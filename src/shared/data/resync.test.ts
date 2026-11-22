@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keepListening, scheduleClockSync, singleFlight } from './resync';
+import { keepListening, onSaveFailure, queued, reportSaveFailure, SAVE_WAIT_MS, scheduleClockSync, singleFlight, type SaveFailure } from './resync';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -163,5 +163,98 @@ describe('singleFlight', () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(write).toHaveBeenCalledTimes(1);
     stop();
+  });
+});
+
+describe('queued (a save never waits for the internet)', () => {
+  const never = () => new Promise<void>(() => {});
+  let errors: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    errors.mockRestore();
+  });
+
+  it('is done as soon as the server confirms', async () => {
+    let done = false;
+    queued(Promise.resolve(), 'x', SAVE_WAIT_MS, false).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(true);
+  });
+
+  it('is done after the wait when the server does not answer (internet down)', async () => {
+    let done = false;
+    queued(never(), 'x', SAVE_WAIT_MS, false).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS - 1);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(done).toBe(true);
+  });
+
+  it('is done at once when the device knows it is offline', async () => {
+    let done = false;
+    queued(never(), 'x', SAVE_WAIT_MS, true).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(true);
+  });
+
+  it('still fails when the server refuses in time', async () => {
+    const p = queued(Promise.reject(new Error('permission-denied')), 'x', SAVE_WAIT_MS, false);
+    await expect(p).rejects.toThrow('permission-denied');
+  });
+
+  it('logs a refusal that comes after the save already counted as done, with no unhandled rejection', async () => {
+    let refuse!: (e: Error) => void;
+    const p = queued(new Promise<void>((_, j) => (refuse = j)), 'setDoc orders/1', SAVE_WAIT_MS, false);
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    await expect(p).resolves.toBeUndefined();
+    refuse(new Error('permission-denied'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(errors).toHaveBeenCalledWith('setDoc orders/1: the server refused this save', expect.any(Error));
+  });
+
+  it('tells the save-failure listeners about a late refusal (the "Not saved" banner)', async () => {
+    const seen: SaveFailure[] = [];
+    const stop = onSaveFailure((f) => seen.push(f));
+    let refuse!: (e: Error) => void;
+    queued(new Promise<void>((_, j) => (refuse = j)), 'updateDoc orders/1', SAVE_WAIT_MS, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual([]);
+    refuse(new Error('permission-denied'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual([{ what: 'updateDoc orders/1', message: 'permission-denied' }]);
+    stop();
+  });
+
+  it('does not report a refusal that came in time (the save already failed on screen)', async () => {
+    const seen: SaveFailure[] = [];
+    const stop = onSaveFailure((f) => seen.push(f));
+    await expect(queued(Promise.reject(new Error('permission-denied')), 'x', SAVE_WAIT_MS, false)).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(seen).toEqual([]);
+    stop();
+  });
+});
+
+describe('save failure events', () => {
+  it('reach every listener until it stops listening, and a broken listener does not stop the others', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const a: string[] = [];
+    const b: string[] = [];
+    const stopBad = onSaveFailure(() => {
+      throw new Error('boom');
+    });
+    const stopA = onSaveFailure((f) => a.push(f.what));
+    const stopB = onSaveFailure((f) => b.push(f.message));
+    reportSaveFailure('setDoc x/1', new Error('refused'));
+    stopA();
+    reportSaveFailure('setDoc x/2', 'plain text');
+    expect(a).toEqual(['setDoc x/1']);
+    expect(b).toEqual(['refused', 'plain text']);
+    stopB();
+    stopBad();
   });
 });

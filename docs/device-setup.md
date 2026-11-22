@@ -61,6 +61,19 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 4. Settings > Apps > Tabla > Battery: **Unrestricted** (not optimised). Display > Screen timeout: the longest. Security > Screen lock: **None** (so it comes back after a power cut).
 5. **Sound:** the 1-hour reminder uses the **media** volume: turn media volume up. Keep **Do Not Disturb off** (if it must be on, allow media sounds). Leave the tablet plugged in.
 
+## Phone alerts (manager phones)
+
+Phones can get a 1-hour reminder before each catering order, a 9:00 AM "Today's catering" list (only on days with orders), and alerts when the kitchen changes an order or the Toast menu can't be read. Until at least one phone has alerts on, nobody gets these (the server logs an error each time).
+
+1. **Once, for the whole app:** Firebase console > Project settings > **Cloud Messaging** > Web Push certificates > **Generate key pair**. Copy the key and put it in `vapidKey` in `src/shared/data/firebaseConfig.ts` (it is public, not a secret). While it is empty the app doesn't offer alerts.
+2. **On each manager phone:** open the Manager app link in **Chrome** (Android) or add it to the Home Screen and open it from there (iPhone: Share > "Add to Home Screen"). Go to Catering and press **Turn on alerts**, then Allow.
+3. The **Tabla Android app** (the one on the TVs and the kitchen tablet) can't get phone alerts. Use Chrome or the Home Screen app on phones.
+4. Test: add an order due in a bit over 1 hour; the phone should buzz about 1 hour before.
+
+## Backups
+
+See [backups.md](backups.md): turn them on once, and how to get back a lost order or payment.
+
 ## Getting out of Tabla (staff and owner)
 
 - **Press Back 5 times quickly** (within 3 seconds). The "Which screen is this?" page opens. From there you can pick a different screen, allow auto-start, or press **Open device settings**.
@@ -70,8 +83,8 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 ## Updates
 
 - **Menus, pictures, music, orders:** change them in the Manager app; the screens show them right away.
-- **The web app:** updates by itself. Each screen reloads once a night after 4 AM (or as soon as it is on again).
-- **The screen app (`tabla.apk`):** updates itself. A few times a day it checks for a newer version and installs it; the screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?": press **Install** with the remote (if nobody does, it asks again the next day). The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
+- **The web app:** updates by itself. The kitchen tablet picks up a new version within a few minutes when nobody is using it; phones when the app is opened again; TVs reload once a night after 4 AM (or as soon as they are on again).
+- **The screen app (`tabla.apk`):** updates itself. TVs and the kitchen tablet install a new version only between 3 and 5 AM, so leave them on overnight; phones may update any time. The screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?" at that time; nobody is there to press **Install**, so it asks again the next night. To update such a screen during the day, download and install `tabla.apk` again the same way as the first time. The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
 - Copies installed before automatic updates existed (versions below 1.1000) must be updated by hand once: download and install again the same way. If Android says the app "conflicts" with an installed one (only for an early test copy), uninstall Tabla first, then install and choose the screen again.
 
 ## 24-hour test before opening day

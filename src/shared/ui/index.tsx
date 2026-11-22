@@ -13,6 +13,7 @@ export function Logo({ className }: { className?: string }) {
 
 export { ErrorBoundary } from './ErrorBoundary';
 export { TimeZoneNote } from './TimeZoneNote';
+export { SaveFailedBanner, SAVE_FAILED_MESSAGE } from './SaveFailedBanner';
 
 export function PageHeader({ title, sub, action, logo }: { title: string; sub?: string; action?: ReactNode; logo?: boolean }) {
   return (
@@ -71,13 +72,51 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/* Phone Back button: while any sheet is open there is one extra history entry (same URL, so the hash
+   route doesn't change). Back pops it and closes the top sheet the same way a backdrop tap does; when a
+   sheet closes any other way the entry is taken off again. One sheet closing as another opens shares it. */
+const backStack: { onBack: () => void }[] = [];
+let entryPushed = false;
+let dropTimer: ReturnType<typeof setTimeout> | undefined;
+const ourEntry = () => !!(window.history.state && (window.history.state as { tSheet?: boolean }).tSheet);
+function pushEntry() {
+  if (entryPushed) return;
+  entryPushed = true;
+  window.history.pushState({ ...(window.history.state ?? {}), tSheet: true }, '');
+}
+function onPop() {
+  if (!entryPushed || ourEntry()) return; // not our entry that was popped
+  entryPushed = false;
+  backStack[backStack.length - 1]?.onBack();
+}
+function addBackHandler(h: { onBack: () => void }) {
+  if (backStack.length === 0) window.addEventListener('popstate', onPop);
+  backStack.push(h);
+  clearTimeout(dropTimer);
+  pushEntry();
+}
+function removeBackHandler(h: { onBack: () => void }) {
+  const i = backStack.indexOf(h);
+  if (i >= 0) backStack.splice(i, 1);
+  clearTimeout(dropTimer);
+  // Wait a moment: another sheet opening right now keeps the same entry.
+  dropTimer = setTimeout(() => {
+    if (backStack.length > 0) return pushEntry();
+    window.removeEventListener('popstate', onPop);
+    if (!entryPushed) return;
+    entryPushed = false;
+    // Only step back if our entry is still on top (a link inside the sheet may have moved on).
+    if (ourEntry()) window.history.back();
+  }, 0);
+}
+
 const SheetClose = createContext<() => void>(() => {});
 /** Inside a Sheet: closes it the same way a backdrop tap does (asking first when `confirmClose` is set).
  *  Use it for the sheet's own Cancel button. */
 export const useSheetClose = () => useContext(SheetClose);
 
 /** Bottom sheet on phones, centred dialog on wider screens. Closes on backdrop tap, Escape,
- *  or (phones) dragging it down from the handle or from the top of its content.
+ *  the phone's Back button, or (phones) dragging it down from the handle or from the top of its content.
  *  `confirmClose` (e.g. "Discard your changes?", or a function returning it or null, read at the moment
  *  of closing so a change typed just before always counts): while set, those ways of closing ask first,
  *  with "Discard" and "Keep editing". The content stays mounted behind the question. */
@@ -111,6 +150,23 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
   keep.current = keepEditing;
   useEffect(() => {
     if (!open) setAsking(null);
+  }, [open]);
+  // Phone Back: closes the sheet through the same question as a backdrop tap. If the question shows,
+  // the entry goes back so a second Back press asks again rather than leaving the page.
+  useEffect(() => {
+    if (!open) return;
+    const h = {
+      onBack: () => {
+        if (askingRef.current) return pushEntry(), keep.current();
+        const q = question();
+        if (q) {
+          pushEntry();
+          ask(q);
+        } else close.current();
+      },
+    };
+    addBackHandler(h);
+    return () => removeBackHandler(h);
   }, [open]);
   useEffect(() => {
     if (asking) sheet.current?.focus({ preventScroll: true });
@@ -243,7 +299,7 @@ export function Sheet({ open, title, onClose, confirmClose, children }: { open: 
 
 /** Manager tab bar. A `narrow` tab (e.g. the ☰ More button) takes a small fixed width; `name` is its spoken name. */
 export function TabBar({ tabs }: { tabs: { to: string; label: string; name?: string; narrow?: boolean }[] }) {
-  const columns = tabs.map((t) => (t.narrow ? '64px' : '1fr')).join(' ');
+  const columns = tabs.map((t) => (t.narrow ? 'var(--t-tab-narrow, 64px)' : 'minmax(0, 1fr)')).join(' ');
   return (
     <div className="t-tabbar">
       <nav style={{ gridTemplateColumns: columns }}>

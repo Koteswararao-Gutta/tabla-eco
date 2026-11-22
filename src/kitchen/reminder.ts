@@ -1,5 +1,7 @@
 // 1-hour heads-up on the kitchen tablet. Pure helper so it is easy to test.
 import type { CateringOrder, WithId } from '@shared/data';
+import { defaults } from '../manager/staff/model'; // read-only: the shift planner's starting hours
+import { dayLabel, timeLabel, countdown } from '../manager/catering/orders';
 
 export const REMIND_MS = 60 * 60_000;
 
@@ -18,7 +20,8 @@ export const ackPatch = (o: { dueAt: number }): Partial<KitchenOrder> => ({ kitc
 export function dueReminders<T extends KitchenOrder>(orders: readonly T[], now: number, staff?: unknown): T[] {
   return orders
     .filter((o) => {
-      if (o.status !== 'open' || o.kitchenAckFor === o.dueAt) return false;
+      // Only open orders ring: never a completed, cancelled or deleted one.
+      if (o.status !== 'open' || typeof o.deletedAt === 'number' || o.kitchenAckFor === o.dueAt) return false;
       const ring = ringAt(o.dueAt, staff);
       return now >= ring && now <= Math.max(o.dueAt, ring) + LATE_MS;
     })
@@ -34,10 +37,16 @@ export function dueReminders<T extends KitchenOrder>(orders: readonly T[], now: 
 const MIN = 60_000;
 type Span = [number, number]; // ms
 
-/** Staffed times on the local day that starts at `day0` (midnight, ms). Empty when closed. */
+/** The staff schedule nobody has saved yet (`null`): the planner's starting hours, so the alarm
+ *  doesn't ring at 3 AM before the manager opens Staff once. */
+let plannerDefaults: unknown;
+const defaultStaff = () => (plannerDefaults ??= defaults().config);
+
+/** Staffed times on the local day that starts at `day0` (midnight, ms). Empty when closed.
+ *  `staff` null (no schedule saved) uses the planner's starting hours. */
 export function staffedSpans(staff: unknown, day0: number): Span[] | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const c = staff as any;
+  const c = (staff === null ? defaultStaff() : staff) as any;
   const s = c?.settings;
   if (!s || !Array.isArray(s.days) || s.days.length !== 7) return null;
   const date = new Date(day0);
@@ -49,7 +58,10 @@ export function staffedSpans(staff: unknown, day0: number): Span[] | null {
   if (!h || h.closed) return [];
   const num = (x: unknown): x is number => typeof x === 'number' && isFinite(x);
   if (!num(h.open) || !num(h.close) || h.close <= h.open) return null;
-  const start = num(s.prepStart) && s.prepStart < h.open ? s.prepStart : h.open;
+  // Prep starts the same time ahead of opening as on a normal day (like the planner's hoursFor),
+  // so a special day opening at 3 PM starts prep before 3, not at the usual morning time.
+  const lead = num(s.prepStart) && base && num(base.open) ? Math.max(0, base.open - s.prepStart) : 0;
+  const start = h.open - lead;
   const at = (m: number) => {
     const d = new Date(day0);
     d.setHours(0, m, 0, 0);
@@ -93,6 +105,28 @@ export function staffedAt(now: number, staff?: unknown): boolean {
   const spans = staffedSpans(staff, d.getTime());
   if (spans === null) return true;
   return spans.some(([a, b]) => now >= a && now < b);
+}
+
+/** "pickup at 3:00 PM, in 30 min" today; "pickup tomorrow at 10:15 AM" (or "on Wed, Nov 25") on another day. */
+export function whenText(o: { type: string; dueAt: number }, now: number, capital = false): string {
+  const type = o.type === 'delivery' ? 'delivery' : 'pickup';
+  const kind = capital ? type[0].toUpperCase() + type.slice(1) : type;
+  const day = dayLabel(o.dueAt, now);
+  if (day === 'Today' || isNear(o.dueAt, now)) return `${kind} at ${timeLabel(o.dueAt)}, ${countdown(o.dueAt, now).text}`;
+  const on = day === 'Tomorrow' || day === 'Yesterday' ? day.toLowerCase() : 'on ' + day;
+  return `${kind} ${on} at ${timeLabel(o.dueAt)}`;
+}
+
+/** Within this time an order reads as "soon, in 30 min", even just past midnight; further off, by its day. */
+const NEAR_MS = 3 * 3_600_000;
+const isNear = (dueAt: number, now: number) => dueAt - now <= NEAR_MS;
+
+/** The alarm's headline: "soon" when every order is today or within a few hours; otherwise the day (or "coming up"). */
+export function alarmTitle(reminders: readonly { dueAt: number }[], now: number): string {
+  const days = new Set(reminders.map((o) => (isNear(o.dueAt, now) ? 'Today' : dayLabel(o.dueAt, now))));
+  const one = days.size === 1 ? [...days][0] : null;
+  const when = one === 'Today' ? 'soon' : one === 'Tomorrow' ? 'tomorrow' : 'coming up';
+  return reminders.length > 1 ? `${reminders.length} catering orders ${when}` : `Catering order ${when}`;
 }
 
 /** One key per order and due time (so the alarm rings again when the time changes). */

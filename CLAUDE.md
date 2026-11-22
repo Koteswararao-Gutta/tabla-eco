@@ -15,6 +15,9 @@ One web app (Vite + React + TypeScript), hash routes:
 | `#/tv/5` | Music TV: YouTube playlist + catering clip between songs | `src/tv-music/` (agent 3) |
 | `#/manager/catering`, `#/kitchen` | Catering orders; kitchen tablet with PIN | `src/manager/catering/`, `src/kitchen/` (agent 4) |
 | `#/manager/staff` | Shift planner (port of `reference/shift-planner.html`) | `src/manager/staff/` (agent 5) |
+| `#/front/catering` | Front app for front staff: the same Catering only. No Screens, no Staff, no ☰ | `src/manager/ManagerShell.tsx` (`mode="front"`, `src/manager/mode.tsx`) |
+
+Two links, one code base: `#/manager` (everything, no PIN) and `#/front` (front staff). Inside these apps build links with `useAppBase()` from `src/manager/mode.tsx`, never a hard-coded `/manager`; check `useAppMode() === 'front'` for anything that differs in the front app.
 
 Foundation-owned (do not edit from an agent branch; ask instead): `src/shared/**`, `src/App.tsx`, `src/main.tsx`, `src/manager/ManagerShell.tsx`, configs, `e2e/helpers.ts`, `e2e/foundation.spec.ts`, this file.
 
@@ -45,6 +48,7 @@ npm run dev          # http://localhost:5173/#/  (open screens in separate windo
 npm run typecheck
 npm test             # unit tests (vitest)
 npm run e2e          # Chrome tests (Playwright). In the cloud container: PW_CHROMIUM=/opt/pw-browsers/chromium npm run e2e
+npm test --prefix rules-test   # Firestore rules on the emulator (needs Java 21)
 ```
 
 Parallel agents each use their own test port: `PW_PORT=4181` agent 1, `4182` agent 2, `4183` agent 3, `4184` agent 4, `4185` agent 5, `4190` integration.

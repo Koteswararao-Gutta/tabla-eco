@@ -4,21 +4,18 @@ import { saveSingleton, updateSingleton, useSingleton } from '@shared/data';
 import { Field } from '@shared/ui';
 import { isPin } from './logic';
 import { ScreenPage } from './parts';
-import { expectedManagerPin } from '../lock/pin';
 
 export default function KitchenPage() {
   const settings = useSingleton('settings');
   const [pin, setPin] = useState('');
-  const [status, setStatus] = useState<'' | 'saving' | 'saved' | 'invalid' | 'manager' | 'error'>('');
+  const [status, setStatus] = useState<'' | 'saving' | 'saved' | 'invalid' | 'error'>('');
   const current = settings?.kitchenPin ?? '1234';
 
   const save = async () => {
     if (!isPin(pin)) return setStatus('invalid');
-    // Kitchen staff know the kitchen PIN, so it must never also open the manager's tabs.
-    if (pin === expectedManagerPin(settings ?? null)) return setStatus('manager');
     setStatus('saving');
     try {
-      // Only the PIN changes; the rest of settings (manager PIN etc.) is left as stored.
+      // Only the PIN changes; the rest of settings is left as stored.
       if (settings) await updateSingleton('settings', { kitchenPin: pin });
       else await saveSingleton('settings', { restaurantName: 'Tabla', kitchenPin: pin });
       setPin('');
@@ -53,7 +50,6 @@ export default function KitchenPage() {
               />
             </Field>
             {status === 'invalid' && <p className="sc-error" role="alert">The PIN must be exactly 4 digits.</p>}
-            {status === 'manager' && <p className="sc-error" role="alert">That's the manager PIN. Pick a different one.</p>}
             {status === 'error' && <p className="sc-error" role="alert">Could not save. Try again.</p>}
             {status === 'saved' && <p className="sc-ok" role="status">PIN changed.</p>}
             <button className="t-btn primary block" onClick={save} disabled={status === 'saving'}>Change PIN</button>

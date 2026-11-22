@@ -68,3 +68,55 @@ test.describe('device on another time zone', () => {
     await expect(tv.getByTestId('tz-note')).toHaveClass('t-tz-tv');
   });
 });
+
+// A screen's code that can't be fetched (a new version replaced the files, or the internet dropped):
+// the page reloads once and opens normally, instead of "Something went wrong".
+test.describe('screen code fails to load', () => {
+  test('reloads once and opens', async ({ browser }) => {
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    // Count page loads, not file requests: a browser may fetch the same file twice in one load (preload, then import).
+    let loads = 0;
+    page.on('request', (r) => { if (r.resourceType() === 'document' && r.frame() === page.mainFrame()) loads++; });
+    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => (loads <= 1 ? route.abort() : route.continue()));
+    await page.goto('/#/kitchen');
+    await expect(page.getByTestId('kitchen')).toBeVisible();
+    expect(loads).toBe(2);
+    await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+    await context.close();
+  });
+
+  test('still missing after the reload: the calm crash screen, no reload loop', async ({ browser }) => {
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    let loads = 0;
+    page.on('request', (r) => { if (r.resourceType() === 'document' && r.frame() === page.mainFrame()) loads++; });
+    await page.route(/\/assets\/kitchen-[\w-]+\.js$/, (route) => route.abort());
+    await page.goto('/#/kitchen');
+    await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
+    await page.waitForTimeout(1500);
+    expect(loads).toBe(2); // the first load, then exactly one reload
+    await context.close();
+  });
+});
+
+// The service worker keeps the last good page: a bad answer from the server (e.g. GitHub's error page
+// during a deploy) never replaces the app on a reload.
+test('a reload that gets a server error still opens the app', async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto('/#/tv/1');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await expect.poll(() => page.evaluate(async () => !!(await caches.open('tabla-shell-v2').then((c) => c.keys())).length)).toBe(true);
+  await page.reload(); // now controlled by the worker
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+  await context.route(/\/(index\.html)?(\?.*)?$/, (route) =>
+    route.request().resourceType() === 'document' || route.request().url().endsWith('/')
+      ? route.fulfill({ status: 503, contentType: 'text/html', body: '<h1>Server error</h1>' })
+      : route.continue(),
+  );
+  await page.reload();
+  await expect(page.getByText('Server error')).toHaveCount(0);
+  await expect(page.locator('#root > *').first()).toBeAttached();
+  await context.close();
+});

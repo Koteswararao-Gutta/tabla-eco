@@ -1,9 +1,10 @@
 // The order form's items: one row per dish, with quantity, unit and an optional note.
 // Typing a dish shows matching dishes from the Toast menu; a dish that isn't on the menu is saved as typed.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { deviceValue, setDeviceValue } from '@shared/data';
 import { norm, searchDishes, UNITS, type Dish } from './lines';
-import { blankLine, type LineDraft } from './orders';
+import { blankLine, parseQty, type LineDraft } from './orders';
+import { missingExtras, withExtras } from './extras';
 
 /** Remembered on this device: the unit picked last, for the next new row. */
 const UNIT_KEY = 'cateringUnit';
@@ -21,18 +22,31 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
   // Which row's dish box is open for suggestions, and the highlighted suggestion.
   const [open, setOpen] = useState<number | null>(null);
   const [hi, setHi] = useState(0);
+  // Auto extras (raita with biryani, ...) taken off by hand, so they aren't added back. An order opened
+  // without an extra it would get (taken off before, or saved before extras existed) counts as taken off.
+  const off = useRef<Set<string> | null>(null);
+  if (!off.current) off.current = new Set(missingExtras(lines));
+  /** Every change goes out with the extras brought up to date. */
+  const commit = (next: LineDraft[]) => onChange(withExtras(next, off.current!));
+  // Rows filled from outside (a scan or a paste) get their extras too.
+  useEffect(() => {
+    const next = withExtras(lines, off.current!);
+    if (JSON.stringify(next) !== JSON.stringify(lines)) onChange(next);
+  }, [lines, onChange]);
 
   const focus = (i: number, field: 'dish' | 'qty') =>
     requestAnimationFrame(() => rows.current.get(i)?.querySelector<HTMLElement>(`[data-field="${field}"]`)?.focus());
 
-  /** A change to one row. Any change means the row has been looked at: its typed text and check mark go. */
+  /** A change to one row. Any change means the row has been looked at: its typed text and check mark go.
+   *  An extra whose amount or name is changed keeps that change from then on. */
   const edit = (i: number, patch: Partial<LineDraft>) => {
     const next = lines.map((l, j) => {
       if (j !== i) return l;
       const { text: _typed, check: _check, ...rest } = l;
-      return { ...rest, ...patch };
+      const changed = l.extra && ['qty', 'unit', 'name'].some((k) => k in patch && patch[k as keyof LineDraft] !== l[k as keyof LineDraft]);
+      return { ...rest, ...patch, ...(changed ? { extraEdited: true } : {}) };
     });
-    onChange(next);
+    commit(next);
   };
 
   const typeDish = (i: number, name: string) => {
@@ -47,13 +61,18 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
     focus(i, 'qty');
   };
   const add = () => {
-    onChange([...lines, blankLine(lastUnit())]);
-    focus(lines.length, 'dish');
+    // A new dish row goes after the other dishes, before the extras.
+    commit([...lines, blankLine(lastUnit())]);
+    focus(lines.filter((l) => !l.extra).length, 'dish');
   };
   const remove = (i: number) => {
-    onChange(lines.length > 1 ? lines.filter((_, j) => j !== i) : [blankLine(lastUnit())]);
+    const gone = lines[i];
+    if (gone?.extra) off.current!.add(gone.extra);
+    const rest = lines.filter((_, j) => j !== i);
+    commit(rest.some((l) => !l.extra) ? rest : [blankLine(lastUnit()), ...rest]);
     setOpen(null);
   };
+  const firstExtra = lines.findIndex((l) => l.extra);
 
   const noneFilled = lines.every((l) => !l.name.trim());
   return (
@@ -61,23 +80,26 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
       {lines.map((l, i) => {
         const n = i + 1;
         const picked = !!l.dishId;
-        const matches = open === i && !picked && l.name.trim() ? searchDishes(l.name, dishes) : [];
+        const matches = open === i && !picked && !l.extra && l.name.trim() ? searchDishes(l.name, dishes) : [];
         const listId = `c-dish-list-${i}`;
+        const label = l.extra ? `Extra ${l.extra}` : `Item ${n}`;
         return (
+          <div key={i} className="c-line-wrap">
+          {i === firstExtra && <div className="c-extras-head">Extras, added for the dishes above</div>}
           <div
-            key={i}
-            className={'c-line' + (l.check ? ' check' : '')}
-            data-testid="item-row"
+            className={'c-line' + (l.check ? ' check' : '') + (l.extra ? ' extra' : '')}
+            data-testid={l.extra ? 'extra-row' : 'item-row'}
             ref={(el) => {
               if (el) rows.current.set(i, el);
               else rows.current.delete(i);
             }}
           >
             <div className="c-line-top">
+              {l.extra && <span className="t-badge accent c-extra-badge">Extra</span>}
               <input
                 className="t-input c-dish"
                 data-field="dish"
-                aria-label={`Item ${n} dish`}
+                aria-label={`${label} dish`}
                 placeholder="Dish, e.g. chicken biryani"
                 value={l.name}
                 autoComplete="off"
@@ -110,7 +132,7 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
                   }
                 }}
               />
-              <button type="button" className="t-btn ghost c-line-x" aria-label={`Remove item ${n}`} title="Remove" onClick={() => remove(i)}>
+              <button type="button" className="t-btn ghost c-line-x" aria-label={`Remove ${label.charAt(0).toLowerCase()}${label.slice(1)}`} title="Remove" onClick={() => remove(i)}>
                 ✕
               </button>
             </div>
@@ -143,20 +165,21 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
               <input
                 className="t-input c-qty"
                 data-field="qty"
-                aria-label={`Item ${n} quantity`}
+                aria-label={`${label} quantity`}
                 placeholder="Qty"
                 inputMode="decimal"
                 autoComplete="off"
                 value={l.qty}
-                aria-invalid={!!invalid && !!l.qty.trim() && !/^\s*\d*[.,]?\d+\s*$/.test(l.qty)}
+                aria-invalid={!!invalid && !!l.qty.trim() && Number.isNaN(parseQty(l.qty))}
                 onChange={(e) => edit(i, { qty: e.target.value })}
               />
               <select
                 className="t-select c-unit"
-                aria-label={`Item ${n} unit`}
+                aria-label={`${label} unit`}
                 value={l.unit}
                 onChange={(e) => {
-                  setDeviceValue(UNIT_KEY, e.target.value);
+                  // Remembered for the next dish row (an extra's ounces aren't).
+                  if (!l.extra) setDeviceValue(UNIT_KEY, e.target.value);
                   edit(i, { unit: e.target.value });
                 }}
               >
@@ -170,14 +193,14 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
               </select>
               <input
                 className="t-input c-line-note"
-                aria-label={`Item ${n} note`}
+                aria-label={`${label} note`}
                 placeholder="Note"
                 autoComplete="off"
                 value={l.note}
                 onChange={(e) => edit(i, { note: e.target.value })}
                 onKeyDown={(e) => {
-                  // Enter in the last note starts the next item, so a long order is typed without reaching for the mouse.
-                  if (e.key === 'Enter' && i === lines.length - 1 && l.name.trim()) {
+                  // Enter in the last dish's note starts the next item, so a long order is typed without reaching for the mouse.
+                  if (e.key === 'Enter' && !l.extra && i === (firstExtra < 0 ? lines.length : firstExtra) - 1 && l.name.trim()) {
                     e.preventDefault();
                     add();
                   }
@@ -187,8 +210,15 @@ export function ItemsEditor({ lines, dishes, onChange, invalid }: Props) {
             {l.check ? (
               <small className="c-check">Please check this item{l.text ? `: it was typed as “${l.text}”` : ''}.</small>
             ) : (
-              l.name.trim() && !picked && open !== i && dishes.length > 0 && <small className="c-hint">Not on the menu: saved as typed.</small>
+              l.extra ? (
+                <small className="c-hint">
+                  {l.extraEdited ? 'Changed by hand: stays as it is.' : !l.qty.trim() ? 'Please add the amount.' : 'Changes with the dishes. Edit or remove it if needed.'}
+                </small>
+              ) : (
+                l.name.trim() && !picked && open !== i && dishes.length > 0 && <small className="c-hint">Not on the menu: saved as typed.</small>
+              )
             )}
+          </div>
           </div>
         );
       })}

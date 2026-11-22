@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 concurrency:
@@ -15,23 +16,31 @@ concurrency:
   cancel-in-progress: true
 jobs:
   # Deploy only the newest tested commit: a slower, older Tests run finishing late must not overwrite a newer deploy.
+  # When two merges land close together, the older commit's run can cancel the newer one's (one deploy at a time),
+  # so a run for an older commit deploys the tip of main instead when the tip's Tests already passed.
   latest:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.tip.outputs.ok }}
+      sha: ${{ steps.tip.outputs.sha }}
     steps:
       - id: tip
         env:
           GH_TOKEN: ${{ github.token }}
           TESTED: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ -z "$TESTED" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi  # started by hand
+          if [ -z "$TESTED" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"; exit 0; fi  # started by hand
           tip=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
           if [ "$tip" = "$TESTED" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=$tip" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          passed=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yml/runs?head_sha=$tip&event=push&status=success" --jq .total_count)
+          if [ "${passed:-0}" -gt 0 ]; then
+            echo "::notice::$TESTED is no longer the tip of main; deploying the tip ($tip), whose tests passed."
+            echo "ok=true" >> "$GITHUB_OUTPUT"; echo "sha=$tip" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Skipped: $TESTED is no longer the tip of main ($tip); the newer commit's run deploys."
+            echo "::notice::Skipped: $TESTED is no longer the tip of main ($tip); the tip's own run deploys once its tests pass."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -43,23 +52,23 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history: the app's version number counts commits that changed android/
-          # The commit the tests passed on (not whatever main is by now).
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - uses: actions/setup-node@v4
+          # A commit whose tests passed (see `latest`), not whatever main is by now.
+          ref: ${{ needs.latest.outputs.sha }}
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build
       # The Android screen app, served from the same site: <site>/tabla.apk
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: 8.14.3
       # The version only goes up when android/ changed, so installed apps update themselves (Updater.java)
@@ -73,8 +82,8 @@ jobs:
       - run: |
           cp android/app/build/outputs/apk/release/app-release.apk dist/tabla.apk
           echo '{"versionCode": ${{ steps.apkver.outputs.code }}}' > dist/tabla-version.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

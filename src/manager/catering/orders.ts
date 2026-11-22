@@ -1,7 +1,7 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
 import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
-import { cleanLine, findDish, itemLines, linesText, normalizeUnit, orderLines, type Dish } from './lines';
+import { cleanLine, findDish, itemLines, itemTexts, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
 
 export { itemLines };
 
@@ -44,9 +44,9 @@ export function groupOpen<T extends Order>(orders: T[], now: number): OpenGroups
   return g;
 }
 
-/** Completed orders, newest due first. */
+/** Completed and cancelled orders, newest due first. */
 export function history<T extends Order>(orders: T[]): T[] {
-  return orders.filter((o) => o.status === 'completed').sort(byDueDesc);
+  return orders.filter((o) => o.status === 'completed' || o.status === 'cancelled').sort(byDueDesc);
 }
 
 /** Every order grouped by its due day, newest day (and newest order) first. */
@@ -107,6 +107,11 @@ export function countdown(dueAt: number, now: number): { text: string; late: boo
   if (Math.abs(diff) < MIN) return { text: 'due now', late: false };
   return diff > 0 ? { text: `in ${duration(diff)}`, late: false } : { text: `${duration(diff)} late`, late: true };
 }
+
+/** The countdown shows only in the last hour before an order, and once its time has passed (in red).
+ *  Before that, the time and day are enough. */
+export const COUNTDOWN_MS = 60 * MIN;
+export const showsCountdown = (dueAt: number, now: number) => dueAt - now <= COUNTDOWN_MS;
 
 /** Open and due within two hours (or already late). */
 export const isSoon = (o: Order, now: number) => o.status === 'open' && o.dueAt - now <= SOON_MS;
@@ -173,6 +178,9 @@ export interface LineDraft {
   text?: string;
   /** Read by a guess and not checked yet: the row asks to be checked. */
   check?: boolean;
+  /** An auto extra: see OrderLine.extra and OrderLine.extraEdited. */
+  extra?: string;
+  extraEdited?: boolean;
 }
 
 export const blankLine = (unit = ''): LineDraft => ({ dishId: null, name: '', qty: '', unit, note: '' });
@@ -183,6 +191,8 @@ export function draftFromLine(l: OrderLine): LineDraft {
   const d: LineDraft = { dishId: l.dishId ?? null, name: l.name, qty: qtyInput(l.qty), unit: l.unit, note: l.note };
   if (l.text) d.text = l.text;
   if (l.check) d.check = true;
+  if (l.extra) d.extra = l.extra;
+  if (l.extra && l.extraEdited) d.extraEdited = true;
   return d;
 }
 
@@ -191,10 +201,9 @@ const filled = (d: LineDraft) => d.name.trim() !== '';
 
 /** A quantity box's text as a number: null when empty, NaN when it isn't a positive number. */
 export function parseQty(text: string): number | null {
-  const t = text.trim().replace(',', '.');
-  if (!t) return null;
-  if (!/^\d*\.?\d+$/.test(t)) return NaN;
-  const n = parseFloat(t);
+  if (!text.trim()) return null;
+  const n = qtyValue(text);
+  if (Number.isNaN(n)) return NaN;
   return n > 0 && n <= 100_000 ? Math.round(n * 100) / 100 : NaN;
 }
 
@@ -204,6 +213,8 @@ export function linesFromForm(drafts: LineDraft[]): OrderLine[] {
     const qty = parseQty(d.qty);
     const line: OrderLine = { dishId: d.dishId, name: d.name.trim(), qty: qty === null || Number.isNaN(qty) ? null : qty, unit: d.unit, note: d.note };
     if (d.text) line.text = d.text;
+    if (d.extra) line.extra = d.extra;
+    if (d.extra && d.extraEdited) line.extraEdited = true;
     return cleanLine(line);
   });
 }
@@ -302,7 +313,7 @@ export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes:
       .filter((l) => l && text(l.dish))
       .map((l) => {
         const dish = findDish(text(l.dish), dishes);
-        const qty = parseQty(text(l.qty).replace(/[^\d.,]/g, ''));
+        const qty = parseQty(text(l.qty).replace(/[^\d.,/\s½¼¾-]/g, ''));
         const unit = normalizeUnit(text(l.unit));
         const d: LineDraft = { dishId: dish?.id ?? null, name: dish?.name ?? text(l.dish), qty: qty === null || Number.isNaN(qty) ? '' : String(qty), unit: unit.unit, note: text(l.note) };
         if (l.unsure === true || !dish || !d.qty || !unit.sure) d.check = true;
@@ -355,13 +366,15 @@ export function telHref(phone: string): string {
 /** The order as a WhatsApp message for the front staff group, so they can get sides ready.
  *  The date is written out ("Fri, Nov 20"), since the message is read later. The customer's
  *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
-export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'>, heading = 'Catering order'): string {
+export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order'): string {
   const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const lines = [`*${heading}*`, `${o.customerName}`, `${date}, ${timeLabel(o.dueAt)}`];
-  lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${o.address.trim()}` : ''}` : 'Pickup');
-  if (o.people) lines.push(`${o.people} people`);
-  lines.push('', '*Items*', ...itemLines(o.items).map((l) => `• ${l}`));
-  if (o.notes?.trim()) lines.push('', `*Notes:* ${o.notes.trim()}`);
+  // WhatsApp would turn *, _ and ~ in typed text into bold, italic or struck-out words: leave them out.
+  const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
+  const lines = [`*${heading}*`, plain(o.customerName ?? ''), `${date}, ${timeLabel(o.dueAt)}`];
+  lines.push(o.type === 'delivery' ? `Delivery${o.address?.trim() ? `: ${plain(o.address)}` : ''}` : 'Pickup');
+  if (o.people) lines.push(`${o.people} ${o.people === 1 ? 'person' : 'people'}`);
+  lines.push('', '*Items*', ...itemTexts(o).map((l) => `• ${l}`));
+  if (o.notes?.trim()) lines.push('', `*Notes:* ${plain(o.notes)}`);
   return lines.join('\n');
 }
 
@@ -394,7 +407,7 @@ function missing(a: string[], b: string[]): string[] {
   });
 }
 
-type EditFields = Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items'> & Partial<Pick<Order, 'address' | 'notes' | 'people'>>;
+type EditFields = Pick<Order, 'customerName' | 'phone' | 'dueAt' | 'type' | 'items'> & Partial<Pick<Order, 'address' | 'notes' | 'people' | 'lines'>>;
 
 /** What an edit changes, in plain words, e.g. ["Time: 5:00 PM → 6:00 PM", "Items: 20 samosas → 25 samosas"]. Empty when nothing changed. */
 export function describeChanges(before: EditFields, after: EditFields): string[] {
@@ -407,8 +420,8 @@ export function describeChanges(before: EditFields, after: EditFields): string[]
   if (after.type === 'delivery' && (before.address ?? '').trim() !== (after.address ?? '').trim()) out.push(`Address: ${shown(before.address ?? '')} → ${shown(after.address ?? '')}`);
   if ((before.people || null) !== (after.people || null)) out.push(`People: ${before.people || '(none)'} → ${after.people || '(none)'}`);
   // Items: a changed line reads "old → new"; extra lines read as added or removed.
-  const was = itemLines(before.items);
-  const now = itemLines(after.items);
+  const was = itemTexts(before);
+  const now = itemTexts(after);
   const removed = missing(was, now);
   const added = missing(now, was);
   const paired = Math.min(removed.length, added.length);

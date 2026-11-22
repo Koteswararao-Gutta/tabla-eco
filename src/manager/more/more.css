@@ -1,14 +1,9 @@
 .mo-h2 { margin: 0; font-size: 1.05rem; font-weight: 650; }
 .mo-note { margin: 0; color: var(--muted); font-size: 0.92rem; }
-.mo-current { margin: 0; display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 0.92rem; }
-.mo-current strong { color: var(--ink); font-size: 1.3rem; letter-spacing: 0.2em; }
-.mo-pin { font-size: 1.4rem; letter-spacing: 0.4em; max-width: 180px; }
-.mo-error { margin: 0; color: var(--bad); font-size: 0.92rem; font-weight: 600; }
-.mo-ok { margin: 0; color: var(--good); font-size: 0.92rem; font-weight: 600; }
 .mo-link { display: flex; align-items: center; gap: 12px; min-height: 72px; text-decoration: none; color: var(--ink); }
 .mo-link > span:first-child { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .mo-chev { font-size: 1.6rem; color: var(--muted); }
-.mo-back { display: inline-flex; align-items: center; min-height: var(--tap); color: var(--accent); font-weight: 600; text-decoration: none; }
+.mo-back { display: inline-flex; align-items: center; min-height: var(--tap); margin: -8px 0 0 -4px; padding: 0 4px; color: var(--muted); font-weight: 600; text-decoration: none; }
 
 /* Payments */
 .mo-day { display: flex; align-items: center; gap: 8px; }
@@ -42,3 +37,10 @@
 .mo-noamount { margin-top: 12px; text-align: center; }
 .mo-week-list { margin-top: 16px; }
 .mo-row .t-badge { white-space: nowrap; }
+.mo-refund { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Export */
+.mo-export .t-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; border-radius: 22px; }
+.mo-export-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mo-export-dates .t-input { width: 100%; min-height: var(--tap); }
+.mo-export-help { font-size: 0.85rem; }

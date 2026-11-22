@@ -13,7 +13,7 @@ const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const MAX_TEXT_CHARS = 8000;
 
 /** The units the order form offers. Keep in step with UNITS in src/manager/catering/lines.ts. */
-export const UNITS = ['Full tray', 'Half tray', 'Pieces', 'Servings', 'Lbs', 'Quarts', 'Gallons', 'Plates'];
+export const UNITS = ['Full tray', 'Half tray', 'Pieces', 'Servings', 'Lbs', 'Quarts', 'Gallons', 'Plates', 'Oz'];
 /** Most menu dish names sent along with an order (Tabla's menu has about 200). */
 export const MAX_MENU_NAMES = 400;
 
@@ -30,7 +30,7 @@ export const ScannedOrder = z.object({
     .array(
       z.object({
         dish: z.string().describe('The dish: the exact name from the menu list when it clearly is that dish, otherwise as written'),
-        qty: z.string().describe('How many, as digits (e.g. "2" or "1.5"), or empty'),
+        qty: z.string().describe('How many, as digits (e.g. "2" or "1.5"), or empty. A tray and a half, written "1 1/2", "1-1/2", "1½" or "11/2", is "1.5"'),
         unit: z.string().describe(`One of: ${UNITS.join(', ')}. FT means Full tray and HT means Half tray. Use another word only when none fits, or empty when no unit is written`),
         note: z.string().describe('Anything written about this one dish, like "extra spicy" or "no onion", or empty'),
         unsure: z.boolean().describe('true when this item was hard to read or you had to guess the dish, quantity or unit'),
@@ -140,4 +140,33 @@ export function readError(e) {
   if (status === 400) return INPUT_PROBLEM.test(message) ? 'unreadable' : 'setup';
   if (status === undefined && /Failed to parse structured output/.test(message)) return 'unreadable';
   return 'unavailable';
+}
+
+// ---------- daily limit ----------
+
+/** Most photos or messages read in one day (restaurant time). Each read costs a little; this caps the bill. */
+export const DAILY_LIMIT = 50;
+export const LIMIT_REACHED = 'Daily limit reached. Please type the order in.';
+
+/** The restaurant's date (America/Phoenix) as yyyy-mm-dd: the day the counter belongs to. */
+export function usageDay(now) {
+  return new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+}
+
+/** The counter document for that day (server only; the rules let no device touch `usage`). */
+export const usageDoc = (now) => `usage/readOrder-${usageDay(now)}`;
+
+/**
+ * Counts one read in a transaction. Returns false (and counts nothing) when the day's limit is used up.
+ * `db` is a Firestore (admin) instance.
+ */
+export async function takeDailyRead(db, now, limit = DAILY_LIMIT) {
+  const ref = db.doc(usageDoc(now));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const count = snap.exists ? Number(snap.get('count')) || 0 : 0;
+    if (count >= limit) return false;
+    tx.set(ref, { count: count + 1, day: usageDay(now), updatedAt: now });
+    return true;
+  });
 }

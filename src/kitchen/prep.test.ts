@@ -88,3 +88,19 @@ describe('prepFor with orders saved as plain text', () => {
     expect(p.others.map((x) => x.customer)).toEqual(['10:00 AM Old']);
   });
 });
+
+describe('prepFor with 1½ trays', () => {
+  it('shows mixed amounts with a dash, never "11/2"', () => {
+    const p = prepFor(
+      [
+        order('Patel', at(12), [line('cb', 'Chicken Dum Biryani', 1.5, 'Full tray')]),
+        order('Smith', at(18), [line('cb', 'Chicken Dum Biryani', 1, 'Full tray')]),
+        { ...order('Old', at(13), []), lines: undefined, items: 'Chicken dum biryani 11/2 FT' },
+      ],
+      day,
+      MENU,
+    );
+    expect(p.dishes[0].totals).toEqual(['4 Full trays']);
+    expect(p.dishes[0].from.map((f) => f.text)).toEqual(['12:00 PM Patel: 1-1/2 Full trays', '1:00 PM Old: 1-1/2 Full trays', '6:00 PM Smith: 1 Full tray']);
+  });
+});

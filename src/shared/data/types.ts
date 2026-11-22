@@ -73,8 +73,14 @@ export interface CateringOrder {
    *  added (read them with orderLines() from the catering helpers, which falls back to the text). */
   lines?: OrderLine[];
   notes?: string;
-  status: 'open' | 'completed';
+  /** 'cancelled': the customer called it off. Hidden from the kitchen and the totals; deposits stay in Payments. */
+  status: 'open' | 'completed' | 'cancelled';
   completedAt?: number | null;
+  /** When it was cancelled (store time); null after it is reopened. */
+  cancelledAt?: number | null;
+  /** Soft delete: set when deleted in the app, which then hides the order everywhere. Orders are never
+   *  removed from the database by the app. null or missing: not deleted. */
+  deletedAt?: number | null;
   createdAt: number;
   updatedAt: number;
   /** Every saved edit, oldest first (the last 50 are kept). */
@@ -98,6 +104,11 @@ export interface OrderLine {
   text?: string;
   /** true when the line was read by a guess (an old order, a scan or a paste) and nobody has checked it yet. */
   check?: boolean;
+  /** Set on an extra (raita with a biryani, ...) added by the auto-extras rules: the extra's name, which
+   *  finds the row again when the dishes change. Missing on dish rows. */
+  extra?: string;
+  /** true once someone changed the extra's amount or name: it then stays as they left it. */
+  extraEdited?: boolean;
 }
 
 /**
@@ -118,7 +129,24 @@ export interface OrderAmount {
   takenBy?: string | null;
   /** Part payments (advances) taken before the order is paid in full, oldest first. Missing when none. */
   deposits?: Deposit[];
+  /** Every money action, oldest first. Add-only: entries are never changed or removed. Missing on older docs. */
+  log?: PayEvent[];
+  /** The order's `items` text when the amount was set or last confirmed, to warn when the items change
+   *  later. null or missing: no check (older orders). */
+  itemsAt?: string | null;
+  /** On a cancelled order: what happened to the money, e.g. "Refunded $200 deposit by Zelle" (<= 500 chars). */
+  refundNote?: string | null;
   updatedAt: number;
+}
+
+/** One money action on a catering order, kept in orderAmounts.log (add-only). */
+export interface PayEvent {
+  kind: 'amount' | 'deposit' | 'depositRemoved' | 'paid' | 'unpaid' | 'cancelled' | 'refund';
+  amount: number | null;
+  method: PayMethod | null;
+  takenBy: string | null;
+  at: number;
+  note?: string;
 }
 
 export type PayMethod = 'cash' | 'card' | 'zelle' | 'check';
@@ -132,6 +160,63 @@ export interface Deposit {
   takenBy: string;
   /** When it was recorded (store time). */
   at: number;
+}
+
+/**
+ * A catering price estimate (quote) made with a customer before they confirm. Front and manager apps only:
+ * the kitchen never loads this collection. Once the customer agrees, "Make order" turns it into a real
+ * catering order and the estimate is kept, marked `ordered`, with the new order's id.
+ */
+export interface CateringEstimate {
+  customerName: string;
+  /** '' when not given. */
+  phone: string;
+  /** When the customer wants it, if known (ms since epoch); null when not decided yet. */
+  dueAt: number | null;
+  type: 'pickup' | 'delivery';
+  /** '' unless delivery. */
+  address: string;
+  people: number | null;
+  lines: EstimateLine[];
+  /** US dollars off the subtotal; null when none. */
+  discount: number | null;
+  /** US dollars; null when none. */
+  deliveryFee: number | null;
+  /** Sales tax in percent, as it was when the estimate was saved (0 = no tax). */
+  taxPercent: number;
+  /** What the customer pays, as worked out when saved. */
+  total: number;
+  notes: string;
+  status: 'open' | 'ordered';
+  /** The catering order made from it, once ordered. */
+  orderId: string | null;
+  /** Soft delete: set when deleted in the app, which then hides it everywhere. null or missing: not deleted. */
+  deletedAt?: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** One item of an estimate: an order line with its price. */
+export interface EstimateLine extends OrderLine {
+  /** What this line costs in US dollars (all of it, not each). 0 for a free extra; null when not priced. */
+  price: number | null;
+  /** true when someone typed the price; otherwise it came from the price list. */
+  priceSet?: boolean;
+}
+
+/**
+ * The catering price list (singleton `cateringPrices`), edited in the manager app under ☰ More.
+ * Missing: the app uses its built-in starting prices (see prices.ts in the catering folder).
+ */
+export interface CateringPrices {
+  /** Full-tray price per dish, by the dish's plain name key (letters and digits, lower case). Half tray = half. */
+  trays: Record<string, number>;
+  /** Full-tray price for a dish with no price of its own, by kind of dish (chicken includes paneer and egg;
+   *  meat is goat, lamb and fish). Pieces (samosa, kebab, tikki) are priced by hand for now. */
+  defaults: { veg: number; chicken: number; meat: number };
+  /** Sales tax in percent; 0 = no tax line. */
+  taxPercent: number;
+  updatedAt: number;
 }
 
 /** Which device saved an edit: the kitchen tablet or the manager phone app. */
@@ -175,7 +260,7 @@ export type AlertState = 'on' | 'off' | 'blocked' | 'needs-home-screen' | 'unsup
 
 export interface AppSettings {
   kitchenPin: string; // 4 digits
-  /** Manager PIN (4 digits) for the Screens, Staff and More tabs. Missing = the default, 5678. */
+  /** No longer used (the manager PIN was removed when the front app got its own link). Left so old data still reads. */
   managerPin?: string;
   restaurantName: string;
 }
@@ -211,6 +296,7 @@ export interface Singletons {
   staffConfig: StaffConfig;
   loop: LoopAnchor;
   seeded: { at: number };
+  cateringPrices: CateringPrices;
 }
 export type SingletonId = keyof Singletons;
 
@@ -222,6 +308,8 @@ export interface Collections {
   orders: CateringOrder;
   /** Manager only: the amount per order (doc id = order id). Never read it from the kitchen. */
   orderAmounts: OrderAmount;
+  /** Catering price estimates (front and manager apps). Never read it from the kitchen. */
+  estimates: CateringEstimate;
   /** Single documents: use useSingleton / saveSingleton rather than this collection directly. */
   singletons: Singletons[SingletonId];
   staffWeeks: StaffWeek;

@@ -12,12 +12,15 @@ import {
   deleteDoc as fsDelete,
   doc,
   collection,
+  documentId,
   getDoc as fsGet,
   getDocFromServer,
   getDocsFromServer,
   runTransaction,
   limit,
+  or,
   query,
+  where,
   initializeFirestore,
   onSnapshot,
   persistentLocalCache,
@@ -28,10 +31,11 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { filterKey, idChunks, recentSince, type CollectionFilter } from './filter';
 import { fitPicture } from './local';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import { keepListening, scheduleClockSync, singleFlight } from './resync';
+import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
@@ -149,22 +153,67 @@ export class FirebaseStore implements DataStore {
     );
   }
 
-  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void): Unsubscribe {
-    return this.later(() =>
-      keepListening(
+  watchCollection<C extends CollectionName>(col: C, cb: (docs: WithId<Collections[C]>[]) => void, filter?: CollectionFilter): Unsubscribe {
+    const label = `watchCollection ${col}${filter ? ` (${filterKey(filter).slice(0, 60)})` : ''}`;
+    // { ids }: one query per 30 ids (Firestore's limit for `in`); the list is sent once every part has answered.
+    if (filter && typeof filter === 'object' && 'ids' in filter) {
+      const chunks = idChunks(filter.ids);
+      if (chunks.length === 0) {
+        cb([]);
+        return () => {};
+      }
+      const parts: (WithId<Collections[C]>[] | null)[] = chunks.map(() => null);
+      const send = () => {
+        if (parts.every(Boolean)) cb(parts.flatMap((p) => p!));
+      };
+      const stops = chunks.map((ids, i) =>
+        this.later(() =>
+          keepListening(
+            (ok, fail) =>
+              onSnapshot(
+                query(collection(this.db, col), where(documentId(), 'in', ids)),
+                (q) => {
+                  ok();
+                  parts[i] = q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>);
+                  send();
+                },
+                fail,
+              ),
+            `${label} part ${i + 1}`,
+          ),
+        ),
+      );
+      return () => stops.forEach((stop) => stop());
+    }
+    return this.later(() => {
+      // The same rules as matchesFilter (filter.ts). Each part uses Firestore's automatic one-field index.
+      const all = collection(this.db, col);
+      const since = recentSince(this.now());
+      const source =
+        filter === 'openOrRecent'
+          ? query(all, or(where('status', '==', 'open'), where('dueAt', '>=', since)))
+          : filter === 'openOrRecentlyUpdated'
+            ? query(all, or(where('status', '==', 'open'), where('updatedAt', '>=', since)))
+            : filter === 'notPaid'
+              ? query(all, where('paid', '==', false))
+              : filter
+                ? query(all, where('dueAt', '>=', filter.dueFrom), where('dueAt', '<', filter.dueTo))
+                : all;
+      return keepListening(
         (ok, fail) =>
           onSnapshot(
-            collection(this.db, col),
+            source,
             (q) => {
               ok();
               cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>));
             },
             fail,
           ),
-        `watchCollection ${col}`,
-      ),
-    );
+        label,
+      );
+    });
   }
+
 
   async getDoc<C extends CollectionName>(col: C, id: string): Promise<WithId<Collections[C]> | null> {
     await this.ready;
@@ -189,17 +238,17 @@ export class FirebaseStore implements DataStore {
 
   async setDoc<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<void> {
     await this.ready;
-    await fsSet(this.ref(col, id), { ...clean(data as object), id });
+    await queued(fsSet(this.ref(col, id), { ...clean(data as object), id }), `setDoc ${col}/${id}`);
   }
 
   async updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void> {
     await this.ready;
-    await fsSet(this.ref(col, id), { ...clean(patch as object), id }, { merge: true });
+    await queued(fsSet(this.ref(col, id), { ...clean(patch as object), id }, { merge: true }), `updateDoc ${col}/${id}`);
   }
 
   async deleteDoc(col: CollectionName, id: string): Promise<void> {
     await this.ready;
-    await fsDelete(this.ref(col, id));
+    await queued(fsDelete(this.ref(col, id)), `deleteDoc ${col}/${id}`);
   }
 
   async addDoc<C extends CollectionName>(col: C, data: Omit<Collections[C], 'id'>): Promise<string> {
@@ -316,9 +365,10 @@ export class FirebaseStore implements DataStore {
       return res.data;
     } catch (e) {
       console.warn('readOrder', e);
-      // The server says plainly when this photo or message can't be read (trying again won't help).
+      // The server says plainly when this photo or message can't be read, or the day's limit is used up
+      // (trying again won't help).
       const err = e as { code?: string; message?: string };
-      if (err?.code === 'functions/invalid-argument' && err.message) throw new Error(err.message);
+      if ((err?.code === 'functions/invalid-argument' || err?.code === 'functions/resource-exhausted') && err.message) throw new Error(err.message);
       throw new Error(`Couldn't read the ${what} right now. Please try again, or type the order in.`);
     }
   }

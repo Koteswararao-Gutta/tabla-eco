@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CateringOrder } from '@shared/data';
-import { ALARM_BEEPS, ALARM_CYCLE_MS, CHIME_PEAK, MIN_RINGS, RING_MS, ackPatch, alarmRings, dueReminders, ring, ringAt, staffedAt, startAlarm, stopAlarm, wakeAudio, type KitchenOrder } from './reminder';
+import { ALARM_BEEPS, ALARM_CYCLE_MS, CHIME_PEAK, MIN_RINGS, RING_MS, ackPatch, alarmRings, alarmTitle, dueReminders, whenText, ring, ringAt, staffedAt, startAlarm, stopAlarm, wakeAudio, type KitchenOrder } from './reminder';
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -17,6 +17,11 @@ describe('dueReminders', () => {
     const done = order('done', now + 1000, 'completed');
     const seen = order('seen', now + 1000, 'open', now + 1000);
     expect(dueReminders([done, seen], now)).toEqual([]);
+  });
+  it('never rings for a cancelled or deleted order', () => {
+    const off = order('off', now + 1000, 'cancelled');
+    const gone = { ...order('gone', now + 1000), deletedAt: now - 5 };
+    expect(dueReminders([off, gone], now)).toEqual([]);
   });
   it('the acknowledgement is stored as the due time it was for', () => {
     expect(ackPatch(order('x', now + 1000))).toEqual({ kitchenAckFor: now + 1000 });
@@ -73,6 +78,20 @@ describe('ringAt: only while the kitchen is staffed', () => {
     expect(staffedAt(at(22, 12), staff)).toBe(false); // closed day
     expect(staffedAt(at(18, 3))).toBe(true); // no hours set up: always
   });
+  it('no staff schedule saved (null): uses the planner\'s starting hours, so no alarm at 3 AM', () => {
+    // Planner defaults: Mon-Thu open 11-9 with a 2-5 break, Fri-Sun 11-10, prep from 10.
+    expect(staffedAt(at(18, 3), null)).toBe(false);
+    expect(staffedAt(at(18, 12), null)).toBe(true); // Wednesday noon
+    expect(staffedAt(at(18, 15), null)).toBe(false); // Wednesday break
+    expect(staffedAt(at(20, 15), null)).toBe(true); // Friday, no break
+    expect(ringAt(at(19, 10, 15), null)).toBe(at(18, 20, 45)); // 10:15 AM order: before closing the night before
+  });
+  it('on a special-hours day, prep starts the usual lead before that day\'s opening', () => {
+    const special = { ...staff, special: { '2026-11-18': { open: 900, close: 1260 } } }; // opens 3 PM; prep normally 1 h ahead
+    expect(staffedAt(at(18, 13, 59), special)).toBe(false);
+    expect(staffedAt(at(18, 14), special)).toBe(true);
+    expect(staffedAt(at(19, 10), special)).toBe(true); // a normal day keeps prep at 10
+  });
   it('an order before opening, with nobody there the night before, rings at opening and is not dropped', () => {
     const noPrep = { settings: { days: [wd, wd, wd, wd, wd, wd, wd] }, special: { '2026-11-22': { closed: true } } };
     expect(ringAt(at(23, 11), noPrep)).toBe(at(23, 11)); // Monday 11:00 order after a closed Sunday
@@ -87,6 +106,29 @@ describe('ringAt: only while the kitchen is staffed', () => {
     const o = order('x', at(18, 16));
     expect(dueReminders([o], at(18, 13, 45), staff)).toEqual([o]);
     expect(dueReminders([o], at(18, 17, 1), staff)).toEqual([]);
+  });
+});
+
+describe('heads-up wording names the day when it is not today', () => {
+  const now = new Date(2026, 10, 23, 20, 46).getTime();
+  const tomorrow = { type: 'pickup', dueAt: new Date(2026, 10, 24, 10, 15).getTime() };
+  const today = { type: 'delivery', dueAt: new Date(2026, 10, 23, 21, 16).getTime() };
+  it('says the day', () => {
+    expect(whenText(tomorrow, now, true)).toBe('Pickup tomorrow at 10:15 AM');
+    expect(whenText(tomorrow, now)).toBe('pickup tomorrow at 10:15 AM');
+    expect(whenText({ ...tomorrow, dueAt: new Date(2026, 10, 25, 10, 15).getTime() }, now)).toBe('pickup on Wed, Nov 25 at 10:15 AM');
+    expect(whenText(today, now, true)).toBe('Delivery at 9:16 PM, in 30 min');
+  });
+  it('the headline says "soon" only for today', () => {
+    expect(alarmTitle([today], now)).toBe('Catering order soon');
+    expect(alarmTitle([tomorrow], now)).toBe('Catering order tomorrow');
+    // Just before midnight, an order 30 minutes away is "soon", with its countdown, not "tomorrow".
+    const late = new Date(2026, 10, 23, 23, 50).getTime();
+    const pastMidnight = { type: 'pickup', dueAt: late + 30 * 60_000 };
+    expect(alarmTitle([pastMidnight], late)).toBe('Catering order soon');
+    expect(whenText(pastMidnight, late)).toBe('pickup at 12:20 AM, in 30 min');
+    expect(alarmTitle([today, tomorrow], now)).toBe('2 catering orders coming up');
+    expect(alarmTitle([today, today], now)).toBe('2 catering orders soon');
   });
 });
 

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Idle, ScreenSurface } from '@shared/ui';
 import { store, useCollection, useHeartbeat, useSingleton, type ScreenId, type Slot, type Transition } from '@shared/data';
+import { loopSlots } from '@shared/clock/loop';
 import { msUntilNextChange, targetFor, type Target } from './schedule';
 import './tv-menu.css';
 
@@ -62,6 +63,8 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   const allSlots = useCollection('slots');
   const slots = useMemo(() => allSlots && allSlots.filter((s: Partial<Slot>) => !!s.pictures && typeof s.pictures === 'object' && typeof s.seconds === 'number' && typeof s.order === 'number'), [allSlots]);
   const screens = useCollection('screens');
+  // Only the spots this TV plays (a picture added to TV 3 alone is not a spot on TV 1).
+  const mine = useMemo(() => slots && screens && loopSlots(slots, screenId, screens), [slots, screens, screenId]);
   const loop = useSingleton('loop');
   const settings = useSingleton('settings');
   const name = settings?.restaurantName || 'Tabla';
@@ -70,10 +73,10 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   const [tick, setTick] = useState(0);
   const ready = slots !== null && screens !== null && loop !== undefined;
   useEffect(() => {
-    if (!slots || loop === undefined) return;
-    const t = setTimeout(() => setTick((n) => n + 1), msUntilNextChange(slots, loop, store.now()));
+    if (!mine || loop === undefined) return;
+    const t = setTimeout(() => setTick((n) => n + 1), msUntilNextChange(mine, loop, store.now()));
     return () => clearTimeout(t);
-  }, [slots, loop, tick]);
+  }, [mine, loop, tick]);
   useEffect(() => {
     const onVis = () => document.visibilityState === 'visible' && setTick((n) => n + 1);
     document.addEventListener('visibilitychange', onVis);

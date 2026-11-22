@@ -8,10 +8,12 @@ import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { editAlertFor, kitchenEdit } from './edits.js';
-import { checkRequest, menuNames, readError, readOrderPhoto, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
-import { alertFor, chunks, deadTokens, onRing, planReminder, shouldSchedule, TIME_ZONE } from './reminders.js';
+import { checkRequest, LIMIT_REACHED, menuNames, readError, readOrderPhoto, takeDailyRead, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
+import { alertFor, chunks, deadTokens, onRing, planReminder, sendShouldRetry, shouldSchedule, TIME_ZONE } from './reminders.js';
+import { restaurantDay, SUMMARY_WINDOW_MS, summaryFor, todaysOrders } from './summary.js';
 import { MENU_LINK, nextStatus, readReport } from './toastMenu.js';
 
 initializeApp();
@@ -24,6 +26,16 @@ export const readOrder = onCall(
     if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
     const problem = checkRequest(req.data);
     if (problem) throw new HttpsError('invalid-argument', problem);
+    // At most DAILY_LIMIT reads a day (restaurant time), so a stuck button or a leaked link can't run up the bill.
+    // If the counter itself can't be reached, the read still goes ahead (logged).
+    const allowed = await takeDailyRead(getFirestore(), Date.now()).catch((e) => {
+      logger.error('readOrder: daily counter failed', e);
+      return true;
+    });
+    if (!allowed) {
+      logger.warn('readOrder: daily limit reached');
+      throw new HttpsError('resource-exhausted', LIMIT_REACHED);
+    }
     try {
       const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value(), maxRetries: 2 });
       // The menu's dish names, so items come back with the same names the order form picks from.
@@ -58,23 +70,33 @@ async function scheduleReminder(orderId, order) {
   }
 }
 
+/** Stop retrying a save's alarm after this long (a problem that lasts hours needs a fix, not more tries). */
+const RETRY_FOR_MS = 6 * 60 * 60_000;
+
 /** Every time an order is saved: set its alarm (completed, deleted or moved orders are checked when it rings),
- *  and when the kitchen edited it, tell the phones what changed. */
-export const orderSaved = onDocumentWritten({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
+ *  and when the kitchen edited it, tell the phones what changed.
+ *  retry: if setting the alarm fails (e.g. a short Cloud Tasks outage), Firebase runs this again. A repeat is safe:
+ *  the alarm's id makes the same alarm count once, and the edit alert is sent only after the alarm is set. */
+export const orderSaved = onDocumentWritten({ document: 'orders/{orderId}', maxInstances: 3, retry: true }, async (event) => {
   const after = event.data?.after?.data() ?? null;
   const before = event.data?.before?.data() ?? null;
   const { orderId } = event.params;
+  const age = Date.now() - Date.parse(event.time);
+  if (age > RETRY_FOR_MS) {
+    logger.error(`orderSaved: gave up on order ${orderId} after ${Math.round(age / 60_000)} min of retries`);
+    return;
+  }
+  // Throws on failure, so the whole save is tried again.
+  if (shouldSchedule(before, after)) await scheduleReminder(orderId, after); // else nothing moves the alarm
   const edit = kitchenEdit(before, after);
-  // Retries can repeat this; the tag makes a repeat replace the same alert on the phone.
+  // The tag makes a repeat replace the same alert on the phone.
   if (edit) {
     try {
       await sendToAllDevices(editAlertFor(after, edit), `edit-${orderId}-${edit.at}`);
     } catch (e) {
-      logger.error('kitchen edit alert failed', e); // never stops the 1-hour reminder below
+      logger.error('kitchen edit alert failed', e); // never retried: the alarm above is what matters
     }
   }
-  if (!shouldSchedule(before, after)) return; // nothing that moves the alarm (e.g. only remindedFor changed)
-  await scheduleReminder(orderId, after);
 });
 
 /** The alarm: re-reads the order and sends the alert to every device that turned alerts on. */
@@ -91,9 +113,32 @@ export const orderReminder = onTaskDispatched(
     if (what === 'later') return scheduleReminder(orderId, order);
     if (what === 'skip') return;
 
-    const sent = await sendToAllDevices(alertFor(order, now), `order-${orderId}`, 'high');
+    const result = await sendToAllDevices(alertFor(order, now), `order-${orderId}`, 'high');
     // Remember it was sent for this time, so a retry or a move away and back doesn't ring again.
-    if (sent > 0) await snap.ref.update({ remindedFor: dueAt });
+    if (result.sent > 0) return void (await snap.ref.update({ remindedFor: dueAt }));
+    // Nobody got it: an error in Cloud Logging, with the order id.
+    logger.error(`orderReminder: the 1-hour reminder for order ${orderId} reached no phone (${result.failed} failed)`);
+    // The failure may pass (not just phones that are gone): throw, so Cloud Tasks tries again.
+    if (sendShouldRetry(result)) throw new Error(`reminder for order ${orderId}: no phone got it (${result.failed} failed), trying again`);
+  },
+);
+
+// ---------- Morning summary ----------
+
+/** 9:00 AM restaurant time: one alert listing today's open catering orders. No orders today, no alert. */
+export const morningSummary = onSchedule(
+  { schedule: '0 9 * * *', timeZone: TIME_ZONE, retryCount: 1, maxInstances: 1 },
+  async () => {
+    const now = Date.now();
+    const snap = await getFirestore()
+      .collection('orders')
+      .where('dueAt', '>=', now - SUMMARY_WINDOW_MS)
+      .where('dueAt', '<=', now + SUMMARY_WINDOW_MS)
+      .get();
+    const today = todaysOrders(snap.docs.map((d) => ({ ...d.data(), id: d.id })), now);
+    const alert = summaryFor(today);
+    if (!alert) return void logger.info('morningSummary: no catering orders today');
+    await sendToAllDevices(alert, `summary-${restaurantDay(now)}`);
   },
 );
 
@@ -114,13 +159,21 @@ export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, ma
   const source = 'kitchen tablet';
   const { menu, error } = readReport(req.data);
   let result;
+  let saveError = null;
   if (menu) {
-    const saved = await currentRef.get();
-    if (saved.get('hash') !== menu.hash) {
-      await currentRef.set({ ...menu, changedAt: now, source });
-      logger.info(`reportToastMenu: menu changed (${menu.itemCount} items, ${menu.soldOutCount} sold out)`);
+    try {
+      const saved = await currentRef.get();
+      if (saved.get('hash') !== menu.hash) {
+        await currentRef.set({ ...menu, changedAt: now, source });
+        logger.info(`reportToastMenu: menu changed (${menu.itemCount} items, ${menu.soldOutCount} sold out)`);
+      }
+      result = { ok: true, source, itemCount: menu.itemCount, soldOutCount: menu.soldOutCount };
+    } catch (e) {
+      // Saving failed (e.g. the menu grew too big): count it as a failed try, so it alerts like any other.
+      logger.error('reportToastMenu: could not save the menu', e);
+      saveError = e;
+      result = { ok: false, error: `could not save the menu: ${e?.message ?? e}` };
     }
-    result = { ok: true, source, itemCount: menu.itemCount, soldOutCount: menu.soldOutCount };
   } else {
     logger.warn('reportToastMenu: the tablet could not read the Toast menu', error);
     result = { ok: false, error };
@@ -129,15 +182,18 @@ export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, ma
   const { status, alert } = nextStatus(prev, result, now);
   await statusRef.set(status);
   if (alert) await sendToAllDevices({ ...alert, link: MENU_LINK }, 'toast-menu');
+  if (saveError) throw new HttpsError('internal', 'Could not save the menu.');
   return result;
 });
 
-/** Sends one alert to every phone that turned alerts on, 500 at a time, and forgets phones that are gone. Returns how many got it. */
+/** Sends one alert to every phone that turned alerts on, 500 at a time, and forgets phones that are gone.
+ *  Returns { sent, failed, removed }: how many got it, how many didn't, and how many of those were gone for good. */
 async function sendToAllDevices(alert, tag, urgency = 'normal') {
   const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
   if (!docs.length) {
-    logger.info(`${tag} alert: no devices have alerts on`);
-    return 0;
+    // An error (not info), so it shows among Cloud Logging's errors: with alerts on nowhere, nobody hears them.
+    logger.error(`${tag} alert reached no phone: no devices have alerts on (turn alerts on in the manager app on each phone)`);
+    return { sent: 0, failed: 0, removed: 0 };
   }
   let sent = 0;
   let failed = 0;
@@ -155,6 +211,7 @@ async function sendToAllDevices(alert, tag, urgency = 'normal') {
     removed += dead.length;
     await Promise.all(batch.filter((d) => dead.includes(d.get('token'))).map((d) => d.ref.delete().catch(() => {})));
   }
-  logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
-  return sent;
+  if (sent === 0) logger.error(`${tag} alert reached no phone: all ${failed} sends failed (${removed} phones were gone)`);
+  else logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
+  return { sent, failed, removed };
 }
