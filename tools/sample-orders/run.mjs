@@ -69,6 +69,24 @@ async function main() {
       console.log(`${mode === 'delete' ? 'deleted' : 'found'} ${d.id} | ${d.get('customerName')}`);
     }
     console.log(`${mode === 'delete' ? 'deleted' : 'found'} ${n} sample orders`);
+  } else if (mode === 'indexes') {
+    // The apps' "open or recent" lists (orders: status + dueAt, estimates: status + updatedAt) need a
+    // composite index in Firestore. Lists what exists and creates any that are missing. Adds only, never deletes.
+    const { cert: c } = await import('firebase-admin/app');
+    const token = (await c(JSON.parse(process.env.SA)).getAccessToken()).access_token;
+    const base = 'https://firestore.googleapis.com/v1/projects/tabla-eco-2e94b/databases/(default)/collectionGroups';
+    const want = [['orders', 'dueAt'], ['estimates', 'updatedAt']];
+    for (const [group, field] of want) {
+      const list = await (await fetch(`${base}/${group}/indexes`, { headers: { Authorization: `Bearer ${token}` } })).json();
+      console.log(`${group} indexes now:`, JSON.stringify(list));
+      const has = (list.indexes ?? []).some((ix) => ix.queryScope === 'COLLECTION' && ix.fields?.[0]?.fieldPath === 'status' && ix.fields?.[1]?.fieldPath === field);
+      if (has) { console.log(`${group}: status + ${field} index already there`); continue; }
+      const res = await fetch(`${base}/${group}/indexes`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queryScope: 'COLLECTION', fields: [{ fieldPath: 'status', order: 'ASCENDING' }, { fieldPath: field, order: 'ASCENDING' }] }),
+      });
+      console.log(`${group}: create status + ${field} -> ${res.status}`, await res.text());
+    }
   } else if (mode === 'check') {
     // Read only: the same queries the kitchen and catering list use, to see whether the samples come back.
     const { Filter } = await import('firebase-admin/firestore');
