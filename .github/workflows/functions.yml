@@ -105,7 +105,7 @@ jobs:
             printf '%s' "$KEY" | $FIREBASE functions:secrets:set ANTHROPIC_API_KEY --data-file=- --project $PROJECT --non-interactive --force
           fi
       - if: steps.check.outputs.ready == 'true'
-        run: $FIREBASE deploy --only functions,firestore:rules --project $PROJECT --non-interactive --force
+        run: $FIREBASE deploy --only functions,firestore:rules,firestore:indexes --project $PROJECT --non-interactive --force
       - if: steps.check.outputs.ready == 'true'
         name: Remove old key versions
         continue-on-error: true

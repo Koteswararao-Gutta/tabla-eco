@@ -1,6 +1,8 @@
 // Narrower live lists, so a phone or an always-on screen doesn't download every order ever saved.
 // Both stores use the same rule: FirebaseStore as a Firestore query, LocalStore by filtering in the browser
-// with matchesFilter. Every query here uses Firestore's automatic one-field indexes (no composite index).
+// with matchesFilter. The two "open or recent" queries (status == 'open' OR a date >= since) need the composite
+// indexes in firestore.indexes.json (status + dueAt on orders, status + updatedAt on estimates); without them
+// Firestore refuses the query and the kitchen and catering lists get no new orders. The others use one-field indexes.
 
 /**
  * - 'openOrRecent': documents still open (`status` 'open', whatever their date) plus every one due
