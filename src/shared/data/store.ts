@@ -41,6 +41,10 @@ export interface DataStore {
   /** Creates the document only if it doesn't exist yet, in one step (FirebaseStore: a transaction, so two
    *  devices can't both create it; it throws when offline). True when this call created it. Never overwrites. */
   createIfMissing<C extends CollectionName>(col: C, id: string, data: Collections[C]): Promise<boolean>;
+  /** Merges `patch` into the document only if `test` holds for it as saved right now (null when missing), in one
+   *  step (FirebaseStore: a transaction, which reads the server, never a stale local copy; it throws when offline).
+   *  True when it saved. For small automatic fixes that must never undo another device's newer change. */
+  updateIf<C extends CollectionName>(col: C, id: string, test: (cur: WithId<Collections[C]> | null) => boolean, patch: Partial<Collections[C]>): Promise<boolean>;
 
   /** Stores a picture (resized to fit 1920x1080 for menu use) and returns its record. */
   uploadPicture(file: Blob, name: string): Promise<WithId<Picture>>;

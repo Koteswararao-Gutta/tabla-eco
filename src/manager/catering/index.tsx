@@ -12,7 +12,7 @@ import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
 import { itemTexts, menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
-import { balance, depositError, depositTotal, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, paidSoFar, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
 import { savePay } from './payWrite';
 import { duplicateOf, isCancelled, notDeleted } from './safety';
 import './catering.css';
@@ -62,16 +62,18 @@ export default function Catering() {
   // Deleted orders (soft delete) are left out of everything here: list, calendar, Unpaid, details.
   const [recentFrom] = useState(() => recentSince(store.now()));
   const [olderFrom, setOlderFrom] = useState<number | null>(null);
-  const { orders: loadedOrders, recent, unpaidReady, olderLoading } = useCateringOrders(olderFrom, recentFrom);
+  const { orders: loadedOrders, unpaidReady, olderLoading } = useCateringOrders(olderFrom, recentFrom);
   const orders = useMemo(() => (loadedOrders ? notDeleted(loadedOrders) : loadedOrders), [loadedOrders]);
   const [editing, setEditing] = useState<string | null>(null); // order id, 'new', or closed
   // Read the order being edited from the live list, so a change made elsewhere (e.g. the kitchen
   // completing it) shows in the sheet at once; an older order (e.g. opened from Payments) is read on its own.
   const editOrder = useOrder(editing && editing !== 'new' ? editing : null, orders) ?? null;
-  const onScreen = useMemo(() => (orders && editOrder && !orders.some((o) => o.id === editOrder.id) ? [...orders, editOrder] : orders), [orders, editOrder]);
+  // Every loaded order, deleted ones too (their amounts' unpaid flag gets cleared, see useExplicitPaid), and the
+  // one open in the sheet.
+  const onScreen = useMemo(() => (loadedOrders && editOrder && !loadedOrders.some((o) => o.id === editOrder.id) ? [...loadedOrders, editOrder] : loadedOrders), [loadedOrders, editOrder]);
   // Manager only: what each order costs (orderAmounts/{order id}), for the orders loaded. The kitchen never loads this.
   const { shown: amounts, current: currentAmounts } = useAmountsOf(onScreen);
-  useExplicitPaid(recent, currentAmounts);
+  useExplicitPaid(onScreen, currentAmounts);
   // Read once per snapshot, so each card gets the same Pay object until its payment changes.
   const pays = useMemo(() => (amounts ? new Map(amounts.map((a) => [a.id, payFrom(a)])) : null), [amounts]);
   const payOf = useCallback((id: string): Pay | undefined => (pays ? pays.get(id) ?? NO_PAY : undefined), [pays]);
@@ -475,7 +477,7 @@ const OrderCard = memo(function OrderCard({ order: o, pay, today, showDate, onOp
   const drift = !cancelled && itemsChangedSincePrice(o.items, pay);
   // A completed, unpaid order says "Unpaid" once, in its badge; the grey line keeps only the amount.
   // A cancelled order shows only what was already paid (a refund may be due).
-  const payText = cancelled ? (pay && depositTotal(pay) > 0 ? `${amountLabel(depositTotal(pay))} paid` : '') : unpaidBadge && depositTotal(pay) === 0 ? amountLabel(pay.amount) : payLabel(pay);
+  const payText = cancelled ? (pay && paidSoFar(pay) > 0 ? `${amountLabel(paidSoFar(pay))} paid` : '') : unpaidBadge && depositTotal(pay) === 0 ? amountLabel(pay.amount) : payLabel(pay);
   const bits = [o.people ? `${o.people} people` : null, `${n} item${n === 1 ? '' : 's'}`, payText || null].filter(Boolean);
   return (
     <button className={'c-card' + (o.status !== 'open' ? ' done' : '')} onClick={() => onOpen(o)} data-testid="order-card">
@@ -933,7 +935,7 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
 function CancelView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: number; onBack: () => void }) {
   const [note, setNote] = useState('');
   const { busy, error, run } = useSaver();
-  const dep = depositTotal(pay);
+  const dep = paidSoFar(pay);
   const cancel = () =>
     run(async () => {
       const text = note.trim().slice(0, REFUND_NOTE_MAX);
@@ -941,7 +943,7 @@ function CancelView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: 
       await savePay(order.id, (cur) => ({
         patch: text ? { refundNote: text } : {},
         events: [
-          { kind: 'cancelled', amount: depositTotal(cur) || null, method: null, takenBy: null },
+          { kind: 'cancelled', amount: paidSoFar(cur) || null, method: null, takenBy: null },
           ...(text ? [{ kind: 'refund' as const, amount: null, method: null, takenBy: null, note: text }] : []),
         ],
       }));
@@ -958,7 +960,7 @@ function CancelView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: 
       </div>
       <p className="c-confirm">
         The kitchen stops seeing it and it leaves the totals. It stays under History, and “Reopen” brings it back.
-        {dep > 0 && ` ${amountLabel(dep)} was paid as a deposit: it stays in Payments.`}
+        {dep > 0 && ` ${amountLabel(dep)} was already paid: it stays in Payments.`}
       </p>
       <Field label={dep > 0 ? 'Refund note (optional)' : 'Note (optional)'}>
         <textarea

@@ -56,7 +56,7 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && request.resource.data.keys().hasOnly(['amount', 'paid', 'paidAt', 'method', 'takenBy', 'deposits', 'updatedAt', 'id',
                                                  'log', 'itemsAt', 'refundNote'])
-        && (!('paid' in request.resource.data) || request.resource.data.paid is bool)
+        && (!('paid' in request.resource.data) || request.resource.data.paid == null || request.resource.data.paid is bool)
         && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is number)
         && (!('method' in request.resource.data) || request.resource.data.method == null
             || request.resource.data.method in ['cash', 'card', 'zelle', 'check'])

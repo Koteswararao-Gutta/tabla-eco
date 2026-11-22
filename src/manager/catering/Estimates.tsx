@@ -119,13 +119,16 @@ function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, 
   const { busy, error, run } = useBusy();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const t = estimateTotals(e);
-  const ordered = e.status === 'ordered';
+  // The order it was made into: when that order was deleted, the estimate can be made into an order again.
+  const linked = useDoc('orders', e.status === 'ordered' && e.orderId ? e.orderId : '_none');
+  const orderGone = e.status === 'ordered' && (!e.orderId || linked === null || (!!linked && typeof linked.deletedAt === 'number'));
+  const ordered = e.status === 'ordered' && !orderGone;
   const text = estimateText(e, settings?.restaurantName?.trim() ? `${settings.restaurantName.trim()} Indian Restaurant` : undefined);
   return (
     <div className="t-stack c-summary" data-testid="estimate-summary">
       <div className="c-sum-top">
         <span className="c-sum-when">{whenText(e, now)}</span>
-        {ordered ? <span className="t-badge good">✓ Made into an order</span> : <span className={'t-badge' + (e.type === 'delivery' ? ' accent' : '')}>{e.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>}
+        {ordered ? <span className="t-badge good">✓ Made into an order</span> : orderGone ? <span className="t-badge bad">Order was deleted</span> : <span className={'t-badge' + (e.type === 'delivery' ? ' accent' : '')}>{e.type === 'delivery' ? 'Delivery' : 'Pickup'}</span>}
       </div>
       <div className="c-sum-name">{e.customerName}</div>
       {e.phone && (

@@ -95,6 +95,13 @@ const norm = (t: string) => t.replace(/\r/g, '').split('\n').map((l) => l.trim()
 /** What has been paid in deposits so far. */
 export const depositTotal = (pay: Pick<Pay, 'deposits'>): number => Math.round(pay.deposits.reduce((a, d) => a + d.amount, 0) * 100) / 100;
 
+/** Everything the customer has paid so far: the whole amount once marked "Paid in full" (deposits when no amount
+ *  is set), else the deposits. A cancelled order uses this to show what may need refunding. */
+export function paidSoFar(pay: Pick<Pay, 'amount' | 'paid' | 'deposits'>): number {
+  if (pay.paid && pay.amount != null) return Math.max(pay.amount, depositTotal(pay));
+  return depositTotal(pay);
+}
+
 /** What the customer still owes: amount minus deposits (0 once paid). null when the amount isn't set. */
 export function balance(pay: Pick<Pay, 'amount' | 'paid' | 'deposits'>): number | null {
   if (pay.paid) return 0;

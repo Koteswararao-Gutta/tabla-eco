@@ -16,6 +16,11 @@ describe('catering prices', () => {
   it('sorts dishes into kinds', () => {
     expect(kindOf('Egg Biryani')).toBe('chicken');
     expect(kindOf('Chilli Panner')).toBe('chicken');
+  });
+  it('knows Telugu and other meat names (the same words as the name tags)', () => {
+    for (const n of ['Gongura Mamsam', 'Chepa Pulusu', 'Royyala Iguru', 'Keema Biryani', 'Haleem', 'Mutton Paya']) expect(kindOf(n)).toBe('meat');
+    for (const n of ['Kodi Vepudu', 'Natu Kodi Pulusu', 'Kodiguddu Fry', 'Chicken Keema', 'Chicken Haleem', 'Boiled Eggs']) expect(kindOf(n)).toBe('chicken');
+    for (const n of ['Gongura Pappu', 'Dal Tadka', 'Chapati', 'Bagara Rice']) expect(kindOf(n)).toBe('veg');
     expect(kindOf('Shrimp Biryani')).toBe('meat');
     expect(kindOf('Malai Kofta')).toBe('veg');
     expect(kindOf('Eggplant Curry')).toBe('veg');

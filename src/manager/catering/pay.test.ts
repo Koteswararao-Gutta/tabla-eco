@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { balance, depositError, depositTotal, isPaid, NO_PAY, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, isPaid, NO_PAY, paidSoFar, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 
 const dep = (amount: number) => ({ amount, method: 'cash' as const, takenBy: 'Siri', at: 1 });
 const pay = (p: Partial<Pay>): Pay => ({ ...NO_PAY, ...p });
@@ -101,5 +101,15 @@ describe('deposits that add up to the full amount', () => {
 describe('depositError wording', () => {
   it('asks for an amount like 100 without "leave it empty"', () => {
     expect(depositError('abc', pay({ amount: 300 }))).toBe('Please enter an amount like 100 or 100.50.');
+  });
+});
+
+describe('paidSoFar', () => {
+  it('is the whole amount once paid in full, else the deposits', () => {
+    expect(paidSoFar(pay({ amount: 500, paid: true }))).toBe(500);
+    expect(paidSoFar(pay({ amount: 500, paid: true, deposits: [dep(100)] }))).toBe(500);
+    expect(paidSoFar(pay({ amount: 500, deposits: [dep(100)] }))).toBe(100);
+    expect(paidSoFar(pay({ amount: null, paid: true, deposits: [dep(50)] }))).toBe(50);
+    expect(paidSoFar(pay({ amount: 500 }))).toBe(0);
   });
 });

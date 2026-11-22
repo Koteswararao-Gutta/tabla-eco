@@ -86,6 +86,20 @@ test('estimate: priced from the list, sent on WhatsApp, then made into an order'
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS}/estimates-list.png` });
   await expect(page.getByRole('button', { name: /Confirmed, made into orders \(1\)/ })).toBeVisible();
+
+  // The order is deleted: the estimate says so and can be made into an order again (no deleted order opens).
+  await page.getByRole('button', { name: /Confirmed, made into orders/ }).click();
+  await page.getByTestId('estimate-card').first().click();
+  await page.getByRole('dialog', { name: 'Estimate' }).getByRole('button', { name: 'Open the order' }).click();
+  const opened = page.getByRole('dialog', { name: 'Order' });
+  await opened.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('dialog', { name: 'Delete this order?' }).getByRole('button', { name: 'Delete order' }).click();
+  await expect(page.getByRole('dialog', { name: 'Delete this order?' })).toBeHidden();
+  await page.getByTestId('estimate-card').first().click();
+  const again = page.getByRole('dialog', { name: 'Estimate' });
+  await expect(again.getByText('Order was deleted')).toBeVisible();
+  await expect(again.getByRole('button', { name: 'Open the order' })).toHaveCount(0);
+  await expect(again.getByTestId('make-order')).toBeVisible();
 });
 
 test('price list: the manager changes a price and new estimates use it; the front app has estimates too', async ({ context }) => {

@@ -119,8 +119,10 @@ export interface OrderLine {
 export interface OrderAmount {
   /** US dollars, e.g. 200 or 1250.5. null when cleared. */
   amount: number | null;
-  /** Whether the customer has paid in full. Missing on amounts saved before this was added: treat as not paid. */
-  paid?: boolean;
+  /** Whether the customer has paid in full. Missing on amounts saved before this was added: treat as not paid.
+   *  false marks an order still waiting for money, so the 'notPaid' look-up finds it however old; null (also not
+   *  paid in full) takes it out of that look-up: cancelled or deleted orders, and orders deposits paid off. */
+  paid?: boolean | null;
   /** When it was marked paid (store time). null or missing while not paid. */
   paidAt?: number | null;
   /** How the customer paid the rest. null or missing while not paid (and on older paid orders). */
