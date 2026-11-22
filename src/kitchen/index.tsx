@@ -1,6 +1,6 @@
 // Kitchen tablet: PIN first, then the open catering orders, updating by themselves.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Logo, ScreenSurface, Segmented, Sheet } from '@shared/ui';
+import { Logo, RefreshButton, ScreenSurface, Segmented, Sheet } from '@shared/ui';
 import { deviceValue, setDeviceValue, store, useCollection, useHeartbeat, useNow, useSingleton, type CateringOrder, type WithId } from '@shared/data';
 import { byDueAsc, countdown, dayLabel, showsCountdown, timeLabel } from '../manager/catering/orders';
 import { EditOrderSheet, ItemList } from '../manager/catering';
@@ -282,6 +282,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           ]}
           onChange={setView}
         />
+        <RefreshButton className="k-bar-btn k-refresh" />
         <button className="t-btn k-bar-btn" onClick={onLock}>
           Lock
         </button>
