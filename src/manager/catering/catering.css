@@ -65,6 +65,15 @@
 .c-head-actions .t-btn { white-space: nowrap; }
 .c-cal-btn { min-width: var(--tap); min-height: var(--tap); padding: 0 12px; color: var(--ink); }
 .c-cal-btn svg { display: block; }
+/* With ↻ Refresh in the row too, a narrow phone tightens the row a little so "Catering" still fits. */
+@media (max-width: 430px) {
+  .c-page > .t-header { column-gap: 6px; }
+  .c-page > .t-header .t-title { gap: 6px; }
+  .c-page > .t-header .t-logo { height: 26px; }
+  .c-page > .t-header h1 { font-size: 1.3rem; }
+  .c-head-actions { gap: 4px; }
+  .c-head-actions .t-btn.accent { padding: 0 10px; }
+}
 
 /* Same-day orders under date and time */
 .c-sameday { margin: -4px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: 0.9rem; line-height: 1.45; }

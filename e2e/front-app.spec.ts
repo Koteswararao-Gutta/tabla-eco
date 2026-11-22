@@ -51,3 +51,26 @@ test('manager app: every tab opens with no PIN', async ({ context }) => {
   await expect(page.getByText('Manager PIN')).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/manager-more.png` });
 });
+
+test('↻ Refresh reloads the app in place: front, manager and kitchen', async ({ context }) => {
+  for (const path of ['/front/catering', '/manager/catering']) {
+    const page = await openScreen(context, path);
+    await expect(page.getByRole('heading', { name: 'Catering' })).toBeVisible();
+    const marker = await page.evaluate(() => ((window as unknown as { refreshMarker: number }).refreshMarker = 1));
+    expect(marker).toBe(1);
+    await page.getByRole('button', { name: 'Refresh' }).click();
+    await page.waitForFunction(() => !(window as unknown as { refreshMarker?: number }).refreshMarker);
+    await expect(page).toHaveURL(new RegExp('#' + path + '$'));
+    await expect(page.getByRole('heading', { name: 'Catering' })).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/refresh-${path.split('/')[1]}.png` });
+    await page.close();
+  }
+
+  const page = await openScreen(context, '/kitchen');
+  for (const d of '1234') await page.getByRole('button', { name: d, exact: true }).click();
+  await page.evaluate(() => ((window as unknown as { refreshMarker: number }).refreshMarker = 1));
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await page.waitForFunction(() => !(window as unknown as { refreshMarker?: number }).refreshMarker);
+  // Still unlocked after the reload.
+  await expect(page.getByRole('button', { name: 'Lock' })).toBeVisible();
+});

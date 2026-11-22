@@ -15,6 +15,41 @@ export { ErrorBoundary } from './ErrorBoundary';
 export { TimeZoneNote } from './TimeZoneNote';
 export { SaveFailedBanner, SAVE_FAILED_MESSAGE } from './SaveFailedBanner';
 
+/**
+ * ↻ Reload the app: the newest version and the latest orders. The page itself always comes from the
+ * network first (alerts-sw.js), so a reload is enough; the service worker is asked to check for a new
+ * copy of itself too. Offline, the kept copy opens as usual.
+ */
+export function RefreshButton({ className }: { className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const reload = async () => {
+    setBusy(true);
+    try {
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
+      await Promise.race([reg?.update(), new Promise((r) => setTimeout(r, 1500))]);
+    } catch {
+      /* offline or no service worker: reload anyway */
+    }
+    location.reload();
+  };
+  return (
+    <button
+      type="button"
+      className={'t-btn t-refresh' + (className ? ' ' + className : '')}
+      aria-label="Refresh"
+      title="Refresh"
+      disabled={busy}
+      onClick={() => void reload()}
+      data-testid="refresh"
+    >
+      <svg className={busy ? 't-spin' : undefined} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+        <path d="M20 4v4.5h-4.5" />
+      </svg>
+    </button>
+  );
+}
+
 export function PageHeader({ title, sub, action, logo }: { title: string; sub?: string; action?: ReactNode; logo?: boolean }) {
   return (
     <>

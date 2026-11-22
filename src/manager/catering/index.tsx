@@ -1,7 +1,7 @@
 // Manager > Catering: open orders by day, history, an order summary, and a form sheet to add or edit an order.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Field, PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
+import { Field, PageHeader, RefreshButton, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { recentSince, store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
 import {
   amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
@@ -147,6 +147,7 @@ export default function Catering() {
         title="Catering"
         action={
           <div className="c-head-actions">
+            <RefreshButton />
             <button className="t-btn c-cal-btn" aria-label="Calendar" title="Calendar" onClick={() => setCalendar(true)}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
