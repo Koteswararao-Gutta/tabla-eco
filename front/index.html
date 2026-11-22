@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Tabla Front</title>
+    <!-- Add to Home Screen: this page installs the FRONT app (front staff: Catering only). It is its own page,
+         with its own manifest, icon and name written in, because iPhone Safari reads them once as the page loads.
+         The manager app is the page one folder up. -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="../icon-front-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="../icon-192.png?v=2" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Front" />
+    <script>
+      // This page is always the front app: a missing or other # link opens the front app's Catering.
+      if (location.hash.indexOf('#/front') !== 0) history.replaceState(null, '', location.pathname + location.search + '#/front');
+    </script>
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- TVs: paint black from the very first frame (no white flash on load or reload). -->
+    <style>html.t-dark, html.t-dark body { background: #000; }</style>
+    <script>
+      (function () {
+        var meta = document.querySelector('meta[name="theme-color"]');
+        function apply() {
+          var tv = location.hash.indexOf('#/tv') === 0;
+          document.documentElement.classList.toggle('t-dark', tv);
+          if (meta) meta.setAttribute('content', tv ? '#000000' : '#ffffff');
+        }
+        apply();
+        window.addEventListener('hashchange', apply);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Shown only if the app never starts (e.g. a very old TV web viewer); hidden as soon as the app is on screen. -->
+    <div id="boot-fail" hidden style="position: fixed; top: 0; left: 0; right: 0; padding: 48px; color: #888; font: 24px/1.4 sans-serif">
+      This screen's web viewer is too old or failed to start. Update 'Android System WebView' (or Chrome) and restart.
+    </div>
+    <style>#root:not(:empty) ~ #boot-fail { display: none; }</style>
+    <script>
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && !root.firstChild) document.getElementById('boot-fail').hidden = false;
+      }, 20000);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

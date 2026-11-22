@@ -37,6 +37,7 @@ import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
+import { swUrl } from './sw';
 import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
@@ -330,7 +331,7 @@ export class FirebaseStore implements DataStore {
   private async registerPush(): Promise<void> {
     const { getMessaging, getToken, isSupported } = await import('firebase/messaging');
     if (!(await isSupported())) throw new Error('Push is not supported here');
-    const reg = await navigator.serviceWorker.register('./alerts-sw.js');
+    const reg = await navigator.serviceWorker.register(swUrl());
     const token = await getToken(getMessaging(this.app), { vapidKey, serviceWorkerRegistration: reg });
     await this.ready;
     await fsSet(doc(this.db, 'pushTokens', deviceId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
