@@ -79,3 +79,8 @@
 .nt-diet.nonveg .nt-mark i { width: 0; height: 0; border-left: 0.035in solid transparent; border-right: 0.035in solid transparent; border-bottom: 0.055in solid var(--nt-nonveg); margin-top: -0.01in; }
 .nt-foot { margin-top: 0.035in; font: 600 5.6pt 'Tabla Montserrat', var(--font); letter-spacing: 0.09em; text-transform: uppercase; color: var(--nt-brown); white-space: nowrap; }
 .nt-foot b { color: var(--nt-maroon); font-weight: 700; }
+
+/* On a phone the sheets are laid out off screen for a moment while they are drawn into a PDF (tagsPdf.ts). */
+.nt-print.nt-measure { display: block; position: fixed; left: -20000px; top: 0; pointer-events: none; }
+
+.nt-pdf-note { margin: 0; color: var(--muted); font-size: 0.95rem; }
