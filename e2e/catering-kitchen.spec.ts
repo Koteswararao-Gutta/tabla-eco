@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type BrowserContextOptions, type Locator, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { openScreen, readCollection } from './helpers';
 import type { CateringOrder } from '../src/shared/data/types';
 
@@ -1024,6 +1025,53 @@ test('print name tags: one tag per dish, veg or non-veg, printed 10 to a letter 
   // Close goes back to the order.
   await sheet.getByRole('button', { name: 'Close' }).click();
   await expect(manager.getByRole('dialog', { name: 'Order details' })).toBeVisible();
+  await context.close();
+});
+
+test('print name tags on a phone: makes a PDF of the sheets for the phone\'s Share, or to save', async ({ browser }) => {
+  const context = await newContext(browser, {
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+  });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.evaluate(() => {
+    const w = window as unknown as { shared: { name: string; type: string; size: number }[]; printed: number };
+    w.shared = [];
+    w.printed = 0;
+    window.print = () => void (w.printed += 1); // a home-screen app on a phone: print does nothing
+    navigator.canShare = () => true;
+    navigator.share = async (d?: ShareData) => {
+      for (const f of d?.files ?? []) w.shared.push({ name: f.name, type: f.type, size: f.size });
+    };
+  });
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  await manager.getByRole('dialog', { name: 'Order details' }).getByRole('button', { name: /Print name tags/ }).click();
+  const sheet = manager.getByRole('dialog', { name: 'Name tags' });
+  await expect(sheet.getByTestId('tag-row')).toHaveCount(4);
+  await sheet.getByRole('button', { name: 'Print 4 tags (1 sheet)' }).click();
+
+  // The PDF goes straight to the phone's Share sheet; Share and Save stay for another try.
+  await expect(sheet.getByRole('status')).toContainText('The PDF is ready');
+  const shared = await manager.evaluate(() => (window as unknown as { shared: { name: string; type: string; size: number }[] }).shared);
+  expect(shared).toHaveLength(1);
+  expect(shared[0].type).toBe('application/pdf');
+  expect(shared[0].name).toMatch(/^Tags Priya Sharma .+\.pdf$/);
+  expect(shared[0].size).toBeGreaterThan(50_000); // a drawn sheet, not an empty page
+  expect(await manager.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(0);
+  await expect(manager.getByTestId('name-tag').first()).toBeHidden(); // the sheets went back to hidden
+  await shot(manager, 'manager-tags-pdf-ready');
+
+  const [download] = await Promise.all([manager.waitForEvent('download'), sheet.getByRole('link', { name: 'Save PDF' }).click()]);
+  const pdf = readFileSync(await download.path());
+  expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+  expect(pdf.toString('latin1')).toContain('/Count 1 ');
+  if (process.env.SHOT_DIR) await download.saveAs(`${SHOTS}/manager-tags.pdf`);
+
+  // Changing a tag makes a new PDF on the next tap.
+  await sheet.getByTestId('tag-row').nth(0).getByRole('textbox').fill('Chicken Biryani');
+  await expect(sheet.getByRole('button', { name: 'Print 4 tags (1 sheet)' })).toBeEnabled();
   await context.close();
 });
 
