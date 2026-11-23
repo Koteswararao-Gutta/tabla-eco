@@ -85,6 +85,8 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   // No save bar until something changes.
   await expect(page.locator('#savebar')).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/staff-settings.png` });
+  // Each Break box names its day for screen readers (seven boxes all called "Break" before).
+  await expect(page.getByRole('checkbox', { name: 'Friday break' })).toHaveCount(1);
   await page.locator('#minStaff').selectOption('3');
   await expect(page.locator('#savebar')).toBeVisible();
   await expect(page.locator('#savebar')).toContainText('Unsaved changes');

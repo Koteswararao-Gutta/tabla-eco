@@ -1640,7 +1640,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     <span class="dname"><b>${DAYS[d]}</b></span>
     <input type="time" step="900" data-d="${d}" data-f="open" value="${toHM(h.open)}" aria-label="${DAYS[d]} opens">
     <input type="time" step="900" data-d="${d}" data-f="close" value="${toHM(h.close)}" aria-label="${DAYS[d]} closes">
-    <span class="brk brkcell"><label class="toggle"><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''}> Break</label>
+    <span class="brk brkcell"><label class="toggle"><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''} aria-label="${DAYS[d]} break"> Break</label>
       ${h.brk ? `<input type="time" step="900" data-d="${d}" data-f="b0" value="${toHM(h.brk[0])}" aria-label="${DAYS[d]} break starts"><input type="time" step="900" data-d="${d}" data-f="b1" value="${toHM(h.brk[1])}" aria-label="${DAYS[d]} break ends">` : ''}</span>`,
       )
       .join('');
