@@ -170,3 +170,23 @@ test.describe('staff sheets on a touch phone', () => {
     expect(errors).toEqual([]);
   });
 });
+
+test('two phones rename different people at once: each phone shows both names', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  const page2 = await openScreen(context, '/manager/staff');
+  await expect(page2.locator('#savepill')).toHaveText('Saved ✓');
+  await page.locator('.views [data-v="people"]').click();
+  await page2.locator('.views [data-v="people"]').click();
+  await expect(page2.locator('input[data-id]')).toHaveCount(7);
+  // Both type before either one applies: phone 2 is mid-typing when phone 1's rename arrives.
+  await page.locator('input[data-id]').nth(0).fill('Anil');
+  await page2.locator('input[data-id]').nth(1).fill('Bala');
+  await page.locator('input[data-id]').nth(0).press('Enter');
+  await page2.locator('input[data-id]').nth(1).press('Enter');
+  await expect.poll(async () => (await staffConfig(page))!.people.slice(0, 2).map((p) => p.name)).toEqual(['Anil', 'Bala']);
+  // Phone 2 saved both (merged); its page must show phone 1's rename too, not the old name.
+  await expect(page2.locator('input[data-id]').nth(0)).toHaveValue('Anil');
+  await expect(page2.locator('input[data-id]').nth(1)).toHaveValue('Bala');
+  await expect(page.locator('input[data-id]').nth(1)).toHaveValue('Bala');
+});

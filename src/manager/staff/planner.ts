@@ -163,8 +163,12 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   const saveConfig = () => {
     const L = latest();
     if (base && L && rawConfig) {
-      db().config = mergeConfig(base.config, db().config, L.config);
+      const mine = db().config;
+      db().config = mergeConfig(base.config, mine, L.config);
       base.config = clone(db().config);
+      // Another phone's change came in with this save (e.g. a rename while this phone renamed someone
+      // else). Some callers don't redraw (a name box), so ask for a redraw once nothing is being typed.
+      if (JSON.stringify(db().config) !== JSON.stringify(mine)) mergedIn = refreshDue = true;
     }
     const c = clone(db().config);
     track(() => io.saveConfig(c));
@@ -174,6 +178,8 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   let rawConfig: unknown | null | undefined;
   let rawWeeks: Record<string, unknown> | undefined;
   let refreshDue = false;
+  /** A save merged in another phone's change that the page may not show yet. */
+  let mergedIn = false;
   function editing(): boolean {
     if (!must('edit').hidden || !must('ask').hidden) return true;
     if (settingsDirty()) return true;
@@ -222,7 +228,16 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     }
     refreshDue = false;
     const n = rawConfig === null ? null : normalizeDB({ config: rawConfig, weeks: rawWeeks });
-    if (!n || JSON.stringify(n) === JSON.stringify({ config: DB.config, weeks: DB.weeks })) return;
+    if (!n) return;
+    if (JSON.stringify(n) === JSON.stringify({ config: DB.config, weeks: DB.weeks })) {
+      // The data already holds the merged change; make sure the page shows it.
+      if (mergedIn) {
+        mergedIn = false;
+        render();
+      }
+      return;
+    }
+    mergedIn = false;
     draft = null;
     DB = n;
     base = clone(n);
