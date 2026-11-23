@@ -262,6 +262,19 @@ describe('validate: name length', () => {
   });
 });
 
+describe('dates in another year', () => {
+  const nextYear = new Date(2027, 0, 2, 18).getTime(); // Sat, Jan 2, 2027
+  const o = { customerName: 'X', phone: '', dueAt: nextYear, type: 'pickup' as const, items: 'Samosa, 20', people: null };
+  it('the WhatsApp message names the year when it is not this year', () => {
+    expect(shareText(o, undefined, new Date(2026, 10, 23).getTime())).toContain('\nSat, Jan 2, 2027, 6:00 PM\n');
+    expect(shareText(o, undefined, new Date(2027, 0, 1).getTime())).toContain('\nSat, Jan 2, 6:00 PM\n');
+  });
+  it('a change of year in the edit history shows both years', () => {
+    expect(describeChanges({ ...o, dueAt: new Date(2026, 0, 2, 18).getTime() }, o)).toEqual(['Date: Fri, Jan 2, 2026 → Sat, Jan 2, 2027']);
+    expect(describeChanges({ ...o, dueAt: new Date(2027, 0, 3, 18).getTime() }, o)).toEqual(['Date: Sun, Jan 3 → Sat, Jan 2']);
+  });
+});
+
 describe('shareText / whatsappHref', () => {
   const due = new Date(2026, 10, 20, 17, 30).getTime(); // Fri, Nov 20, 5:30 PM
   const base = { customerName: 'Anika Wedding', dueAt: due, items: 'Chicken biryani, 4 trays\n\n  Garlic naan, 150 ', people: 120 };

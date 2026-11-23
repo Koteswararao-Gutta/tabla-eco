@@ -704,7 +704,7 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
           Mark paid
         </button>
       )}
-      {open && <ShareLink text={shareText(o)} />}
+      {open && <ShareLink text={shareText(o, undefined, now)} />}
       {onPrintTags && !cancelled && (
         <button type="button" className="t-btn block" onClick={() => onPrintTags(o)}>
           Print name tags
@@ -1282,7 +1282,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
       await saveAmount(id, fields.items);
       // The estimate it came from is kept, marked as made into this order.
       if (props.fromEstimate) await store.updateDoc('estimates', props.fromEstimate.id, { status: 'ordered', orderId: id, updatedAt: store.now() }).catch(() => {});
-      props.onSaved(shareText(fields, 'New catering order'));
+      props.onSaved(shareText(fields, 'New catering order', now));
     });
   };
 

@@ -86,6 +86,13 @@ export function dayLabel(ms: number, now: number): string {
   return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}) });
 }
 
+/** "Fri, Nov 20" for a message read later; "Sat, Jan 2, 2027" when the date is in another year than `now`
+ *  (a party booked for next year, or a date typed with the wrong year). Without `now`, no year. */
+export function dateText(ms: number, now?: number): string {
+  const otherYear = now !== undefined && new Date(ms).getFullYear() !== new Date(now).getFullYear();
+  return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}) });
+}
+
 /** "5:30 PM" */
 export function timeLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -376,8 +383,8 @@ export function telHref(phone: string): string {
 /** The order as a WhatsApp message for the front staff group, so they can get sides ready.
  *  The date is written out ("Fri, Nov 20"), since the message is read later. The customer's
  *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
-export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order'): string {
-  const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order', now?: number): string {
+  const date = dateText(o.dueAt, now);
   // WhatsApp would turn *, _ and ~ in typed text into bold, italic or struck-out words: leave them out.
   const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
   const lines = [`*${heading}*`, plain(o.customerName ?? ''), `${date}, ${timeLabel(o.dueAt)}`];
@@ -403,7 +410,7 @@ const shown = (v: string) => {
   if (!t) return '(none)';
   return t.length > SHOWN_MAX ? `${t.slice(0, SHOWN_MAX - 1)}…` : t;
 };
-const fullDate = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
 const typeWord = (t: Order['type']) => (t === 'delivery' ? 'Delivery' : 'Pickup');
 
 /** Lines in `a` that are not in `b`, counting repeats. */
@@ -424,6 +431,8 @@ export function describeChanges(before: EditFields, after: EditFields): string[]
   const out: string[] = [];
   if (before.customerName.trim() !== after.customerName.trim()) out.push(`Name: ${shown(before.customerName)} → ${shown(after.customerName)}`);
   if (before.phone.trim() !== after.phone.trim()) out.push(`Phone: ${shown(before.phone)} → ${shown(after.phone)}`);
+  // A change of year shows the years ("Fri, Jan 2, 2026 → Sat, Jan 2, 2027"), else it reads like no change.
+  const fullDate = (ms: number) => dateText(ms, ms === before.dueAt ? after.dueAt : before.dueAt);
   if (dayStart(before.dueAt) !== dayStart(after.dueAt)) out.push(`Date: ${fullDate(before.dueAt)} → ${fullDate(after.dueAt)}`);
   if (timeLabel(before.dueAt) !== timeLabel(after.dueAt)) out.push(`Time: ${timeLabel(before.dueAt)} → ${timeLabel(after.dueAt)}`);
   if (before.type !== after.type) out.push(`${typeWord(before.type)} → ${typeWord(after.type)}`);
