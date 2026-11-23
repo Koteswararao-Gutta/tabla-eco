@@ -171,6 +171,20 @@ test.describe('staff sheets on a touch phone', () => {
   });
 });
 
+test('whole day on a phone: shifts too short for end handles, so the tip says to zoom in', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  await expect(page.locator('.bar').first()).toBeVisible();
+  // At 390 px a 4-hour shift is narrow and its ends are hidden.
+  await expect(page.locator('.bar.narrow').first()).toBeVisible();
+  await expect(page.locator('.bar.narrow .h').first()).toBeHidden();
+  await expect(page.locator('#tipEnds')).toHaveText('or Zoom in to drag its ends');
+  await page.locator('#zoomBtn').click();
+  await expect(page.locator('.bar:not(.narrow) .h.r').first()).toBeVisible();
+  await expect(page.locator('#tipEnds')).toHaveText('or drag its ends');
+});
+
 test('keyboard: focus stays put in the shift sheet and comes back when a sheet closes', async ({ context }) => {
   const page = await openScreen(context, '/manager/staff');
   const errors = watchErrors(page);

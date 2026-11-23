@@ -706,8 +706,8 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       info = `<b>${fmt(t)}</b>: ${who.length ? who.join(', ') : 'nobody working'}.`;
     }
     const touchTip = matchMedia('(hover:none)').matches
-      ? '<b>Tap</b> a shift to edit it. <b>Hold</b> it for a moment, then drag to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.'
-      : '<b>Tap</b> a shift to edit it. <b>Drag</b> it to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.';
+      ? '<b>Tap</b> a shift to edit it. <b>Hold</b> it for a moment, then drag to move it, <span id="tipEnds">or drag its ends</span>. <b>Tap an empty spot</b> to add a shift.'
+      : '<b>Tap</b> a shift to edit it. <b>Drag</b> it to move it, <span id="tipEnds">or drag its ends</span>. <b>Tap an empty spot</b> to add a shift.';
 
     return `<div class="dayhead"><h2>${DAYS[d]}, ${dshort(date)}</h2></div>
     ${hours}<div class="chips">${chips}</div>
@@ -747,6 +747,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         if (sp_) sp_.textContent = short(a);
       }
     });
+    // Short shifts have no ends to drag (no room on a phone's whole-day view): say how to get them.
+    const te = $('tipEnds');
+    if (te && !zoom && el.querySelector('.bar.narrow')) te.textContent = 'or Zoom in to drag its ends';
     all('.covrow button:not(.closed)', el).forEach(
       (c) =>
         (c.onclick = () => {
