@@ -13,9 +13,10 @@ export const LISTEN_RETRY_MAX_MS = 60_000;
  * because nothing is sent to it on an error.
  */
 export function keepListening(
-  start: (onData: () => void, onError: (e: Error) => void) => Unsubscribe,
+  start: (onData: (fromCache?: boolean) => void, onError: (e: Error) => void) => Unsubscribe,
   label: string,
 ): Unsubscribe {
+  const key = ++listenerCount;
   let stop: Unsubscribe | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let dead = false;
@@ -26,11 +27,14 @@ export function keepListening(
     timer = null;
     if (dead) return;
     const mine = ++round;
-    const onData = () => {
-      if (mine === round) wait = LISTEN_RETRY_FIRST_MS;
+    const onData = (fromCache?: boolean) => {
+      if (mine !== round) return;
+      wait = LISTEN_RETRY_FIRST_MS;
+      setTrouble(key, fromCache ? 'cache' : null);
     };
     const onError = (e: Error) => {
       if (dead || mine !== round || timer) return;
+      setTrouble(key, 'error');
       console.warn(label, e?.message ?? e, `- trying again in ${wait / 1000} s`);
       const s = stop;
       stop = null;
@@ -51,7 +55,37 @@ export function keepListening(
     timer = null;
     stop?.();
     stop = null;
+    setTrouble(key, null);
   };
+}
+
+// ---------- connection health ----------
+// navigator.onLine only says the device has Wi-Fi. The restaurant's Wi-Fi can be up while its internet is down,
+// or a list can keep failing on the server's side (e.g. a missing index). Either way the screen keeps showing
+// the last data it had and nothing looked wrong. So every live list reports here whether it is up to date:
+// 'cache' = Firestore says the data is only this device's copy (not connected to the server),
+// 'error' = the list failed and is waiting to try again.
+
+let listenerCount = 0;
+const trouble = new Map<number, 'cache' | 'error'>();
+const troubleListeners = new Set<() => void>();
+
+function setTrouble(key: number, kind: 'cache' | 'error' | null): void {
+  const was = trouble.size > 0;
+  if (kind) trouble.set(key, kind);
+  else trouble.delete(key);
+  if (was !== trouble.size > 0) for (const l of [...troubleListeners]) l();
+}
+
+/** True while at least one live list is not up to date with the server. */
+export function hasSyncTrouble(): boolean {
+  return trouble.size > 0;
+}
+
+/** Calls `listener` whenever hasSyncTrouble() changes. Returns a function that stops listening. */
+export function onSyncTroubleChange(listener: () => void): () => void {
+  troubleListeners.add(listener);
+  return () => void troubleListeners.delete(listener);
 }
 
 export const CLOCK_RETRY_MS = 30_000;
