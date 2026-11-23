@@ -1,10 +1,11 @@
-// Manager > More (☰): manager-only tools: Analytics, Export and Catering prices. Only the manager app has this tab;
+// Manager > More (☰): manager-only tools: Analytics, Export, Catering prices and Devices. Only the manager app has this tab;
 // the front app (#/front) has no ☰.
 import { Link, Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@shared/ui';
 import Analytics from './Analytics';
 import Prices from './Prices';
 import Export from './Export';
+import Devices from './Devices';
 import './more.css';
 
 export default function More() {
@@ -17,6 +18,7 @@ export default function More() {
       <Route path="statistics" element={<OldLink kind="week" />} />
       <Route path="prices" element={<Prices />} />
       <Route path="export" element={<Export />} />
+      <Route path="devices" element={<Devices />} />
       <Route path="*" element={<Navigate to="/manager/more" replace />} />
     </Routes>
   );
@@ -45,6 +47,13 @@ function MoreHome() {
           <span>
             <h2 className="mo-h2">Catering prices</h2>
             <span className="mo-note">Tray prices used for catering estimates.</span>
+          </span>
+          <span className="mo-chev" aria-hidden="true">›</span>
+        </Link>
+        <Link className="t-card mo-link" to="devices" data-testid="devices">
+          <span>
+            <h2 className="mo-h2">Devices</h2>
+            <span className="mo-note">Which phones, tablets and TVs can open the app. The restaurant code and the lock.</span>
           </span>
           <span className="mo-chev" aria-hidden="true">›</span>
         </Link>

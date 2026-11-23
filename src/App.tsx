@@ -1,7 +1,7 @@
 // Routes. Owned by the foundation. Each area's screen lives in its own folder.
 import { lazy } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { PageHeader, SaveFailedBanner } from '@shared/ui';
+import { AccessGate, PageHeader, SaveFailedBanner } from '@shared/ui';
 import type { ScreenId } from '@shared/data';
 import { LazyScreen } from './LazyScreen';
 
@@ -55,14 +55,17 @@ function SaveFailed() {
 export function App() {
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/tv/:n" element={<TvRoute />} />
-        <Route path="/kitchen" element={<LazyScreen fallback={<div />}><Kitchen /></LazyScreen>} />
-        <Route path="/front/*" element={<LazyScreen fallback={<div />}><ManagerShell mode="front" /></LazyScreen>} />
-        <Route path="/manager/*" element={<LazyScreen fallback={<div />}><ManagerShell mode="manager" /></LazyScreen>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      {/* Once the app is locked (More > Devices), a device that isn't approved gets the code screen instead. */}
+      <AccessGate>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/tv/:n" element={<TvRoute />} />
+          <Route path="/kitchen" element={<LazyScreen fallback={<div />}><Kitchen /></LazyScreen>} />
+          <Route path="/front/*" element={<LazyScreen fallback={<div />}><ManagerShell mode="front" /></LazyScreen>} />
+          <Route path="/manager/*" element={<LazyScreen fallback={<div />}><ManagerShell mode="manager" /></LazyScreen>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AccessGate>
       <SaveFailed />
     </HashRouter>
   );

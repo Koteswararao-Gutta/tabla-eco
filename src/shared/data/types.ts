@@ -291,6 +291,43 @@ export interface ToastMenu {
   changedAt?: number;
 }
 
+/** Which app a device opened (shown in More > Devices). */
+export type DeviceApp = ScreenId | 'front' | 'manager' | 'home' | 'other';
+
+/** One approved device (devices/{sign-in id}). Saved only by the server. */
+export interface DeviceRecord {
+  id: string;
+  app: DeviceApp;
+  /** From the browser, e.g. "iPhone", "Fire TV", "Android tablet". */
+  model: string;
+  /** Typed in More > Devices; null shows a name made from `app`. */
+  name: string | null;
+  /** 'open': added by itself before the app was locked. 'code': the restaurant code was entered. */
+  how: 'open' | 'code';
+  approvedAt: number;
+  lastSeen: number;
+}
+
+/** access/info: shown in More > Devices. Missing means open and no code set. */
+export interface AccessInfo {
+  locked?: boolean;
+  lockedAt?: number | null;
+  codeSetAt?: number | null;
+  updatedAt?: number;
+}
+
+/** This device: 'checking' until known (and while offline with no answer yet; screens show as usual),
+ *  'ok' (approved, or the app isn't locked), 'needs-code' (locked and this device isn't approved). */
+export type DeviceAccess = 'checking' | 'ok' | 'needs-code';
+
+/** More > Devices actions (approved devices only). */
+export type DeviceAction =
+  | { action: 'setCode'; code: string }
+  | { action: 'lock' }
+  | { action: 'unlock' }
+  | { action: 'rename'; uid: string; name: string }
+  | { action: 'remove'; uid: string };
+
 /** Single documents, by id. Use useSingleton / saveSingleton from @shared/data. */
 export interface Singletons {
   music: MusicSettings;
@@ -320,5 +357,9 @@ export interface Collections {
   heartbeats: { lastSeen: number };
   /** Read only (the server writes it): use useDoc('toastMenu', 'current'). */
   toastMenu: ToastMenu;
+  /** Approved devices, by sign-in id. Read only: change them with store.manageDevices. */
+  devices: DeviceRecord;
+  /** Read only: only access/info is readable (locked or open, when the code was set). */
+  access: AccessInfo;
 }
 export type CollectionName = keyof Collections;

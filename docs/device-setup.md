@@ -70,6 +70,25 @@ Phones can get a 1-hour reminder before each catering order, a 9:00 AM "Today's 
 3. The **Tabla Android app** (the one on the TVs and the kitchen tablet) can't get phone alerts. Use Chrome or the Home Screen app on phones.
 4. Test: add an order due in a bit over 1 hour; the phone should buzz about 1 hour before.
 
+## Approved devices and the restaurant code
+
+The app can be locked so that only the restaurant's own phones, tablets and TVs open it. Someone who gets hold of a link sees a "restaurant code" screen and nothing else.
+
+Turning it on (once):
+
+1. Do nothing for a day after the update goes live. Every device that opens the app adds itself to the list in the manager app: ☰ More > Devices. TVs pick up the update at their 4 AM reload; phones and the kitchen tablet when they next open the app.
+2. In ☰ More > Devices, check the list. The page says "Not in the list yet: ..." for any TV or the kitchen tablet still missing; wait for those. Rename devices if it helps ("Ravi's phone"). Remove anything you don't recognise.
+3. Tap **Set code** and pick 6 to 10 digits. Write it down; it isn't shown again (you can always set a new one).
+4. Tap **Lock to these devices**.
+
+After that:
+
+- **A new phone, tablet or TV** shows the code screen the first time. Type the code once (on a TV, use the remote's arrows and OK, or its number keys). It stays approved.
+- **A lost phone or someone who left:** ☰ More > Devices > Remove. It stops working within 15 minutes.
+- **A device that loses its sign-in** (site data cleared, app reinstalled) shows the code screen instead of the menu or orders. Type the code again.
+- **5 wrong codes** on one device wait 15 minutes; 20 wrong codes from anywhere in an hour pause the code screen for everyone for up to an hour. Approved devices are never affected.
+- **Something wrong?** ☰ More > Devices > "Open the app to anyone again" undoes the lock at once.
+
 ## Backups
 
 See [backups.md](backups.md): turn them on once, and how to get back a lost order or payment.

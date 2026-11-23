@@ -153,3 +153,44 @@ test('pictureData: only pictures can be saved, never a web page', async () => {
   await assertFails(setDoc(doc(db, 'pictureData/x4'), { type: 'image/png; text/html', data: 'AAAA' }));
   await assertFails(setDoc(doc(db, 'pictureData/x5'), { data: 'AAAA' }));
 });
+
+// ---------- approved devices (More > Devices) ----------
+
+test('open (not locked): any signed-in device gets in; signed-out still refused', async () => {
+  await seed('orders/o1', order);
+  await assertSucceeds(getDoc(doc(db, 'orders/o1')));
+  await assertFails(getDoc(doc(nobody, 'orders/o1')));
+});
+
+test('locked: only approved devices read or save; the lock and the code are server only', async () => {
+  await seed('orders/o1', order);
+  await seed('orderAmounts/o1', amount);
+  await seed('access/locked', { at: 1 });
+  await seed('access/info', { locked: true });
+  await seed('access/code', { salt: 's', hash: 'h' });
+  await seed('devices/approved-1', { app: 'kitchen' });
+  const approved = env.authenticatedContext('approved-1', { tabla: true }).firestore();
+  // A device that isn't approved: nothing at all.
+  await assertFails(getDoc(doc(db, 'orders/o1')));
+  await assertFails(getDoc(doc(db, 'orderAmounts/o1')));
+  await assertFails(setDoc(doc(db, 'orders/o2'), { ...order, id: 'o2' }));
+  await assertFails(getDoc(doc(db, 'singletons/settings')));
+  await assertFails(getDoc(doc(db, 'devices/approved-1')));
+  await assertFails(getDoc(doc(db, 'access/info')));
+  await assertFails(setDoc(doc(db, 'pushTokens/p1'), { token: 'abc', device: 'x', updatedAt: 1 }));
+  // An approved device: as before.
+  await assertSucceeds(getDoc(doc(approved, 'orders/o1')));
+  await assertSucceeds(setDoc(doc(approved, 'orders/o2'), { ...order, id: 'o2' }));
+  await assertSucceeds(getDoc(doc(approved, 'devices/approved-1')));
+  await assertSucceeds(getDoc(doc(approved, 'access/info')));
+  // Nobody approves themselves, unlocks, or reads the code from the app.
+  await assertFails(setDoc(doc(approved, 'devices/x'), { app: 'tv1' }));
+  await assertFails(deleteDoc(doc(approved, 'devices/approved-1')));
+  await assertFails(deleteDoc(doc(approved, 'access/locked')));
+  await assertFails(getDoc(doc(approved, 'access/code')));
+  await assertFails(getDoc(doc(approved, 'access/locked')));
+  await assertFails(getDoc(doc(approved, 'codeTries/all')));
+  // A claim with the wrong value is not approval.
+  const fake = env.authenticatedContext('fake', { tabla: 'yes' }).firestore();
+  await assertFails(getDoc(doc(fake, 'orders/o1')));
+});

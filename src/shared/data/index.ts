@@ -5,13 +5,14 @@ import { LocalStore } from './local';
 import { hasSyncTrouble, onSaveFailure, onSyncTroubleChange, type SaveFailure } from './resync';
 import { filterKey, type CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
-import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
+import type { CollectionName, Collections, DeviceAccess, ScreenId, SingletonId, Singletons } from './types';
 
 export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
 export { newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export { swUrl, isFrontPage } from './sw';
+export { appLabel, currentApp, deviceLabel } from './access';
 export type { CollectionFilter } from './filter';
 export type { SaveFailure } from './resync';
 export { recentSince, RECENT_DAYS } from './filter';
@@ -32,6 +33,13 @@ export function useCollection<C extends CollectionName>(col: C, filter?: Collect
   latest.current = filter;
   useEffect(() => store.watchCollection(col, (docs) => setGot({ key, docs }), latest.current), [key]);
   return got && got.key === key ? got.docs : null;
+}
+
+/** This device's access (see DeviceAccess): the code screen shows on 'needs-code'. */
+export function useDeviceAccess(): DeviceAccess {
+  const [access, setAccess] = useState<DeviceAccess>('checking');
+  useEffect(() => store.watchAccess(setAccess), []);
+  return access;
 }
 
 /** Live single document. `undefined` while loading, `null` if it doesn't exist. */

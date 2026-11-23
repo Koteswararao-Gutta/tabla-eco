@@ -15,6 +15,7 @@ export function Logo({ className }: { className?: string }) {
 export { ErrorBoundary } from './ErrorBoundary';
 export { TimeZoneNote } from './TimeZoneNote';
 export { SaveFailedBanner, SAVE_FAILED_MESSAGE } from './SaveFailedBanner';
+export { AccessGate } from './AccessGate';
 
 /**
  * ↻ Reload the app: the newest version and the latest orders. The page itself always comes from the

@@ -1,0 +1,16 @@
+/* The restaurant code screen (AccessGate). Large keys: it's used on phones, the kitchen tablet and TVs (with a remote). */
+.t-access { position: fixed; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; background: var(--bg); color: var(--ink); text-align: center; }
+.t-access h1 { margin: 8px 0 0; font-size: 1.6rem; font-weight: 650; }
+.t-access-logo { height: 56px; }
+.t-access-sub { margin: 0; max-width: 420px; color: var(--muted); }
+.t-access-dots { display: flex; gap: 14px; margin: 16px 0 4px; min-height: 18px; }
+.t-access-dots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); }
+.t-access-dots i.on { background: var(--ink); border-color: var(--ink); }
+.t-access-msg { margin: 0 0 8px; min-height: 1.5em; max-width: 420px; color: var(--bad); font-weight: 600; }
+.t-access-pad { display: grid; grid-template-columns: repeat(3, 88px); gap: 12px; }
+.t-access-key { height: 68px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); font-size: 1.8rem; font-weight: 600; cursor: pointer; }
+.t-access-key:active { background: var(--surface-2); }
+.t-access-key:disabled { opacity: 0.6; }
+.t-access-key.fn { font-size: 1.1rem; background: var(--bg); }
+.t-access-ok { margin-top: 16px; width: calc(3 * 88px + 2 * 12px); min-height: 60px; font-size: 1.15rem; }
+@media (max-height: 720px) { .t-access-key { height: 58px; } .t-access-logo { height: 40px; } .t-access { gap: 4px; } }
