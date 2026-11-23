@@ -101,17 +101,15 @@ test('cancel an order: off the kitchen and the totals, deposit and refund note s
   expect(order.status).toBe('cancelled');
   expect(typeof order.cancelledAt).toBe('number');
 
-  // Payments: listed as Cancelled with what was paid and the note, not in the totals. Statistics: left out.
-  await manager.goto('/#/manager/more/payments?day=' + dateInput(order.dueAt));
-  const row = manager.getByTestId('payments').getByRole('link', { name: /Priya Sharma/ });
+  // Analytics: listed as Cancelled with what was paid and the note, not in any total.
+  await manager.goto('/#/manager/more/analytics?r=dates&from=' + dateInput(order.dueAt) + '&to=' + dateInput(order.dueAt));
+  await expect(manager.getByTestId('an-sales')).toBeVisible();
+  const row = manager.getByTestId('an-list').getByRole('link', { name: /Priya Sharma/ });
   await expect(row).toContainText('Cancelled');
   await expect(row).toContainText('$100 paid');
   await expect(row.getByTestId('refund-line')).toHaveText('Refunded $100 by Zelle');
-  await expect(manager.getByText('Cancelled orders are not in the totals.')).toBeVisible();
-  await shot(manager, 'payments-cancelled');
-  await manager.goto('/#/manager/more/statistics?week=' + dateInput(order.dueAt));
-  await expect(manager.getByTestId('week-total')).toBeVisible();
-  await expect(manager.locator('body')).not.toContainText('Priya Sharma');
+  await expect(manager.getByText('Cancelled orders are not in any total.')).toBeVisible();
+  await shot(manager, 'analytics-cancelled');
 
   // Reopen brings it back everywhere.
   await manager.goto('/#/manager/catering');

@@ -1,9 +1,8 @@
-// Manager > More (☰): manager-only tools: Payments, Statistics, Export and Catering prices. Only the manager app has this tab;
+// Manager > More (☰): manager-only tools: Analytics, Export and Catering prices. Only the manager app has this tab;
 // the front app (#/front) has no ☰.
-import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@shared/ui';
-import Payments from './Payments';
-import Statistics from './Statistics';
+import Analytics from './Analytics';
 import Prices from './Prices';
 import Export from './Export';
 import './more.css';
@@ -12,8 +11,10 @@ export default function More() {
   return (
     <Routes>
       <Route index element={<MoreHome />} />
-      <Route path="payments" element={<Payments />} />
-      <Route path="statistics" element={<Statistics />} />
+      <Route path="analytics" element={<Analytics />} />
+      {/* Old links (Payments for a day, Statistics for a week) open the same dates in Analytics. */}
+      <Route path="payments" element={<OldLink kind="day" />} />
+      <Route path="statistics" element={<OldLink kind="week" />} />
       <Route path="prices" element={<Prices />} />
       <Route path="export" element={<Export />} />
       <Route path="*" element={<Navigate to="/manager/more" replace />} />
@@ -26,17 +27,10 @@ function MoreHome() {
     <main className="t-page">
       <PageHeader title="More" sub="Manager tools. The front app doesn't have these." />
       <div className="t-stack">
-        <Link className="t-card mo-link" to="payments">
+        <Link className="t-card mo-link" to="analytics" data-testid="analytics">
           <span>
-            <h2 className="mo-h2">Payments</h2>
-            <span className="mo-note">Each day's catering orders, paid or unpaid.</span>
-          </span>
-          <span className="mo-chev" aria-hidden="true">›</span>
-        </Link>
-        <Link className="t-card mo-link" to="statistics" data-testid="statistics">
-          <span>
-            <h2 className="mo-h2">Statistics</h2>
-            <span className="mo-note">This week's catering orders and total, Monday to Sunday.</span>
+            <h2 className="mo-h2">Analytics</h2>
+            <span className="mo-note">Catering sales, money collected and owed, how customers paid, who took it, top dishes. Any week, month, year or dates.</span>
           </span>
           <span className="mo-chev" aria-hidden="true">›</span>
         </Link>
@@ -57,4 +51,12 @@ function MoreHome() {
       </div>
     </main>
   );
+}
+
+function OldLink({ kind }: { kind: 'day' | 'week' }) {
+  const [params] = useSearchParams();
+  const d = params.get(kind) ?? '';
+  const ok = /^\d{4}-\d{2}-\d{2}$/.test(d);
+  const to = kind === 'day' ? (ok ? `?r=dates&from=${d}&to=${d}` : '?r=dates') : '?r=week' + (ok ? '&d=' + d : '');
+  return <Navigate to={'/manager/more/analytics' + to} replace />;
 }
