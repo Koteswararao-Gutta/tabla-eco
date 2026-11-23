@@ -45,7 +45,6 @@
 .nt-marks i.v { width: 0.6pt; height: 0.3in; margin-left: -0.3pt; }
 .nt-marks i.h { height: 0.6pt; width: 0.28in; margin-top: -0.3pt; }
 
-.nt-page-foot { position: absolute; left: 0.75in; right: 0.75in; top: 10.68in; display: flex; justify-content: space-between; font: 600 7pt 'Tabla Montserrat', var(--font); color: #9a9a9a; }
 
 /* One tag: 3.34in x 1.84in */
 .nt-tag {

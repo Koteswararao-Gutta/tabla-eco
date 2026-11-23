@@ -4,7 +4,6 @@ import { forwardRef, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LOGO_URL as logo, Segmented, Sheet } from '@shared/ui';
 import { useDoc, useSingleton, type CateringOrder } from '@shared/data';
-import { dayLabel, timeLabel } from './orders';
 import { DIET_LABEL, nameSize, sheets, tagsForOrder, TAG_SITE, tooLong, type Diet, type NameTag } from './tags';
 import { printsAsPdf, tagsPdf } from './tagsPdf';
 import './tags.css';
@@ -21,7 +20,7 @@ const MENU_WAIT_MS = 1500;
 
 type Order = Pick<CateringOrder, 'customerName' | 'dueAt' | 'type' | 'items'>;
 
-export function TagsSheet({ order, now, onClose }: { order: Order; now: number; onClose: () => void }) {
+export function TagsSheet({ order, onClose }: { order: Order; now?: number; onClose: () => void }) {
   const menu = useDoc('toastMenu', 'current');
   const settings = useSingleton('settings');
   const brand = settings?.restaurantName?.trim() || 'Tabla';
@@ -53,8 +52,6 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
   const list = tags ?? [];
   const ready = list.filter((t) => t.name.trim());
   const pages = sheets(ready);
-  const when = `${dayLabel(order.dueAt, now) === 'Today' ? 'Today' : shortDate(order.dueAt)} · ${timeLabel(order.dueAt)} ${order.type}`;
-  const pageNote = `Catering · ${order.customerName} · ${when}`;
 
   // Any change to the tags makes a new PDF next time.
   const edit = (next: NameTag[]) => {
@@ -123,7 +120,6 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
                 </button>
               </div>
               {tooLong(t.name) && <span className="nt-row-warn">Too long for the tag</span>}
-              {t.sub && <span className="nt-row-sub">{t.sub}</span>}
               <Segmented<Diet>
                 label={`Veg or non-veg: ${t.name}`}
                 value={t.diet ?? 'veg'}
@@ -168,7 +164,7 @@ export function TagsSheet({ order, now, onClose }: { order: Order; now: number; 
       <button type="button" className="t-btn ghost block" onClick={onClose}>
         Close
       </button>
-      {createPortal(<TagPages ref={pagesRef} pages={pages} note={pageNote} brand={brand} />, document.body)}
+      {createPortal(<TagPages ref={pagesRef} pages={pages} brand={brand} />, document.body)}
     </Sheet>
   );
 }
@@ -221,8 +217,9 @@ function canShare(file: File): boolean {
   }
 }
 
-/** The printed sheets: hidden on screen, the only thing shown when printing. */
-export const TagPages = forwardRef<HTMLDivElement, { pages: NameTag[][]; note: string; brand: string }>(function TagPages({ pages, note, brand }, ref) {
+/** The printed sheets: hidden on screen, the only thing shown when printing. Only the tags print: no
+ *  times, dates or sheet numbers on the page. */
+export const TagPages = forwardRef<HTMLDivElement, { pages: NameTag[][]; brand: string }>(function TagPages({ pages, brand }, ref) {
   return (
     <div className="nt-print" aria-hidden="true" ref={ref}>
       {pages.map((tags, p) => (
@@ -235,12 +232,6 @@ export const TagPages = forwardRef<HTMLDivElement, { pages: NameTag[][]; note: s
               </div>
             ))}
           </div>
-          <footer className="nt-page-foot">
-            <span>{note}</span>
-            <span>
-              Sheet {p + 1} of {pages.length}
-            </span>
-          </footer>
         </section>
       ))}
     </div>
@@ -258,7 +249,6 @@ export function Tag({ tag, brand }: { tag: NameTag; brand: string }) {
       <div className="nt-mid">
         <div className={'nt-name ' + nameSize(tag.name)}>{tag.name}</div>
         <Divider />
-        {tag.sub && <div className="nt-sub">{tag.sub}</div>}
       </div>
       {diet && (
         <div className={'nt-diet ' + diet}>

@@ -38,9 +38,10 @@ const KITCHEN_NOTE = /\b(?:spicy|spice|mild|medium|hot|less|more|extra|no|withou
 // A note from reading a paper order ("Veg crossed out, written as Baby Corn above it", "Not on menu as written")
 // is for the staff checking the scan, not the guest.
 const SCAN_NOTE = /\b(?:menu|written|writing|wrote|crossed|cross|scratched|unclear|illegible|unreadable|readable|maybe|probably|likely|guess|check|confirm|verify|ask|above|below|margin|paper|handwriting|scan|scanned|typo|spelled|spelling|not|unsure|unknown)\b|\?/i;
-/** A tag's small line holds only a short describing word or two ("Dry", "Bone-in", "Boneless"), never a sentence or a note. */
+/** A tag's small line holds only a short describing word or two ("Dry", "Bone-in", "Boneless"), never a sentence, a note
+ *  or a number ("50 people"). */
 const tagNote = (t: string) =>
-  !!t && t.split(/\s+/).length <= 3 && t.length <= 24 && !PORTION.test(t) && !MARKER.test(t) && !KITCHEN_NOTE.test(t) && !SCAN_NOTE.test(t);
+  !!t && !/\d/.test(t) && t.split(/\s+/).length <= 3 && t.length <= 24 && !PORTION.test(t) && !MARKER.test(t) && !KITCHEN_NOTE.test(t) && !SCAN_NOTE.test(t);
 
 /** A dish name for a tag, and its small line: "Onion Samosa (6 pcs) (V)" → "Onion Samosa"; "Andhra Chicken Curry (Bone-in)" →
  *  "Andhra Chicken Curry" with "Bone-in" under it. `mark` is the veg or non-veg a menu marker gave, if any. */
@@ -71,9 +72,8 @@ export function guessDiet(name: string, toast: ToastItem | null): Diet {
   return 'veg';
 }
 
-/** One tag per dish of the order, in order, without repeats ("Samosa" and "Samosas" are one): just the dish,
- *  never the quantity or unit. The line's note goes under the name ("Bone-in"), unless it is for the kitchen
- *  ("extra spicy") or from reading the paper order ("not on menu as written"). The menu dish, when the line has one, gives the name and veg or non-veg. */
+/** One tag per dish of the order, in order, without repeats ("Samosa" and "Samosas" are one): only the dish
+ *  name, never the quantity, unit or any note ("Bone-in", "Dry"): the owner wants just the item name. The menu dish, when the line has one, gives the name and veg or non-veg. */
 export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines'>>, menu?: ToastMenu | null): NameTag[] {
   const dishes = menuDishes(menu);
   const seen = new Set<string>();
@@ -83,14 +83,12 @@ export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines
     // The menu's name when the line is a menu dish; else the line's own name (an old order's line was read
     // from its text once, without its amount). The text is never read again here.
     const raw = menuDish?.name ?? line.name;
-    const note = line.extra ? '' : line.note.trim();
-    const { name, sub: nameSub, mark } = tagName(raw);
-    const sub = nameSub || (tagNote(note) ? tidyCase(note) : '');
+    const { name, mark } = tagName(raw);
     const key = name.toLowerCase().split(/[^a-z0-9]+/).map((w) => (w.length > 3 ? w.replace(/s$/, '') : w)).join('');
     if (!name || seen.has(key)) continue;
     seen.add(key);
     const dish = menuDish ?? findDish(raw, dishes) ?? findDish(name, dishes);
-    tags.push({ name, sub, diet: mark ?? guessDiet(name, dish) });
+    tags.push({ name, sub: '', diet: mark ?? guessDiet(name, dish) });
   }
   return tags;
 }
