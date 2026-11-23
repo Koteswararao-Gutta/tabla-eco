@@ -31,6 +31,19 @@ describe('shift planner model', () => {
     expect(n!.weeks['2026-09-21'].shifts).toHaveLength(7);
   });
 
+  it('normalizeDB drops person ids and break times that could break the page', () => {
+    const n = normalizeDB({
+      config: {
+        people: [{ id: 'p1', name: 'Ann' }, { id: '"><img src=x onerror=alert(1)>', name: 'Bad' }],
+        special: { '2026-12-24': { open: 600, close: 1200, brk: ['<b>', 700] }, '2026-12-25': { open: 600, close: 1200, brk: [700, 800] } },
+      },
+      weeks: {},
+    });
+    expect(n?.config.people.map((p) => p.id)).toEqual(['p1']);
+    expect(n?.config.special['2026-12-24']).toEqual({ open: 600, close: 1200 });
+    expect(n?.config.special['2026-12-25']).toEqual({ open: 600, close: 1200, brk: [700, 800] });
+  });
+
   it('time helpers', () => {
     expect(fromHM('10:07')).toBe(600);
     expect(fmt(1020)).toBe('5pm');

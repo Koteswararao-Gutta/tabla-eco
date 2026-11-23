@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { NavLink } from 'react-router-dom';
 import './theme.css';
 import logoUrl from './brand/tabla-logo.webp';
+import { useSyncTrouble } from '@shared/data';
 
 /** The Tabla logo (transparent background). */
 export const LOGO_URL: string = logoUrl;
@@ -394,14 +395,17 @@ export function useOnline(): boolean {
   return online;
 }
 
-/** A calm notice shown while the device is offline. Changes still save and sync when it is back. */
+/** A calm notice shown while the device is offline, or can't reach the server (Wi-Fi on but no internet).
+ *  Changes still save and sync when it is back. */
 export function OfflineBanner() {
-  if (useOnline()) return null;
+  const online = useOnline();
+  const trouble = useSyncTrouble();
+  if (online && !trouble) return null;
   return (
-    <div className="t-offline" role="status">
+    <div className="t-offline" role="status" data-testid="offline-banner">
       <p>
         <i className="t-dot" aria-hidden="true" />
-        Offline. Changes will be saved when the internet is back.
+        {online ? 'Not connected. Orders may be out of date; changes will be saved when the connection is back.' : 'Offline. Changes will be saved when the internet is back.'}
       </p>
     </div>
   );

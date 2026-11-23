@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FirebaseStore } from './firebase';
 import { firebaseConfig } from './firebaseConfig';
 import { LocalStore } from './local';
-import { onSaveFailure, type SaveFailure } from './resync';
+import { hasSyncTrouble, onSaveFailure, onSyncTroubleChange, type SaveFailure } from './resync';
 import { filterKey, type CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
 import type { CollectionName, Collections, ScreenId, SingletonId, Singletons } from './types';
@@ -107,4 +107,28 @@ export function useSaveFailures(): { failures: SaveFailure[]; dismiss: () => voi
   const [failures, setFailures] = useState<SaveFailure[]>([]);
   useEffect(() => onSaveFailure((f) => setFailures((list) => [...list.slice(-19), f])), []);
   return { failures, dismiss: () => setFailures([]) };
+}
+
+/** How long a list may stay out of touch with the server before screens say so (a normal reconnect is quicker). */
+export const SYNC_TROUBLE_MS = 30_000;
+
+/** True once some live list has been out of touch with the server for SYNC_TROUBLE_MS: no connection to the
+ *  server (even with Wi-Fi on), or a list that keeps failing. False again as soon as it is back. */
+export function useSyncTrouble(afterMs = SYNC_TROUBLE_MS): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      clearTimeout(timer);
+      if (!hasSyncTrouble()) return setShown(false);
+      timer = setTimeout(() => setShown(hasSyncTrouble()), afterMs);
+    };
+    check();
+    const stop = onSyncTroubleChange(check);
+    return () => {
+      stop();
+      clearTimeout(timer);
+    };
+  }, [afterMs]);
+  return shown;
 }

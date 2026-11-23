@@ -58,6 +58,17 @@ export class FirebaseStore implements DataStore {
       ignoreUndefinedProperties: true,
     });
     const auth = getAuth(app);
+    let signingIn = false;
+    const signIn = () => {
+      if (signingIn) return;
+      signingIn = true;
+      const tryIn = () =>
+        signInAnonymously(auth).then(
+          () => void (signingIn = false),
+          () => setTimeout(tryIn, 10_000),
+        );
+      tryIn();
+    };
     // Resolves once this device is signed in. A device that signed in before keeps its sign-in
     // offline, so a TV that restarts without internet still opens its cached data.
     this.ready = new Promise((resolve) => {
@@ -67,11 +78,17 @@ export class FirebaseStore implements DataStore {
           resolve();
         }
       });
-      const tryIn = () => signInAnonymously(auth).catch(() => setTimeout(tryIn, 10_000));
       auth.authStateReady().then(() => {
-        if (!auth.currentUser) tryIn();
+        if (!auth.currentUser) signIn();
       });
     });
+    // A device can lose its sign-in later (its anonymous account removed, or its sign-in refused on a refresh).
+    // Then every list would fail until a reload; sign in again instead, so a kitchen tablet or TV recovers by itself.
+    this.ready.then(() =>
+      onAuthStateChanged(auth, (user) => {
+        if (!user) signIn();
+      }),
+    );
     // Every 30 s until the first sync works, then hourly; again when the internet returns or the
     // device's own clock is changed.
     this.ready.then(() => scheduleClockSync(() => this.syncClock(), { events: typeof window === 'undefined' ? null : window }));
@@ -173,8 +190,10 @@ export class FirebaseStore implements DataStore {
             (ok, fail) =>
               onSnapshot(
                 query(collection(this.db, col), where(documentId(), 'in', ids)),
+                { includeMetadataChanges: true },
                 (q) => {
-                  ok();
+                  ok(q.metadata.fromCache);
+                  if (parts[i] && !q.docChanges().length) return; // only "connected or not" changed
                   parts[i] = q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>);
                   send();
                 },
@@ -200,18 +219,22 @@ export class FirebaseStore implements DataStore {
               : filter
                 ? query(all, where('dueAt', '>=', filter.dueFrom), where('dueAt', '<', filter.dueTo))
                 : all;
-      return keepListening(
-        (ok, fail) =>
-          onSnapshot(
-            source,
-            (q) => {
-              ok();
-              cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>));
-            },
-            fail,
-          ),
-        label,
-      );
+      // Metadata changes too, so the list can say when it is only showing this device's copy (see hasSyncTrouble);
+      // a snapshot where only that changed is not passed on.
+      return keepListening((ok, fail) => {
+        let sent = false;
+        return onSnapshot(
+          source,
+          { includeMetadataChanges: true },
+          (q) => {
+            ok(q.metadata.fromCache);
+            if (sent && !q.docChanges().length) return;
+            sent = true;
+            cb(q.docs.map((d) => ({ ...d.data(), id: d.id }) as WithId<Collections[C]>));
+          },
+          fail,
+        );
+      }, label);
     });
   }
 
@@ -276,7 +299,17 @@ export class FirebaseStore implements DataStore {
     const blob = fitted.blob.size > MAX_PICTURE_BYTES ? await shrink(fitted.blob) : fitted.blob;
     const id = newId();
     await this.ready;
-    await fsSet(doc(this.db, 'pictureData', id), { type: blob.type || 'image/jpeg', data: await toBase64(blob) });
+    // A picture is only added once it reached the server: TVs would otherwise get a picture they can't load.
+    // Without internet that wait would never end, so the Add button gives up with a plain message instead.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please add the picture when online.');
+    const sent = fsSet(doc(this.db, 'pictureData', id), { type: blob.type || 'image/jpeg', data: await toBase64(blob) });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<never>((_, fail) => (timer = setTimeout(() => fail(new Error('The picture could not be sent. Please check the internet.')), 60_000)));
+    try {
+      await Promise.race([sent, slow]);
+    } finally {
+      clearTimeout(timer);
+    }
     const pic: Picture = { id, name, width: fitted.width, height: fitted.height, createdAt: this.now() };
     await this.setDoc('pictures', id, pic);
     return { ...pic, id };
@@ -291,7 +324,9 @@ export class FirebaseStore implements DataStore {
         const s = await fsGet(doc(this.db, 'pictureData', id));
         const data = s.get('data') as string | undefined;
         if (!data) return null;
-        return URL.createObjectURL(fromBase64(data, (s.get('type') as string) || 'image/jpeg'));
+        // Only ever an image type: a picture opened on its own ("Open image in new tab") must never run as a page.
+        const type = s.get('type');
+        return URL.createObjectURL(fromBase64(data, typeof type === 'string' && /^image\/[a-z0-9.+-]+$/.test(type) ? type : 'image/jpeg'));
       })().catch(() => null);
       this.urlCache.set(id, hit);
       // A missing or failed picture is asked for again next time, so it shows once it arrives.
@@ -315,8 +350,17 @@ export class FirebaseStore implements DataStore {
     if (!pushSupported()) return isIphoneBrowser() ? 'needs-home-screen' : 'unsupported';
     if (Notification.permission === 'denied') return 'blocked';
     if (Notification.permission !== 'granted' || !flag()) return 'off';
-    this.registerPush().catch((e) => console.warn('alerts refresh', e)); // the address can change; keep it current
-    return 'on';
+    // The phone's alert address can change or expire: save it again. If that fails while online, alerts aren't
+    // really working, so offer "Turn on alerts" again. Offline we can't check: trust the last good state.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'on';
+    try {
+      await withTimeout(this.registerPush(), 15_000);
+      return 'on';
+    } catch (e) {
+      console.warn('alerts refresh', e);
+      flag(false);
+      return 'off';
+    }
   }
 
   async turnOnAlerts(): Promise<AlertState> {
@@ -334,7 +378,7 @@ export class FirebaseStore implements DataStore {
     const reg = await navigator.serviceWorker.register(swUrl());
     const token = await getToken(getMessaging(this.app), { vapidKey, serviceWorkerRegistration: reg });
     await this.ready;
-    await fsSet(doc(this.db, 'pushTokens', deviceId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
+    await fsSet(doc(this.db, 'pushTokens', pushId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
   }
 
   // ---------- reading paper orders ----------
@@ -429,6 +473,18 @@ function clockWriteWaiting(set?: boolean): boolean {
   }
 }
 
+/** This device's phone-alert address id: random and never shown anywhere else (the clock id is readable by any
+ *  device), so another device can't save over it and take this phone's alerts. */
+function pushId(): string {
+  try {
+    let id = localStorage.getItem('tabla-push-id');
+    if (!id) localStorage.setItem('tabla-push-id', (id = newId() + newId()));
+    return id;
+  } catch {
+    return newId() + newId();
+  }
+}
+
 /** A stable id for this device, used only for its clock document. */
 function deviceId(): string {
   try {
@@ -467,4 +523,12 @@ function fromBase64(data: string, type: string): Blob {
   const bytes = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
   return new Blob([bytes], { type });
+}
+
+/** Rejects when `p` takes longer than `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timed out')), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
 }

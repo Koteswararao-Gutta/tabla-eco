@@ -414,10 +414,15 @@ export function ItemList({ lines, className, showChecks }: { lines: OrderLine[];
   );
 }
 
-/** Offers the 1-hour phone alerts on this device, or says why it can't. */
+/** True inside the Tabla Android app (a web view), which can't get web push alerts. */
+const inAndroidApp = () => typeof navigator !== 'undefined' && /; wv\)|TablaScreen\//.test(navigator.userAgent);
+
+/** Offers the 1-hour phone alerts on this device, or says why it can't. Shown again whenever alerts stop working. */
 function AlertsCard() {
   const [state, setState] = useState<AlertState | null>(null);
   const [busy, setBusy] = useState(false);
+  // The "alerts are on" line shows only right after turning them on here, not every time the app opens.
+  const [justOn, setJustOn] = useState(false);
   useEffect(() => {
     let live = true;
     store.alertState().then((s) => live && setState(s), () => live && setState('unsupported'));
@@ -426,8 +431,15 @@ function AlertsCard() {
     };
   }, []);
 
-  if (!state || state === 'unsupported') return null;
-  if (state === 'on') return <p className="c-alerts-on" data-testid="alerts">✓ This phone gets an alert 1 hour before each order.</p>;
+  if (!state) return null;
+  // The Android screen app (a web view) can't get alerts: point to Chrome instead. Elsewhere, say nothing.
+  if (state === 'unsupported')
+    return inAndroidApp() ? (
+      <div className="c-alerts" data-testid="alerts">
+        <p>This app can’t show phone alerts. To get them, open the same link in Chrome and tap “Turn on alerts” there.</p>
+      </div>
+    ) : null;
+  if (state === 'on') return justOn ? <p className="c-alerts-on" data-testid="alerts">✓ This phone gets an alert 1 hour before each order.</p> : null;
   return (
     <div className="c-alerts" data-testid="alerts">
       {state === 'off' && (
@@ -438,7 +450,9 @@ function AlertsCard() {
             disabled={busy}
             onClick={async () => {
               setBusy(true);
-              setState(await store.turnOnAlerts().catch((): AlertState => 'off'));
+              const next = await store.turnOnAlerts().catch((): AlertState => 'off');
+              setJustOn(next === 'on');
+              setState(next);
               setBusy(false);
             }}
           >
@@ -449,7 +463,12 @@ function AlertsCard() {
       {state === 'needs-home-screen' && (
         <p>To get alerts on iPhone, first add this app to your Home Screen: tap Share, then “Add to Home Screen”. Then open it from there.</p>
       )}
-      {state === 'blocked' && <p>Alerts are blocked on this phone. To turn them on, allow notifications for this app in the phone’s settings.</p>}
+      {state === 'blocked' && (
+        <>
+          <p>Alerts are blocked on this phone, so it won’t get the 1-hour alerts.</p>
+          <p>To fix it in Chrome: tap ⋮ › Settings › Site settings › Notifications, allow this site, then open the app again. On a Home Screen app: phone Settings › Notifications › this app › Allow.</p>
+        </>
+      )}
     </div>
   );
 }
