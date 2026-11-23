@@ -166,6 +166,14 @@ describe('formFromScan', () => {
     expect(form.lines).toEqual(base.lines);
     expect(unsure).toEqual(['phone', 'date', 'type']);
   });
+
+  it('reads a range of people as its first number and asks to check it', () => {
+    for (const people of ['40-50', '40 to 50', '40 or 50']) {
+      const { form, unsure } = formFromScan({ ...scan, people }, base);
+      expect(form.people).toBe('40');
+      expect(unsure).toContain('people');
+    }
+  });
 });
 
 describe('formFromScan with structured lines', () => {

@@ -340,7 +340,10 @@ export function formFromScan(s: ScannedOrder, base: OrderForm, dishes: Dish[] = 
   const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(text(s.date)) && fromInputs(text(s.date), '12:00') !== null ? text(s.date) : '';
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(text(s.time)) ? text(s.time) : '';
-  const people = text(s.people).replace(/\D/g, '');
+  // The first number only: "40-50" or "40 to 50" is 40 (and asked to be checked), never 4050.
+  const numbers = text(s.people).match(/\d+/g) ?? [];
+  const people = numbers[0] ?? '';
+  if (numbers.length > 1) unsure.add('people');
   const address = text(s.address);
   const type = s.type === 'pickup' || s.type === 'delivery' ? s.type : address ? 'delivery' : base.type;
   const lines = draftsFromScan(s, dishes);
