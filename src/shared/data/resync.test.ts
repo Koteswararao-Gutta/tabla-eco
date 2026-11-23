@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keepListening, onSaveFailure, queued, reportSaveFailure, SAVE_WAIT_MS, scheduleClockSync, singleFlight, type SaveFailure } from './resync';
+import { keepListening, LISTEN_RETRY_FIRST_MS, onSaveFailure, queued, reportSaveFailure, SAVE_WAIT_MS, scheduleClockSync, singleFlight, type SaveFailure } from './resync';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -256,5 +256,37 @@ describe('save failure events', () => {
     expect(b).toEqual(['refused', 'plain text']);
     stopB();
     stopBad();
+  });
+});
+
+describe('connection health (hasSyncTrouble)', () => {
+  it('reports a list that only has the device copy, or that failed, until it is back or stopped', async () => {
+    const { hasSyncTrouble, onSyncTroubleChange } = await import('./resync');
+    let changes = 0;
+    const off = onSyncTroubleChange(() => changes++);
+    let ok: (fromCache?: boolean) => void = () => {};
+    let fail: (e: Error) => void = () => {};
+    vi.useFakeTimers();
+    const stop = keepListening((o, f) => {
+      ok = o;
+      fail = f;
+      return () => {};
+    }, 'health');
+    expect(hasSyncTrouble()).toBe(false);
+    ok(true); // the device's copy only
+    expect(hasSyncTrouble()).toBe(true);
+    ok(false); // the server answered
+    expect(hasSyncTrouble()).toBe(false);
+    fail(new Error('missing index'));
+    expect(hasSyncTrouble()).toBe(true);
+    vi.advanceTimersByTime(LISTEN_RETRY_FIRST_MS);
+    ok();
+    expect(hasSyncTrouble()).toBe(false);
+    ok(true);
+    stop(); // a list nobody looks at any more is no trouble
+    expect(hasSyncTrouble()).toBe(false);
+    expect(changes).toBe(6);
+    off();
+    vi.useRealTimers();
   });
 });

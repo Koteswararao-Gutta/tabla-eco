@@ -15,4 +15,9 @@ describe('kitchen red notice', () => {
     expect(noticeText({ ...ok, ordersLoaded: false })).toBeNull();
     expect(noticeText({ ...ok, ordersLoaded: false, waitedLong: true })).toMatch(/Can’t reach the orders/);
   });
+  it('says when the tablet has Wi-Fi but is out of touch with the server', () => {
+    expect(noticeText({ ...ok, connected: false })).toMatch(/Not connected: new orders may not show/);
+    expect(noticeText({ ...ok, online: false, connected: false })).toMatch(/Offline/);
+    expect(noticeText({ ...ok, connected: true })).toBeNull();
+  });
 });
