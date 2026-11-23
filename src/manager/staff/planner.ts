@@ -302,7 +302,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       e.preventDefault();
       if (top.id === 'ask') askClose?.();
       else if (top.id === 'edit') closeEdit();
-      else top.hidden = true;
+      else closeShot();
       return;
     }
     if (e.key !== 'Tab') return;
@@ -996,8 +996,11 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         saveConfig();
         tlScroll = null;
         render();
+        // The menu is drawn again: keep focus on it (a question box may have taken it meanwhile).
+        const a = document.activeElement;
+        if (!a || a === document.body) $('spMode')?.focus({ preventScroll: true });
       };
-    const so = $<HTMLInputElement>('spOpen'), scl = $<HTMLInputElement>('spClose');
+    const so =$<HTMLInputElement>('spOpen'), scl = $<HTMLInputElement>('spClose');
     if (so && scl)
       commitTime([so, scl], () => {
         const o = fromHM(so.value), c = fromHM(scl.value), err = must('spErr');
@@ -1117,10 +1120,27 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }
 
   /* ---------- shift editor (bottom sheet) ---------- */
+  // Where focus goes back to when the editor closes: the shift it was opened from (found again by
+  // person and index, as a redraw replaces the bars), so keyboard users keep their place.
+  let editFrom: { pid: string; k: number } | null = null;
+  let titleFocus: number | undefined;
   function closeEdit() {
     const b = $('edit');
+    const wasOpen = !!b && !b.hidden;
     if (b) b.hidden = true;
     posFlow = false;
+    const from = editFrom;
+    editFrom = null;
+    if (!wasOpen || !from) return;
+    // Only when focus was in the sheet (or nowhere): never pull it away from something else that was tapped.
+    const a = document.activeElement;
+    if (a && a !== document.body && !(b && b.contains(a))) return;
+    const back = root.querySelector<HTMLElement>(`.bar[data-p="${from.pid}"][data-k="${from.k}"]`) || root.querySelector<HTMLElement>(`.bar[data-p="${from.pid}"]`);
+    try {
+      back?.focus({ preventScroll: true });
+    } catch {
+      /* gone */
+    }
   }
   // Next shift on this day that has no position yet (in timeline order), skipping the one being edited.
   function nextUnset(d: number, skip: { pid: string; k: number } | null) {
@@ -1135,13 +1155,15 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     return out[0] || null;
   }
   const dayShifts = (d: number) => Wk(wk).shifts[d];
-  function openEdit(pid: string, k: number) {
+  /** focusSel: the control to focus again after a redraw of the open sheet (a stepper button pressed by keyboard). */
+  function openEdit(pid: string, k: number, focusSel?: string) {
     const box = must('edit'), el = must('editBox'), d = cur;
     const list = Wk(wk).shifts[d][pid] || [], v = list[k];
     if (!v) {
       closeEdit();
       return;
     }
+    editFrom = { pid, k };
     const L = !!Wk(wk).locked, R = dayRange(wk, d);
     const opts = (from: number, to: number, sel: number) => {
       let o = '';
@@ -1168,20 +1190,27 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       if (e.target === box) closeEdit();
     };
     must('eDone').onclick = closeEdit;
-    later(() => {
-      try {
-        $('editTitle')?.focus({ preventScroll: true });
-      } catch {
-        /* gone */
-      }
-    }, 30);
+    const again = focusSel ? el.querySelector<HTMLButtonElement | HTMLSelectElement>(focusSel) : null;
+    cancel(titleFocus);
+    if (again && !again.disabled) again.focus({ preventScroll: true });
+    else
+      titleFocus = later(() => {
+        try {
+          $('editTitle')?.focus({ preventScroll: true });
+        } catch {
+          /* gone */
+        }
+      }, 30);
     if (L) return;
     const apply = () => {
+      // The sheet is drawn again: remember which control had focus (e.g. "+" pressed with the keyboard).
+      const a = document.activeElement as HTMLElement | null;
+      const sel = !a || !el.contains(a) ? undefined : a.id ? '#' + a.id : a.dataset.dir ? `[data-s="${a.dataset.s}"][data-dir="${a.dataset.dir}"]` : a.dataset.r ? `[data-r="${a.dataset.r}"]` : undefined;
       saveWeek(wk);
       render();
       // Saving may merge in shifts from another phone, so find this shift again.
       const k2 = (Wk(wk).shifts[d][pid] || []).findIndex((x) => x[0] === v[0] && x[1] === v[1]);
-      openEdit(pid, k2 >= 0 ? k2 : k);
+      openEdit(pid, k2 >= 0 ? k2 : k, sel);
     };
     all('.poschoice button', el).forEach(
       (b) =>
@@ -1251,7 +1280,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }, sig);
   dragToClose(must('edit'), closeEdit);
   dragToClose(must('ask'), () => askClose?.());
-  dragToClose(must('shot'), () => (must('shot').hidden = true));
+  dragToClose(must('shot'), () => closeShot());
   // A new week may have started while the page sat in the background.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !DB) return;
@@ -1443,9 +1472,20 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       /* cancelled */
     }
   };
-  must('shotClose').onclick = () => (must('shot').hidden = true);
+  function closeShot() {
+    const box = must('shot');
+    if (box.hidden) return;
+    box.hidden = true;
+    // Back to "Send to staff", which stays on the page while the picture is shown.
+    try {
+      $('copyPic')?.focus({ preventScroll: true });
+    } catch {
+      /* gone */
+    }
+  }
+  must('shotClose').onclick = closeShot;
   must('shot').onclick = (e) => {
-    if ((e.target as HTMLElement).id === 'shot') must('shot').hidden = true;
+    if ((e.target as HTMLElement).id === 'shot') closeShot();
   };
 
   /* ---------- render: staff ---------- */
@@ -1506,6 +1546,10 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       [L[i], L[j]] = [L[j], L[i]];
       saveConfig();
       renderStaff();
+      // Keep focus on the arrow just pressed (or the other one at the end of the list), so it can be pressed again.
+      const same = main.querySelector<HTMLButtonElement>(`[data-${dir < 0 ? 'up' : 'down'}="${id}"]`);
+      const other = main.querySelector<HTMLButtonElement>(`[data-${dir < 0 ? 'down' : 'up'}="${id}"]`);
+      (same && !same.disabled ? same : other)?.focus();
     };
     all('[data-up]', main).forEach((b) => (b.onclick = () => move(b.dataset.up as string, -1)));
     all('[data-down]', main).forEach((b) => (b.onclick = () => move(b.dataset.down as string, 1)));

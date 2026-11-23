@@ -171,6 +171,51 @@ test.describe('staff sheets on a touch phone', () => {
   });
 });
 
+test('keyboard: focus stays put in the shift sheet and comes back when a sheet closes', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  const errors = watchErrors(page);
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  const focused = () => page.evaluate(() => { const a = document.activeElement as HTMLElement; return a.id || a.getAttribute('aria-label') || a.tagName; });
+
+  // Open a shift with Enter, press "+" twice with the keyboard: focus stays on "+".
+  const bar = page.locator('.bar').first();
+  const pid = await bar.getAttribute('data-p');
+  await bar.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#edit')).toBeVisible();
+  await expect.poll(focused).toBe('editTitle');
+  const plus = page.locator('#editBox [aria-label="End 15 minutes later"]');
+  await plus.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(focused).toBe('End 15 minutes later');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#editBox .when')).toContainText('2:30pm');
+  await expect.poll(focused).toBe('End 15 minutes later');
+  // Escape: back on the same shift.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#edit')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement).dataset.p)).toBe(pid);
+
+  // Send to staff, then Escape: back on the button.
+  await page.locator('#copyPic').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#shot')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shot')).toBeHidden();
+  await expect.poll(focused).toBe('copyPic');
+
+  // People: an arrow keeps focus, so it can be pressed again.
+  await page.locator('.views [data-v="people"]').click();
+  const third = await page.locator('input[data-id]').nth(2).getAttribute('data-id');
+  await page.locator(`[data-up="${third}"]`).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('input[data-id]').first()).toHaveAttribute('data-id', third!);
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement).dataset.down || (document.activeElement as HTMLElement).dataset.up)).toBe(third);
+  expect(errors).toEqual([]);
+});
+
 test('two phones rename different people at once: each phone shows both names', async ({ context }) => {
   const page = await openScreen(context, '/manager/staff');
   await expect(page.locator('#savepill')).toHaveText('Saved ✓');
