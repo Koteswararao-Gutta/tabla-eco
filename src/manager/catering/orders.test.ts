@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
 import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, parseQty, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -135,6 +135,13 @@ describe('form', () => {
   });
 });
 
+describe('parseQty', () => {
+  it('takes 2, 1.5, 1/2 and 1 1/2, and refuses 0, negatives and amounts that round to 0', () => {
+    expect([parseQty('2'), parseQty('1.5'), parseQty('1/2'), parseQty('1 1/2'), parseQty('0.005'), parseQty('')]).toEqual([2, 1.5, 0.5, 1.5, 0.01, null]);
+    for (const bad of ['0', '0.001', '0.004', '-1', 'abc', '100001']) expect(parseQty(bad)).toBeNaN();
+  });
+});
+
 describe('formFromScan', () => {
   const scan: ScannedOrder = {
     isOrder: true, customerName: ' Meera Iyer ', phone: '555 404 1212', date: '2026-11-19', time: '18:30', type: 'delivery',
@@ -159,6 +166,14 @@ describe('formFromScan', () => {
     expect(form.lines).toEqual(base.lines);
     expect(unsure).toEqual(['phone', 'date', 'type']);
   });
+
+  it('reads a range of people as its first number and asks to check it', () => {
+    for (const people of ['40-50', '40 to 50', '40 or 50']) {
+      const { form, unsure } = formFromScan({ ...scan, people }, base);
+      expect(form.people).toBe('40');
+      expect(unsure).toContain('people');
+    }
+  });
 });
 
 describe('formFromScan with structured lines', () => {
@@ -171,6 +186,18 @@ describe('formFromScan with structured lines', () => {
       { dish: 'Kaju Katli', qty: '', unit: '', note: '', unsure: false },
     ],
   };
+  it('marks a dish matched only by the start of its name, and keeps a plain "Samosa" as the menu "Samosa (2)"', () => {
+    const menu = [['c65', 'Chicken 65'], ['pt', 'Paneer Tikka'], ['s2', 'Samosa (2)']].map(([id, name]) => ({ id, name, group: '', description: '' }));
+    const read = (dish: string) => ({ dish, qty: '1', unit: 'Full tray', note: '', unsure: false });
+    const { form } = formFromScan({ ...scan, lines: [read('Chicken'), read('paneer'), read('Chicken 65 Biryani'), read('samosa'), read('Chicken 65')] }, emptyForm(NOW), menu);
+    expect(form.lines.map((l) => [l.name, !!l.check])).toEqual([
+      ['Chicken 65', true],
+      ['Paneer Tikka', true],
+      ['Chicken 65', true],
+      ['Samosa (2)', false],
+      ['Chicken 65', false],
+    ]);
+  });
   it('matches menu dishes, makes units standard and marks rows to check', () => {
     const { form } = formFromScan(scan, emptyForm(NOW), dishes);
     expect(form.lines).toEqual([
@@ -232,6 +259,19 @@ describe('validate: name length', () => {
     const f = { ...emptyForm(at(18, 12), undefined), customerName: 'A'.repeat(NAME_MAX + 1) };
     expect(validate(f).customerName).toBe(`Please shorten the name to ${NAME_MAX} letters or fewer.`);
     expect(validate({ ...f, customerName: 'A'.repeat(NAME_MAX) }).customerName).toBeUndefined();
+  });
+});
+
+describe('dates in another year', () => {
+  const nextYear = new Date(2027, 0, 2, 18).getTime(); // Sat, Jan 2, 2027
+  const o = { customerName: 'X', phone: '', dueAt: nextYear, type: 'pickup' as const, items: 'Samosa, 20', people: null };
+  it('the WhatsApp message names the year when it is not this year', () => {
+    expect(shareText(o, undefined, new Date(2026, 10, 23).getTime())).toContain('\nSat, Jan 2, 2027, 6:00 PM\n');
+    expect(shareText(o, undefined, new Date(2027, 0, 1).getTime())).toContain('\nSat, Jan 2, 6:00 PM\n');
+  });
+  it('a change of year in the edit history shows both years', () => {
+    expect(describeChanges({ ...o, dueAt: new Date(2026, 0, 2, 18).getTime() }, o)).toEqual(['Date: Fri, Jan 2, 2026 → Sat, Jan 2, 2027']);
+    expect(describeChanges({ ...o, dueAt: new Date(2027, 0, 3, 18).getTime() }, o)).toEqual(['Date: Sun, Jan 3 → Sat, Jan 2']);
   });
 });
 

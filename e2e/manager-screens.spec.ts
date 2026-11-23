@@ -69,6 +69,25 @@ test('adding a picture creates a slot after that spot and restarts the loop on i
   await expect(page.getByTestId('slot').nth(1).locator('img')).toBeVisible();
 });
 
+test('a file that is not a picture: plain message, no broken image, Add stays off until a real picture', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Add a picture', exact: true }).click();
+  const sheet = page.getByRole('dialog');
+  await page.getByTestId('add-file').setInputFiles({ name: 'menu.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 not a picture') });
+  await expect(sheet.getByTestId('picture-broken')).toBeVisible();
+  await expect(sheet.locator('img')).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: 'Add picture' })).toBeDisabled();
+  await shot(page, 'add-not-a-picture');
+  // A real picture afterwards clears it.
+  await page.getByTestId('add-file').setInputFiles({ name: 'dish.png', mimeType: 'image/png', buffer: PNG });
+  await expect(sheet.locator('img')).toBeVisible();
+  await expect(sheet.getByTestId('picture-broken')).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Add picture' }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByTestId('slot')).toHaveCount(5);
+});
+
 test('one clear add button at the end, quiet + buttons in between with their own names', async ({ context }) => {
   const page = await openScreen(context, '/manager/screens/tv1');
   await expect(page.getByTestId('slot')).toHaveCount(4);

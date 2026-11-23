@@ -14,6 +14,7 @@ import { itemTexts, menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
 import { balance, depositError, depositTotal, fullAmountError, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, paidSoFar, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
 import { savePay } from './payWrite';
+import { guardTaps, ignoreGuardedTap } from './tapGuard';
 import { duplicateOf, isCancelled, notDeleted } from './safety';
 import './catering.css';
 import { Address } from './Address';
@@ -47,6 +48,8 @@ function useSaver() {
     setError('');
     try {
       await fn();
+      // The screen usually changes now: the second tap of a double tap must not land on what shows next.
+      guardTaps();
     } catch {
       setError(failText);
     } finally {
@@ -143,7 +146,7 @@ export default function Catering() {
   const owedTotal = unpaid.reduce((a, o) => a + (balance(payOf(o.id) ?? NO_PAY) ?? 0), 0);
 
   return (
-    <main className="t-page c-page">
+    <main className="t-page c-page" onClickCapture={ignoreGuardedTap}>
       <PageHeader
         logo
         title="Catering"
@@ -704,7 +707,7 @@ function OrderSummary({ order: o, pay, now, onClose, onCompleted, onDelete, onPr
           Mark paid
         </button>
       )}
-      {open && <ShareLink text={shareText(o)} />}
+      {open && <ShareLink text={shareText(o, undefined, now)} />}
       {onPrintTags && !cancelled && (
         <button type="button" className="t-btn block" onClick={() => onPrintTags(o)}>
           Print name tags
@@ -749,6 +752,11 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
   const { busy, error, run } = useSaver();
   // A tap on Remove asks once more, on the same button.
   const [confirm, setConfirm] = useState<string | null>(null);
+  // A double tap must not be taken as the second, confirming tap.
+  const arm = (what: string) => {
+    setConfirm(what);
+    guardTaps();
+  };
   if (!pay.paid && pay.deposits.length === 0) return null;
   // Removing a deposit or a payment is written to the payment history first-hand, so nothing is lost.
   const removeDeposit = (d: (typeof pay.deposits)[number]) =>
@@ -782,7 +790,7 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
               <b>Deposit {amountLabel(d.amount)}</b> · {methodLabel(d.method)} · {d.takenBy}
               <small>{whenLabel(d.at, now)}</small>
             </span>
-            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === `d${i}` ? removeDeposit(d) : setConfirm(`d${i}`))}>
+            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === `d${i}` ? removeDeposit(d) : arm(`d${i}`))}>
               {confirm === `d${i}` ? 'Tap to remove' : 'Remove'}
             </button>
           </li>
@@ -795,7 +803,7 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
               {pay.takenBy && <> · {pay.takenBy}</>}
               {pay.paidAt != null && <small>{whenLabel(pay.paidAt, now)}</small>}
             </span>
-            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === 'paid' ? markNotPaid() : setConfirm('paid'))}>
+            <button type="button" className="t-btn ghost c-pay-undo" disabled={busy} onClick={() => (confirm === 'paid' ? markNotPaid() : arm('paid'))}>
               {confirm === 'paid' ? 'Tap to undo' : 'Undo'}
             </button>
           </li>
@@ -1282,7 +1290,7 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
       await saveAmount(id, fields.items);
       // The estimate it came from is kept, marked as made into this order.
       if (props.fromEstimate) await store.updateDoc('estimates', props.fromEstimate.id, { status: 'ordered', orderId: id, updatedAt: store.now() }).catch(() => {});
-      props.onSaved(shareText(fields, 'New catering order'));
+      props.onSaved(shareText(fields, 'New catering order', now));
     });
   };
 
@@ -1408,7 +1416,17 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
             autoComplete="off"
             data-testid="amount-input"
           />
-          {amountErr ? <small className="c-err" role="alert">{amountErr}</small> : <small className="c-hint">Not shown on the kitchen tablet.</small>}
+          {amountErr ? (
+            <small className="c-err" role="alert">{amountErr}</small>
+          ) : props.pay?.paid && amountChanged ? (
+            // Paid in full stays paid when the amount changes (also when another phone marked it paid while
+            // this form was open), so say so before Save rather than show "$350 ✓ Paid" for $300 taken.
+            <small className="c-check" role="status" data-testid="amount-paid-note">
+              Already marked paid{props.pay.amount != null ? ` at ${amountLabel(props.pay.amount)}` : ''}. A new amount doesn't change that. If they owe more, tap Undo on the payment first.
+            </small>
+          ) : (
+            <small className="c-hint">Not shown on the kitchen tablet.</small>
+          )}
         </Field>
       )}
 

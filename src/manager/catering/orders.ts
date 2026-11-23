@@ -1,7 +1,7 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
 import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
-import { cleanLine, findDish, itemLines, itemTexts, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
+import { cleanLine, findDish, itemLines, itemTexts, linesText, norm, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
 
 export { itemLines };
 
@@ -83,6 +83,13 @@ export function dayLabel(ms: number, now: number): string {
   if (diff === -1) return 'Yesterday';
   // Another year shows its year, so an order typed with the wrong year stands out.
   const otherYear = new Date(ms).getFullYear() !== new Date(now).getFullYear();
+  return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}) });
+}
+
+/** "Fri, Nov 20" for a message read later; "Sat, Jan 2, 2027" when the date is in another year than `now`
+ *  (a party booked for next year, or a date typed with the wrong year). Without `now`, no year. */
+export function dateText(ms: number, now?: number): string {
+  const otherYear = now !== undefined && new Date(ms).getFullYear() !== new Date(now).getFullYear();
   return new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}) });
 }
 
@@ -204,7 +211,9 @@ export function parseQty(text: string): number | null {
   if (!text.trim()) return null;
   const n = qtyValue(text);
   if (Number.isNaN(n)) return NaN;
-  return n > 0 && n <= 100_000 ? Math.round(n * 100) / 100 : NaN;
+  // Kept to 2 decimals: anything that rounds to 0 ("0.001") is not a quantity either.
+  const r = Math.round(n * 100) / 100;
+  return r > 0 && n <= 100_000 ? r : NaN;
 }
 
 /** The order's lines from the form's rows: empty rows dropped, checks cleared (whoever saves has seen the form). */
@@ -304,8 +313,13 @@ export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' 
 
 const FORM_KEYS: (keyof OrderForm)[] = ['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'lines', 'notes'];
 
+/** True when the menu dish is the dish as read, not a guess from the start of its name ("Chicken" read as
+ *  "Chicken 65", "Paneer" as "Paneer Tikka"). "Samosa" is the same dish as "Samosa (2)" on the menu. */
+const sameDish = (menuName: string, read: string) =>
+  norm(menuName) === norm(read) || norm(menuName.replace(/\s*[([][^)\]]*[)\]]/g, '')) === norm(read);
+
 /** The item rows from what the AI read: menu dishes matched by name, units made standard. A row is marked
- *  to check when the AI was unsure, the dish isn't on the menu, or there's no quantity. */
+ *  to check when the AI was unsure, the dish isn't on the menu (or only matched by a guess), or there's no quantity. */
 export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes: Dish[]): LineDraft[] {
   const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   if (Array.isArray(s.lines) && s.lines.length) {
@@ -316,7 +330,7 @@ export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes:
         const qty = parseQty(text(l.qty).replace(/[^\d.,/\s½¼¾-]/g, ''));
         const unit = normalizeUnit(text(l.unit));
         const d: LineDraft = { dishId: dish?.id ?? null, name: dish?.name ?? text(l.dish), qty: qty === null || Number.isNaN(qty) ? '' : String(qty), unit: unit.unit, note: text(l.note) };
-        if (l.unsure === true || !dish || !d.qty || !unit.sure) d.check = true;
+        if (l.unsure === true || !dish || !sameDish(dish.name, text(l.dish)) || !d.qty || !unit.sure) d.check = true;
         return d;
       });
   }
@@ -333,7 +347,10 @@ export function formFromScan(s: ScannedOrder, base: OrderForm, dishes: Dish[] = 
   const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(text(s.date)) && fromInputs(text(s.date), '12:00') !== null ? text(s.date) : '';
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(text(s.time)) ? text(s.time) : '';
-  const people = text(s.people).replace(/\D/g, '');
+  // The first number only: "40-50" or "40 to 50" is 40 (and asked to be checked), never 4050.
+  const numbers = text(s.people).match(/\d+/g) ?? [];
+  const people = numbers[0] ?? '';
+  if (numbers.length > 1) unsure.add('people');
   const address = text(s.address);
   const type = s.type === 'pickup' || s.type === 'delivery' ? s.type : address ? 'delivery' : base.type;
   const lines = draftsFromScan(s, dishes);
@@ -366,8 +383,8 @@ export function telHref(phone: string): string {
 /** The order as a WhatsApp message for the front staff group, so they can get sides ready.
  *  The date is written out ("Fri, Nov 20"), since the message is read later. The customer's
  *  phone is left out: the staff group doesn't need it. `*bold*` is WhatsApp's own formatting. */
-export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order'): string {
-  const date = new Date(o.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+export function shareText(o: Pick<Order, 'customerName' | 'dueAt' | 'type' | 'address' | 'people' | 'items' | 'notes'> & Partial<Pick<Order, 'lines'>>, heading = 'Catering order', now?: number): string {
+  const date = dateText(o.dueAt, now);
   // WhatsApp would turn *, _ and ~ in typed text into bold, italic or struck-out words: leave them out.
   const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
   const lines = [`*${heading}*`, plain(o.customerName ?? ''), `${date}, ${timeLabel(o.dueAt)}`];
@@ -393,7 +410,7 @@ const shown = (v: string) => {
   if (!t) return '(none)';
   return t.length > SHOWN_MAX ? `${t.slice(0, SHOWN_MAX - 1)}…` : t;
 };
-const fullDate = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
 const typeWord = (t: Order['type']) => (t === 'delivery' ? 'Delivery' : 'Pickup');
 
 /** Lines in `a` that are not in `b`, counting repeats. */
@@ -414,6 +431,8 @@ export function describeChanges(before: EditFields, after: EditFields): string[]
   const out: string[] = [];
   if (before.customerName.trim() !== after.customerName.trim()) out.push(`Name: ${shown(before.customerName)} → ${shown(after.customerName)}`);
   if (before.phone.trim() !== after.phone.trim()) out.push(`Phone: ${shown(before.phone)} → ${shown(after.phone)}`);
+  // A change of year shows the years ("Fri, Jan 2, 2026 → Sat, Jan 2, 2027"), else it reads like no change.
+  const fullDate = (ms: number) => dateText(ms, ms === before.dueAt ? after.dueAt : before.dueAt);
   if (dayStart(before.dueAt) !== dayStart(after.dueAt)) out.push(`Date: ${fullDate(before.dueAt)} → ${fullDate(after.dueAt)}`);
   if (timeLabel(before.dueAt) !== timeLabel(after.dueAt)) out.push(`Time: ${timeLabel(before.dueAt)} → ${timeLabel(after.dueAt)}`);
   if (before.type !== after.type) out.push(`${typeWord(before.type)} → ${typeWord(after.type)}`);

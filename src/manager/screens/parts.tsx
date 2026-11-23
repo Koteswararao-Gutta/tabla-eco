@@ -60,21 +60,38 @@ export function PictureInput({ label, onFile, className = 't-btn block', testId,
 }
 
 /** Preview of a picked file before it is saved, framed like the TV shows it (whole, on black),
- *  with a plain warning when the picture is tall, very wide or small. */
-export function FilePreview({ file }: { file: File }) {
+ *  with a plain warning when the picture is tall, very wide or small. A file that isn't a picture
+ *  (a PDF, a damaged photo) shows a plain message instead of the browser's broken-image icon,
+ *  and `onBroken` tells the sheet so it can keep its save button off. */
+export function FilePreview({ file, onBroken }: { file: File; onBroken?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [broken, setBroken] = useState(false);
   useEffect(() => {
     const u = URL.createObjectURL(file);
     setUrl(u);
     setWarnings([]);
+    setBroken(false);
     return () => URL.revokeObjectURL(u);
   }, [file]);
   return (
     <>
       <div className="sc-pic sc-pic-static">
-        {url && <img src={url} alt="Chosen picture" onLoad={(e) => setWarnings(pictureWarnings(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))} />}
+        {url && !broken && (
+          <img
+            src={url}
+            alt="Chosen picture"
+            onLoad={(e) => setWarnings(pictureWarnings(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))}
+            onError={() => {
+              setBroken(true);
+              onBroken?.();
+            }}
+          />
+        )}
       </div>
+      {broken && (
+        <p className="sc-error" role="alert" data-testid="picture-broken">This file isn't a picture that can be shown. Choose a photo (JPG or PNG).</p>
+      )}
       {warnings.map((w) => (
         <p key={w} className="sc-warn" data-testid="picture-warning">{w}</p>
       ))}

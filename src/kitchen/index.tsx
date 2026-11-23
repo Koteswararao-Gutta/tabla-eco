@@ -7,6 +7,7 @@ import { EditOrderSheet, ItemList } from '../manager/catering';
 import { orderLines } from '../manager/catering/lines';
 import { TagsSheet } from '../manager/catering/TagsSheet';
 import { kitchenOrders } from '../manager/catering/safety';
+import { guardTaps, ignoreGuardedTap } from '../manager/catering/tapGuard';
 import { PIN_LENGTH, expectedPin, isUnlocked, pinFingerprint, press } from './pin';
 import { useToastBridge } from './toastBridge';
 import { useBrowserFullscreen } from './fullscreen';
@@ -263,7 +264,7 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
   const open = (orders ?? []).filter((o) => o.status === 'open').sort(byDueAsc);
 
   return (
-    <div className="k-board" ref={board}>
+    <div className="k-board" ref={board} onClickCapture={ignoreGuardedTap}>
       <header className="k-bar" ref={bar}>
         <div className="k-bar-title">
           <Logo className="k-logo" />
@@ -317,8 +318,13 @@ function Board({ orders, now, banner, note, onLock }: { orders: Order[] | null; 
           now={now}
           full={optionsFor?.full}
           onClose={() => setOptionsFor(null)}
-          onReopen={() => setStatus(optionsOrder, 'open')}
+          // A double tap on these must not tap what shows next: the next card, or Mark completed in Reopen's place.
+          onReopen={() => {
+            guardTaps();
+            setStatus(optionsOrder, 'open');
+          }}
           onComplete={() => {
+            guardTaps();
             setOptionsFor(null);
             complete(optionsOrder);
           }}

@@ -56,6 +56,9 @@ describe('estimates', () => {
     const text = estimateText({ ...fields, status: 'open', orderId: null, createdAt: 1, updatedAt: 1 }, 'Tabla Indian Restaurant');
     expect(text).toContain('*Tabla Indian Restaurant: catering estimate*');
     expect(text).toContain('Sat, Nov 28, 6:00 PM · Pickup');
+    // Made in another year (or typed with the wrong one): the year shows.
+    const e = { ...fields, status: 'open' as const, orderId: null, createdAt: 1, updatedAt: 1 };
+    expect(estimateText(e, 'Tabla Indian Restaurant', new Date(2025, 11, 1).getTime())).toContain('Sat, Nov 28, 2026, 6:00 PM · Pickup');
     expect(text).toContain('• Chicken Dum Biryani, 1 Full tray: $170');
     expect(text).toContain('• Raita, 48 oz: included');
     expect(text).toContain('Discount: -$20');

@@ -85,6 +85,8 @@ test('staff planner: seeded week, live staff sync, shifts saved, tab switching',
   // No save bar until something changes.
   await expect(page.locator('#savebar')).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/staff-settings.png` });
+  // Each Break box names its day for screen readers (seven boxes all called "Break" before).
+  await expect(page.getByRole('checkbox', { name: 'Friday break' })).toHaveCount(1);
   await page.locator('#minStaff').selectOption('3');
   await expect(page.locator('#savebar')).toBeVisible();
   await expect(page.locator('#savebar')).toContainText('Unsaved changes');
@@ -169,4 +171,107 @@ test.describe('staff sheets on a touch phone', () => {
     await expect(page.locator('#edit')).toBeVisible();
     expect(errors).toEqual([]);
   });
+});
+
+test('whole day on a phone: shifts too short for end handles, so the tip says to zoom in', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  await expect(page.locator('.bar').first()).toBeVisible();
+  // At 390 px a 4-hour shift is narrow and its ends are hidden.
+  await expect(page.locator('.bar.narrow').first()).toBeVisible();
+  await expect(page.locator('.bar.narrow .h').first()).toBeHidden();
+  await expect(page.locator('#tipEnds')).toHaveText('or Zoom in to drag its ends');
+  await page.locator('#zoomBtn').click();
+  await expect(page.locator('.bar:not(.narrow) .h.r').first()).toBeVisible();
+  await expect(page.locator('#tipEnds')).toHaveText('or drag its ends');
+});
+
+test('keyboard: focus stays put in the shift sheet and comes back when a sheet closes', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  const errors = watchErrors(page);
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  const focused = () => page.evaluate(() => { const a = document.activeElement as HTMLElement; return a.id || a.getAttribute('aria-label') || a.tagName; });
+
+  // Open a shift with Enter, press "+" twice with the keyboard: focus stays on "+".
+  const bar = page.locator('.bar').first();
+  const pid = await bar.getAttribute('data-p');
+  await bar.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#edit')).toBeVisible();
+  await expect.poll(focused).toBe('editTitle');
+  const plus = page.locator('#editBox [aria-label="End 15 minutes later"]');
+  await plus.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(focused).toBe('End 15 minutes later');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#editBox .when')).toContainText('2:30pm');
+  await expect.poll(focused).toBe('End 15 minutes later');
+  // Escape: back on the same shift.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#edit')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement).dataset.p)).toBe(pid);
+
+  // Send to staff, then Escape: back on the button.
+  await page.locator('#copyPic').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#shot')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shot')).toBeHidden();
+  await expect.poll(focused).toBe('copyPic');
+
+  // People: an arrow keeps focus, so it can be pressed again.
+  await page.locator('.views [data-v="people"]').click();
+  const third = await page.locator('input[data-id]').nth(2).getAttribute('data-id');
+  await page.locator(`[data-up="${third}"]`).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('input[data-id]').first()).toHaveAttribute('data-id', third!);
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement).dataset.down || (document.activeElement as HTMLElement).dataset.up)).toBe(third);
+  expect(errors).toEqual([]);
+});
+
+test('small text on the green and amber tints is readable (4.5:1 or more)', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  let sawOk = false;
+  for (let d = 0; d < 7; d++) {
+    await page.locator(`.tab[data-d="${d}"]`).click();
+    const ratios = await page.locator('#savepill, .chip.ok, .chip.warn').evaluateAll((els) => {
+      const lin = (c: string) => {
+        const n = (c.match(/[\d.]+/g) || []).map(Number).slice(0, 3).map((v) => (c.startsWith('color(') ? v : v / 255));
+        const [r, g, b] = n.map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      return els.map((e) => {
+        const s = getComputedStyle(e), a = lin(s.color), b = lin(s.backgroundColor);
+        return { cls: e.className, r: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+      });
+    });
+    for (const x of ratios) expect(x.r, x.cls).toBeGreaterThanOrEqual(4.5);
+    sawOk ||= ratios.some((x) => /chip ok/.test(x.cls));
+  }
+  expect(sawOk).toBe(true);
+});
+
+test('two phones rename different people at once: each phone shows both names', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  const page2 = await openScreen(context, '/manager/staff');
+  await expect(page2.locator('#savepill')).toHaveText('Saved ✓');
+  await page.locator('.views [data-v="people"]').click();
+  await page2.locator('.views [data-v="people"]').click();
+  await expect(page2.locator('input[data-id]')).toHaveCount(7);
+  // Both type before either one applies: phone 2 is mid-typing when phone 1's rename arrives.
+  await page.locator('input[data-id]').nth(0).fill('Anil');
+  await page2.locator('input[data-id]').nth(1).fill('Bala');
+  await page.locator('input[data-id]').nth(0).press('Enter');
+  await page2.locator('input[data-id]').nth(1).press('Enter');
+  await expect.poll(async () => (await staffConfig(page))!.people.slice(0, 2).map((p) => p.name)).toEqual(['Anil', 'Bala']);
+  // Phone 2 saved both (merged); its page must show phone 1's rename too, not the old name.
+  await expect(page2.locator('input[data-id]').nth(0)).toHaveValue('Anil');
+  await expect(page2.locator('input[data-id]').nth(1)).toHaveValue('Bala');
+  await expect(page.locator('input[data-id]').nth(1)).toHaveValue('Bala');
 });

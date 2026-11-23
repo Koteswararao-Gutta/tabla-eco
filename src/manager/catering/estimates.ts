@@ -4,7 +4,7 @@ import type { CateringEstimate, CateringPrices, EstimateLine, ScannedOrder } fro
 import type { Dish } from './lines';
 import { qtyText } from './lines';
 import {
-  amountError, amountInput, amountLabel, blankLine, draftFromLine, formFromScan, fromInputs, linesFromForm, NAME_MAX, parseAmount, parseQty, timeLabel, toDateInput, toTimeInput,
+  amountError, amountInput, amountLabel, blankLine, dateText, draftFromLine, formFromScan, fromInputs, linesFromForm, NAME_MAX, parseAmount, parseQty, timeLabel, toDateInput, toTimeInput,
   type LineDraft, type OrderForm,
 } from './orders';
 import { listPrice, totals, type Totals } from './prices';
@@ -155,11 +155,11 @@ export function orderFormFromEstimate(e: CateringEstimate): OrderForm {
 const plain = (t: string) => t.replace(/[*_~`]/g, '').trim();
 
 /** The estimate as a WhatsApp message to the customer: items with prices, the total, and how long it holds. */
-export function estimateText(e: CateringEstimate, restaurant = 'Tabla Indian Restaurant'): string {
+export function estimateText(e: CateringEstimate, restaurant = 'Tabla Indian Restaurant', now?: number): string {
   const t = estimateTotals(e);
   const out = [`*${plain(restaurant)}: catering estimate*`, `For ${plain(e.customerName)}`];
   if (typeof e.dueAt === 'number') {
-    const date = new Date(e.dueAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const date = dateText(e.dueAt, now);
     const time = toTimeInput(e.dueAt) === NO_TIME ? '' : `, ${timeLabel(e.dueAt)}`;
     out.push(`${date}${time} · ${e.type === 'delivery' ? 'Delivery' : 'Pickup'}`);
   } else out.push(e.type === 'delivery' ? 'Delivery' : 'Pickup');

@@ -58,3 +58,44 @@ test('kitchen card: plain address, orange border only with the countdown; sheet 
   await expect(notice).toHaveCSS('font-size', '17.6px'); // 1.1rem (was 0.85rem)
   await context.close();
 });
+
+test('kitchen: a double tap on Mark completed or Reopen acts once and never taps the next card', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addInitScript(() => {
+    if (localStorage.getItem('tabla:singletons')) return;
+    const days = Array.from({ length: 7 }, () => ({ closed: true }));
+    localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
+  });
+  const page = await context.newPage();
+  // Morning, so the orders later today show no countdown and sit in the Calendar's day list.
+  await page.clock.install({ time: new Date('2026-11-18T08:00:00-07:00') });
+  await page.goto('/#/kitchen');
+  await expect(page.getByText('Enter the 4-digit PIN')).toBeVisible();
+  await page.evaluate(() => {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    const at = (h: number) => day.getTime() + h * 3600_000;
+    const o = (id: string, name: string, h: number) => ({ id, customerName: name, phone: '555', type: 'pickup', items: 'Samosa, 20', status: 'open', createdAt: 1, updatedAt: 1, dueAt: at(h) });
+    // Many cards, so another card sits under the sheet's button.
+    localStorage.setItem('tabla:orders', JSON.stringify(Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, o(`k${i}`, `Card ${i}`, 10 + i)]))));
+  });
+  await page.reload();
+  for (const d of '1234') await page.getByRole('button', { name: d, exact: true }).click();
+  const status = (id: string) => page.evaluate((id) => JSON.parse(localStorage.getItem('tabla:orders')!)[id].status, id);
+
+  await page.getByRole('article', { name: 'Order for Card 1' }).click();
+  await page.getByRole('dialog', { name: 'Card 1' }).getByRole('button', { name: /Mark completed/ }).dblclick();
+  await expect(page.locator('.k-undo')).toContainText('Card 1');
+  await page.waitForTimeout(600); // a stray tap would open a card's options after the double-tap wait
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await status('k1')).toBe('completed');
+
+  // Calendar: Reopen turns into Mark completed in the same place; a double tap only reopens.
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await page.getByTestId('kitchen-cal-row').filter({ hasText: 'Card 1' }).click();
+  await page.getByRole('dialog', { name: 'Card 1' }).getByRole('button', { name: /Reopen order/ }).dblclick();
+  await expect(page.getByRole('dialog', { name: 'Card 1' }).getByRole('button', { name: /Mark completed/ })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await status('k1')).toBe('open');
+  await context.close();
+});

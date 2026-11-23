@@ -1326,6 +1326,53 @@ test('mark paid: finished orders stay until paid, Unpaid count, deposits and who
   await context.close();
 });
 
+test('a paid order: changing its amount says it stays paid, also when another phone marked it paid meanwhile', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1 });
+  const phone1 = await openScreen(context, '/manager/catering');
+  const phone2 = await openScreen(context, '/manager/catering');
+  for (const p of [phone1, phone2]) await p.setViewportSize({ width: 390, height: 844 });
+  const open = async (p: Page) => {
+    await p.getByTestId('unpaid-filter').click();
+    await p.getByRole('region', { name: 'Unpaid' }).getByRole('button', { name: /Rahul Verma/ }).click();
+    return p.getByRole('dialog', { name: 'Order details' });
+  };
+  // Phone 1 sets $300.
+  let details = await open(phone1);
+  await details.getByRole('button', { name: 'Edit' }).click();
+  let edit = phone1.getByRole('dialog', { name: 'Edit order' });
+  await edit.getByLabel('Amount $ (optional)').fill('300');
+  await expect(edit.getByTestId('amount-paid-note')).toHaveCount(0); // not paid: no note
+  await edit.getByRole('button', { name: 'Save changes' }).click();
+  await expect(edit).toHaveCount(0);
+
+  // Phone 2 opens the form and types $350 while phone 1 marks it paid.
+  const details2 = await open(phone2);
+  await details2.getByRole('button', { name: 'Edit' }).click();
+  const edit2 = phone2.getByRole('dialog', { name: 'Edit order' });
+  await expect(edit2.getByLabel('Amount $ (optional)')).toHaveValue('300');
+  await edit2.getByLabel('Amount $ (optional)').fill('350');
+  await expect(edit2.getByTestId('amount-paid-note')).toHaveCount(0);
+
+  await phone1.getByRole('button', { name: /Rahul Verma/ }).first().click();
+  details = phone1.getByRole('dialog', { name: 'Order details' });
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
+  const pay = phone1.getByRole('dialog', { name: 'Mark paid' });
+  await pay.getByRole('button', { name: 'Card' }).click();
+  await pay.getByLabel('Taken by').selectOption('Siri');
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(details.getByTestId('paid-row')).toBeVisible();
+
+  // Phone 2's open form now says so, before Save.
+  await expect(edit2.getByTestId('amount-paid-note')).toHaveText("Already marked paid at $300. A new amount doesn't change that. If they owe more, tap Undo on the payment first.");
+  await edit2.getByTestId('amount-paid-note').scrollIntoViewIfNeeded();
+  await phone2.waitForTimeout(300);
+  await shot(phone2, 'manager-amount-change-on-paid-order');
+  // Typing the saved amount again: no change, no note.
+  await edit2.getByLabel('Amount $ (optional)').fill('300');
+  await expect(edit2.getByTestId('amount-paid-note')).toHaveCount(0);
+  await context.close();
+});
+
 test('kitchen: small red notice at the top while offline, gone when the internet is back', async ({ browser }) => {
   const context = await newContext(browser, { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const page = await openScreen(context, '/kitchen');

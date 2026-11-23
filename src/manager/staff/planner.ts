@@ -163,8 +163,12 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   const saveConfig = () => {
     const L = latest();
     if (base && L && rawConfig) {
-      db().config = mergeConfig(base.config, db().config, L.config);
+      const mine = db().config;
+      db().config = mergeConfig(base.config, mine, L.config);
       base.config = clone(db().config);
+      // Another phone's change came in with this save (e.g. a rename while this phone renamed someone
+      // else). Some callers don't redraw (a name box), so ask for a redraw once nothing is being typed.
+      if (JSON.stringify(db().config) !== JSON.stringify(mine)) mergedIn = refreshDue = true;
     }
     const c = clone(db().config);
     track(() => io.saveConfig(c));
@@ -174,6 +178,8 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   let rawConfig: unknown | null | undefined;
   let rawWeeks: Record<string, unknown> | undefined;
   let refreshDue = false;
+  /** A save merged in another phone's change that the page may not show yet. */
+  let mergedIn = false;
   function editing(): boolean {
     if (!must('edit').hidden || !must('ask').hidden) return true;
     if (settingsDirty()) return true;
@@ -222,7 +228,16 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     }
     refreshDue = false;
     const n = rawConfig === null ? null : normalizeDB({ config: rawConfig, weeks: rawWeeks });
-    if (!n || JSON.stringify(n) === JSON.stringify({ config: DB.config, weeks: DB.weeks })) return;
+    if (!n) return;
+    if (JSON.stringify(n) === JSON.stringify({ config: DB.config, weeks: DB.weeks })) {
+      // The data already holds the merged change; make sure the page shows it.
+      if (mergedIn) {
+        mergedIn = false;
+        render();
+      }
+      return;
+    }
+    mergedIn = false;
     draft = null;
     DB = n;
     base = clone(n);
@@ -287,7 +302,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       e.preventDefault();
       if (top.id === 'ask') askClose?.();
       else if (top.id === 'edit') closeEdit();
-      else top.hidden = true;
+      else closeShot();
       return;
     }
     if (e.key !== 'Tab') return;
@@ -691,8 +706,8 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       info = `<b>${fmt(t)}</b>: ${who.length ? who.join(', ') : 'nobody working'}.`;
     }
     const touchTip = matchMedia('(hover:none)').matches
-      ? '<b>Tap</b> a shift to edit it. <b>Hold</b> it for a moment, then drag to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.'
-      : '<b>Tap</b> a shift to edit it. <b>Drag</b> it to move it, or drag its ends. <b>Tap an empty spot</b> to add a shift.';
+      ? '<b>Tap</b> a shift to edit it. <b>Hold</b> it for a moment, then drag to move it, <span id="tipEnds">or drag its ends</span>. <b>Tap an empty spot</b> to add a shift.'
+      : '<b>Tap</b> a shift to edit it. <b>Drag</b> it to move it, <span id="tipEnds">or drag its ends</span>. <b>Tap an empty spot</b> to add a shift.';
 
     return `<div class="dayhead"><h2>${DAYS[d]}, ${dshort(date)}</h2></div>
     ${hours}<div class="chips">${chips}</div>
@@ -732,6 +747,9 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         if (sp_) sp_.textContent = short(a);
       }
     });
+    // Short shifts have no ends to drag (no room on a phone's whole-day view): say how to get them.
+    const te = $('tipEnds');
+    if (te && !zoom && el.querySelector('.bar.narrow')) te.textContent = 'or Zoom in to drag its ends';
     all('.covrow button:not(.closed)', el).forEach(
       (c) =>
         (c.onclick = () => {
@@ -981,8 +999,11 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
         saveConfig();
         tlScroll = null;
         render();
+        // The menu is drawn again: keep focus on it (a question box may have taken it meanwhile).
+        const a = document.activeElement;
+        if (!a || a === document.body) $('spMode')?.focus({ preventScroll: true });
       };
-    const so = $<HTMLInputElement>('spOpen'), scl = $<HTMLInputElement>('spClose');
+    const so =$<HTMLInputElement>('spOpen'), scl = $<HTMLInputElement>('spClose');
     if (so && scl)
       commitTime([so, scl], () => {
         const o = fromHM(so.value), c = fromHM(scl.value), err = must('spErr');
@@ -1102,10 +1123,27 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }
 
   /* ---------- shift editor (bottom sheet) ---------- */
+  // Where focus goes back to when the editor closes: the shift it was opened from (found again by
+  // person and index, as a redraw replaces the bars), so keyboard users keep their place.
+  let editFrom: { pid: string; k: number } | null = null;
+  let titleFocus: number | undefined;
   function closeEdit() {
     const b = $('edit');
+    const wasOpen = !!b && !b.hidden;
     if (b) b.hidden = true;
     posFlow = false;
+    const from = editFrom;
+    editFrom = null;
+    if (!wasOpen || !from) return;
+    // Only when focus was in the sheet (or nowhere): never pull it away from something else that was tapped.
+    const a = document.activeElement;
+    if (a && a !== document.body && !(b && b.contains(a))) return;
+    const back = root.querySelector<HTMLElement>(`.bar[data-p="${from.pid}"][data-k="${from.k}"]`) || root.querySelector<HTMLElement>(`.bar[data-p="${from.pid}"]`);
+    try {
+      back?.focus({ preventScroll: true });
+    } catch {
+      /* gone */
+    }
   }
   // Next shift on this day that has no position yet (in timeline order), skipping the one being edited.
   function nextUnset(d: number, skip: { pid: string; k: number } | null) {
@@ -1120,13 +1158,15 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     return out[0] || null;
   }
   const dayShifts = (d: number) => Wk(wk).shifts[d];
-  function openEdit(pid: string, k: number) {
+  /** focusSel: the control to focus again after a redraw of the open sheet (a stepper button pressed by keyboard). */
+  function openEdit(pid: string, k: number, focusSel?: string) {
     const box = must('edit'), el = must('editBox'), d = cur;
     const list = Wk(wk).shifts[d][pid] || [], v = list[k];
     if (!v) {
       closeEdit();
       return;
     }
+    editFrom = { pid, k };
     const L = !!Wk(wk).locked, R = dayRange(wk, d);
     const opts = (from: number, to: number, sel: number) => {
       let o = '';
@@ -1153,20 +1193,27 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       if (e.target === box) closeEdit();
     };
     must('eDone').onclick = closeEdit;
-    later(() => {
-      try {
-        $('editTitle')?.focus({ preventScroll: true });
-      } catch {
-        /* gone */
-      }
-    }, 30);
+    const again = focusSel ? el.querySelector<HTMLButtonElement | HTMLSelectElement>(focusSel) : null;
+    cancel(titleFocus);
+    if (again && !again.disabled) again.focus({ preventScroll: true });
+    else
+      titleFocus = later(() => {
+        try {
+          $('editTitle')?.focus({ preventScroll: true });
+        } catch {
+          /* gone */
+        }
+      }, 30);
     if (L) return;
     const apply = () => {
+      // The sheet is drawn again: remember which control had focus (e.g. "+" pressed with the keyboard).
+      const a = document.activeElement as HTMLElement | null;
+      const sel = !a || !el.contains(a) ? undefined : a.id ? '#' + a.id : a.dataset.dir ? `[data-s="${a.dataset.s}"][data-dir="${a.dataset.dir}"]` : a.dataset.r ? `[data-r="${a.dataset.r}"]` : undefined;
       saveWeek(wk);
       render();
       // Saving may merge in shifts from another phone, so find this shift again.
       const k2 = (Wk(wk).shifts[d][pid] || []).findIndex((x) => x[0] === v[0] && x[1] === v[1]);
-      openEdit(pid, k2 >= 0 ? k2 : k);
+      openEdit(pid, k2 >= 0 ? k2 : k, sel);
     };
     all('.poschoice button', el).forEach(
       (b) =>
@@ -1236,7 +1283,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
   }, sig);
   dragToClose(must('edit'), closeEdit);
   dragToClose(must('ask'), () => askClose?.());
-  dragToClose(must('shot'), () => (must('shot').hidden = true));
+  dragToClose(must('shot'), () => closeShot());
   // A new week may have started while the page sat in the background.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !DB) return;
@@ -1428,9 +1475,20 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       /* cancelled */
     }
   };
-  must('shotClose').onclick = () => (must('shot').hidden = true);
+  function closeShot() {
+    const box = must('shot');
+    if (box.hidden) return;
+    box.hidden = true;
+    // Back to "Send to staff", which stays on the page while the picture is shown.
+    try {
+      $('copyPic')?.focus({ preventScroll: true });
+    } catch {
+      /* gone */
+    }
+  }
+  must('shotClose').onclick = closeShot;
   must('shot').onclick = (e) => {
-    if ((e.target as HTMLElement).id === 'shot') must('shot').hidden = true;
+    if ((e.target as HTMLElement).id === 'shot') closeShot();
   };
 
   /* ---------- render: staff ---------- */
@@ -1491,6 +1549,10 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
       [L[i], L[j]] = [L[j], L[i]];
       saveConfig();
       renderStaff();
+      // Keep focus on the arrow just pressed (or the other one at the end of the list), so it can be pressed again.
+      const same = main.querySelector<HTMLButtonElement>(`[data-${dir < 0 ? 'up' : 'down'}="${id}"]`);
+      const other = main.querySelector<HTMLButtonElement>(`[data-${dir < 0 ? 'down' : 'up'}="${id}"]`);
+      (same && !same.disabled ? same : other)?.focus();
     };
     all('[data-up]', main).forEach((b) => (b.onclick = () => move(b.dataset.up as string, -1)));
     all('[data-down]', main).forEach((b) => (b.onclick = () => move(b.dataset.down as string, 1)));
@@ -1578,7 +1640,7 @@ export function mountPlanner(root: HTMLElement, io: PlannerIO): () => void {
     <span class="dname"><b>${DAYS[d]}</b></span>
     <input type="time" step="900" data-d="${d}" data-f="open" value="${toHM(h.open)}" aria-label="${DAYS[d]} opens">
     <input type="time" step="900" data-d="${d}" data-f="close" value="${toHM(h.close)}" aria-label="${DAYS[d]} closes">
-    <span class="brk brkcell"><label class="toggle"><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''}> Break</label>
+    <span class="brk brkcell"><label class="toggle"><input type="checkbox" data-d="${d}" data-f="brk" ${h.brk ? 'checked' : ''} aria-label="${DAYS[d]} break"> Break</label>
       ${h.brk ? `<input type="time" step="900" data-d="${d}" data-f="b0" value="${toHM(h.brk[0])}" aria-label="${DAYS[d]} break starts"><input type="time" step="900" data-d="${d}" data-f="b1" value="${toHM(h.brk[1])}" aria-label="${DAYS[d]} break ends">` : ''}</span>`,
       )
       .join('');

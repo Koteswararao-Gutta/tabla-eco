@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Field, Segmented, Sheet, useSheetClose } from '@shared/ui';
 import { store, useDoc, useSingleton, type CateringEstimate, type ScannedOrder, type WithId } from '@shared/data';
+import { guardTaps } from './tapGuard';
 import { amountLabel, dayLabel, NAME_MAX, parseQty, telHref, timeLabel, toTimeInput } from './orders';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
 import { menuDishes, qtyText } from './lines';
@@ -32,6 +33,7 @@ function useBusy() {
     setError('');
     try {
       await fn();
+      guardTaps(); // the second tap of a double tap must not land on the next screen (see tapGuard.ts)
     } catch {
       setError(fail);
     } finally {
@@ -123,7 +125,7 @@ function EstimateSummary({ estimate: e, now, onClose, onMakeOrder, onOpenOrder, 
   const linked = useDoc('orders', e.status === 'ordered' && e.orderId ? e.orderId : '_none');
   const orderGone = e.status === 'ordered' && (!e.orderId || linked === null || (!!linked && typeof linked.deletedAt === 'number'));
   const ordered = e.status === 'ordered' && !orderGone;
-  const text = estimateText(e, settings?.restaurantName?.trim() ? `${settings.restaurantName.trim()} Indian Restaurant` : undefined);
+  const text = estimateText(e, settings?.restaurantName?.trim() ? `${settings.restaurantName.trim()} Indian Restaurant` : undefined, now);
   return (
     <div className="t-stack c-summary" data-testid="estimate-summary">
       <div className="c-sum-top">
