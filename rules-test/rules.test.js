@@ -143,3 +143,13 @@ test('unknown collections are closed', async () => {
   await assertFails(setDoc(doc(db, 'secrets/x'), { a: 1 }));
   await assertFails(getDoc(doc(db, 'usage/2026-11-21')));
 });
+
+// ---------- pictures ----------
+
+test('pictureData: only pictures can be saved, never a web page', async () => {
+  await assertSucceeds(setDoc(doc(db, 'pictureData/x1'), { type: 'image/jpeg', data: 'AAAA' }));
+  await assertSucceeds(setDoc(doc(db, 'pictureData/x2'), { type: 'image/svg+xml', data: 'AAAA' }));
+  await assertFails(setDoc(doc(db, 'pictureData/x3'), { type: 'text/html', data: 'AAAA' }));
+  await assertFails(setDoc(doc(db, 'pictureData/x4'), { type: 'image/png; text/html', data: 'AAAA' }));
+  await assertFails(setDoc(doc(db, 'pictureData/x5'), { data: 'AAAA' }));
+});

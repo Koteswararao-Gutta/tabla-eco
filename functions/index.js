@@ -189,7 +189,15 @@ export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, ma
 /** Sends one alert to every phone that turned alerts on, 500 at a time, and forgets phones that are gone.
  *  Returns { sent, failed, removed }: how many got it, how many didn't, and how many of those were gone for good. */
 async function sendToAllDevices(alert, tag, urgency = 'normal') {
-  const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => typeof d.get('token') === 'string');
+  // Once per address: a phone that turned alerts on before addresses moved to their own secret id has two docs
+  // with the same address, and must still get each alert once.
+  const seen = new Set();
+  const docs = (await getFirestore().collection('pushTokens').get()).docs.filter((d) => {
+    const token = d.get('token');
+    if (typeof token !== 'string' || seen.has(token)) return false;
+    seen.add(token);
+    return true;
+  });
   if (!docs.length) {
     // An error (not info), so it shows among Cloud Logging's errors: with alerts on nowhere, nobody hears them.
     logger.error(`${tag} alert reached no phone: no devices have alerts on (turn alerts on in the manager app on each phone)`);

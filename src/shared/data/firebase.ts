@@ -324,7 +324,9 @@ export class FirebaseStore implements DataStore {
         const s = await fsGet(doc(this.db, 'pictureData', id));
         const data = s.get('data') as string | undefined;
         if (!data) return null;
-        return URL.createObjectURL(fromBase64(data, (s.get('type') as string) || 'image/jpeg'));
+        // Only ever an image type: a picture opened on its own ("Open image in new tab") must never run as a page.
+        const type = s.get('type');
+        return URL.createObjectURL(fromBase64(data, typeof type === 'string' && /^image\/[a-z0-9.+-]+$/.test(type) ? type : 'image/jpeg'));
       })().catch(() => null);
       this.urlCache.set(id, hit);
       // A missing or failed picture is asked for again next time, so it shows once it arrives.
@@ -376,7 +378,7 @@ export class FirebaseStore implements DataStore {
     const reg = await navigator.serviceWorker.register(swUrl());
     const token = await getToken(getMessaging(this.app), { vapidKey, serviceWorkerRegistration: reg });
     await this.ready;
-    await fsSet(doc(this.db, 'pushTokens', deviceId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
+    await fsSet(doc(this.db, 'pushTokens', pushId()), { token, device: navigator.userAgent.slice(0, 200), updatedAt: this.now() });
   }
 
   // ---------- reading paper orders ----------
@@ -468,6 +470,18 @@ function clockWriteWaiting(set?: boolean): boolean {
     return localStorage.getItem('tabla-clock-write') === '1';
   } catch {
     return false;
+  }
+}
+
+/** This device's phone-alert address id: random and never shown anywhere else (the clock id is readable by any
+ *  device), so another device can't save over it and take this phone's alerts. */
+function pushId(): string {
+  try {
+    let id = localStorage.getItem('tabla-push-id');
+    if (!id) localStorage.setItem('tabla-push-id', (id = newId() + newId()));
+    return id;
+  } catch {
+    return newId() + newId();
   }
 }
 

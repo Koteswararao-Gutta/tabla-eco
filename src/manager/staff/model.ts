@@ -144,7 +144,8 @@ export function normalizeDB(input: unknown): PlannerDB | null {
   if (settings.secondAt < settings.prepStart) settings.secondAt = settings.prepStart;
   const seen = new Set<string>();
   const people: Person[] = (j.config.people as Loose[])
-    .filter((p) => p && typeof p.id === 'string' && p.id && !seen.has(p.id) && seen.add(p.id))
+    // Ids go into the page as they are: only plain letters, digits, - and _ (what newPersonId makes) are kept.
+    .filter((p) => p && typeof p.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(p.id) && !seen.has(p.id) && seen.add(p.id))
     .map((p) => ({ id: p.id as string, name: String(p.name || '').trim() || 'Unnamed', active: p.active !== false }));
   const special: Record<string, SpecialDay> = {};
   if (j.config.special && typeof j.config.special === 'object')
@@ -153,7 +154,7 @@ export function normalizeDB(input: unknown): PlannerDB | null {
       if (v.closed) special[k] = { closed: true };
       else if (num(v.open) && num(v.close) && v.close > v.open) {
         const s: SpecialDay = { open: v.open, close: v.close };
-        if (Array.isArray(v.brk)) s.brk = v.brk.slice(0, 2);
+        if (Array.isArray(v.brk) && num(v.brk[0]) && num(v.brk[1])) s.brk = [v.brk[0], v.brk[1]];
         special[k] = s;
       }
     });
