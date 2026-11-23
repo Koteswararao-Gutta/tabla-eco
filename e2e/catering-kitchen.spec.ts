@@ -684,6 +684,13 @@ test('manager can turn on 1-hour phone alerts', async ({ browser }) => {
   await shot(manager, 'manager-alerts-off');
   await card.getByRole('button', { name: 'Turn on alerts' }).click();
   await expect(card).toContainText('This phone gets an alert 1 hour before each order.');
+  // Once on, it isn't shown again the next time Catering opens.
+  await manager.evaluate(() => (location.hash = '#/manager/staff'));
+  await manager.waitForTimeout(300);
+  await manager.evaluate(() => (location.hash = '#/manager/catering'));
+  await expect(manager.getByRole('heading', { name: 'Catering' })).toBeVisible();
+  await manager.waitForTimeout(500);
+  await expect(manager.getByTestId('alerts')).toHaveCount(0);
   await context.close();
 });
 
