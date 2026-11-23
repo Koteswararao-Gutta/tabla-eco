@@ -315,8 +315,17 @@ export class FirebaseStore implements DataStore {
     if (!pushSupported()) return isIphoneBrowser() ? 'needs-home-screen' : 'unsupported';
     if (Notification.permission === 'denied') return 'blocked';
     if (Notification.permission !== 'granted' || !flag()) return 'off';
-    this.registerPush().catch((e) => console.warn('alerts refresh', e)); // the address can change; keep it current
-    return 'on';
+    // The phone's alert address can change or expire: save it again. If that fails while online, alerts aren't
+    // really working, so offer "Turn on alerts" again. Offline we can't check: trust the last good state.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'on';
+    try {
+      await withTimeout(this.registerPush(), 15_000);
+      return 'on';
+    } catch (e) {
+      console.warn('alerts refresh', e);
+      flag(false);
+      return 'off';
+    }
   }
 
   async turnOnAlerts(): Promise<AlertState> {
@@ -467,4 +476,12 @@ function fromBase64(data: string, type: string): Blob {
   const bytes = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
   return new Blob([bytes], { type });
+}
+
+/** Rejects when `p` takes longer than `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timed out')), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
 }
