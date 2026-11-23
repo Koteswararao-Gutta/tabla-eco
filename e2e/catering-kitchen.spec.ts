@@ -1727,3 +1727,29 @@ test('small phones: the Catering title is never cut short, and the Unpaid count 
     await context.close();
   }
 });
+
+test('Mark paid on an order with no amount asks for the amount first and saves it on the order', async ({ browser }) => {
+  const context = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
+  const pay = manager.getByRole('dialog', { name: 'Mark paid' });
+  await pay.getByRole('button', { name: 'Cash' }).click();
+  await pay.getByLabel('Taken by').selectOption({ index: 1 });
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(pay.getByText('Please enter the order amount.')).toBeVisible();
+  // A deposit doesn't ask for it.
+  await pay.getByRole('button', { name: 'Deposit' }).click();
+  await expect(pay.getByTestId('full-amount-input')).toHaveCount(0);
+  await pay.getByRole('button', { name: /Paid in full/ }).click();
+  await pay.getByTestId('full-amount-input').fill('640');
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(details.getByTestId('order-amount')).toContainText('$640');
+  await expect(details.getByTestId('order-amount')).toContainText('✓ Paid');
+  const amounts = await readCollection<{ id: string; amount: number | null; paid?: boolean; itemsAt?: string | null }>(manager, 'orderAmounts');
+  const a = amounts.find((x) => x.amount === 640)!;
+  expect(a).toMatchObject({ amount: 640, paid: true, method: 'cash' });
+  expect(a.itemsAt).toBeTruthy();
+  await context.close();
+});

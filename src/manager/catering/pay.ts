@@ -137,6 +137,15 @@ export function depositError(text: string, pay: Pick<Pay, 'amount' | 'paid' | 'd
   return '';
 }
 
+/** Error for the order amount asked for by "Paid in full" when the order has none, or ''. */
+export function fullAmountError(text: string, paidBefore: number): string {
+  const n = parseAmount(text);
+  if (n === null || n === 0) return 'Please enter the order amount.';
+  if (Number.isNaN(n)) return 'Please enter an amount like 200 or 200.50.';
+  if (n < paidBefore) return `That's less than the ${amountLabel(paidBefore)} already paid.`;
+  return '';
+}
+
 /** Names for the "Taken by" list: the people on the Staff tab (shift planner), removed people left out.
  *  Before the planner has saved anything it shows its starting staff, so the same names show here. */
 export function staffNames(config: StaffConfig | null | undefined): string[] {

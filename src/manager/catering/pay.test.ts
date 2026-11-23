@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { balance, depositError, depositTotal, isPaid, NO_PAY, paidSoFar, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, fullAmountError, isPaid, NO_PAY, paidSoFar, payFrom, payLabel, staffNames, unpaidDone, type Pay } from './pay';
 
 const dep = (amount: number) => ({ amount, method: 'cash' as const, takenBy: 'Siri', at: 1 });
 const pay = (p: Partial<Pay>): Pay => ({ ...NO_PAY, ...p });
@@ -111,5 +111,15 @@ describe('paidSoFar', () => {
     expect(paidSoFar(pay({ amount: 500, deposits: [dep(100)] }))).toBe(100);
     expect(paidSoFar(pay({ amount: null, paid: true, deposits: [dep(50)] }))).toBe(50);
     expect(paidSoFar(pay({ amount: 500 }))).toBe(0);
+  });
+});
+
+describe('fullAmountError (Paid in full on an order with no amount)', () => {
+  it('asks for the amount, checks the format and that it covers what was already paid', () => {
+    expect(fullAmountError('', 0)).toBe('Please enter the order amount.');
+    expect(fullAmountError('0', 0)).toBe('Please enter the order amount.');
+    expect(fullAmountError('abc', 0)).toMatch(/like 200/);
+    expect(fullAmountError('50', 100)).toMatch(/less than the \$100 already paid/);
+    expect(fullAmountError('$850', 200)).toBe('');
   });
 });

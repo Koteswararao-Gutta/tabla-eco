@@ -12,7 +12,7 @@ import { ScanPaste, type ScanFrom } from './ScanPaste';
 import { ItemsEditor, lastUnit } from './ItemsEditor';
 import { itemTexts, menuDishes, orderLines, qtyText, type Dish } from './lines';
 import { TagsSheet } from './TagsSheet';
-import { balance, depositError, depositTotal, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, paidSoFar, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
+import { balance, depositError, depositTotal, fullAmountError, isPaid, itemsChangedSincePrice, methodLabel, NO_PAY, paidSoFar, PAY_METHODS, payEventText, payFrom, payLabel, REFUND_NOTE_MAX, staffNames, unpaidDone, type Pay } from './pay';
 import { savePay } from './payWrite';
 import { duplicateOf, isCancelled, notDeleted } from './safety';
 import './catering.css';
@@ -808,14 +808,18 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
   const [tried, setTried] = useState(false);
   const { busy, error, run } = useSaver();
   const owed = balance(pay);
+  // "Paid in full" needs to know how much that was: with no amount on the order, it is asked for here.
+  const needAmount = kind === 'full' && pay.amount == null;
+  const [amountText, setAmountText] = useState('');
   const errs = {
+    amount: needAmount ? fullAmountError(amountText, depositTotal(pay)) : '',
     deposit: kind === 'deposit' ? depositError(depositText, pay) : '',
     method: method ? '' : 'Please choose how they paid.',
     takenBy: takenBy ? '' : 'Please choose who took the payment.',
   };
   const save = () => {
     setTried(true);
-    if (errs.deposit || errs.method || errs.takenBy || !method) return;
+    if (errs.amount || errs.deposit || errs.method || errs.takenBy || !method) return;
     run(async () => {
       const at = store.now();
       if (kind === 'deposit') {
@@ -825,10 +829,19 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
           events: [{ kind: 'deposit', amount, method, takenBy }],
         }));
       } else {
-        await savePay(order.id, (cur) => ({
-          patch: { paid: true, paidAt: at, method, takenBy },
-          events: [{ kind: 'paid', amount: balance(cur), method, takenBy }],
-        }));
+        const typed = needAmount ? parseAmount(amountText) : null;
+        await savePay(order.id, (cur) => {
+          // Another phone may have set the amount meanwhile: theirs stays.
+          const setAmount = typed != null && cur.amount == null;
+          const after = setAmount ? { ...cur, amount: typed } : cur;
+          return {
+            patch: { ...(setAmount ? { amount: typed, itemsAt: order.items } : {}), paid: true, paidAt: at, method, takenBy },
+            events: [
+              ...(setAmount ? [{ kind: 'amount' as const, amount: typed, method: null, takenBy: null }] : []),
+              { kind: 'paid' as const, amount: balance(after), method, takenBy },
+            ],
+          };
+        });
       }
       onBack();
     });
@@ -880,6 +893,21 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
           ]}
         />
       </div>
+      {needAmount && (
+        <Field label="Order amount $">
+          <input
+            className="t-input c-amount"
+            inputMode="decimal"
+            placeholder="e.g. 200"
+            value={amountText}
+            onChange={(e) => setAmountText(e.target.value)}
+            aria-invalid={tried && !!errs.amount}
+            autoComplete="off"
+            data-testid="full-amount-input"
+          />
+          {show('amount') || <small className="c-hint">This order has no amount yet. It is saved on the order too.</small>}
+        </Field>
+      )}
       {kind === 'deposit' && (
         <Field label="Deposit amount $">
           <input
