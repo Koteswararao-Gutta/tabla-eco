@@ -216,6 +216,30 @@ test('keyboard: focus stays put in the shift sheet and comes back when a sheet c
   expect(errors).toEqual([]);
 });
 
+test('small text on the green and amber tints is readable (4.5:1 or more)', async ({ context }) => {
+  const page = await openScreen(context, '/manager/staff');
+  await expect(page.locator('#savepill')).toHaveText('Saved ✓');
+  for (let i = 0; i < 30 && !(await page.locator('.wlabel').innerText()).includes('Sep 21 – 27'); i++) await page.locator('#prev').click();
+  let sawOk = false;
+  for (let d = 0; d < 7; d++) {
+    await page.locator(`.tab[data-d="${d}"]`).click();
+    const ratios = await page.locator('#savepill, .chip.ok, .chip.warn').evaluateAll((els) => {
+      const lin = (c: string) => {
+        const n = (c.match(/[\d.]+/g) || []).map(Number).slice(0, 3).map((v) => (c.startsWith('color(') ? v : v / 255));
+        const [r, g, b] = n.map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      return els.map((e) => {
+        const s = getComputedStyle(e), a = lin(s.color), b = lin(s.backgroundColor);
+        return { cls: e.className, r: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+      });
+    });
+    for (const x of ratios) expect(x.r, x.cls).toBeGreaterThanOrEqual(4.5);
+    sawOk ||= ratios.some((x) => /chip ok/.test(x.cls));
+  }
+  expect(sawOk).toBe(true);
+});
+
 test('two phones rename different people at once: each phone shows both names', async ({ context }) => {
   const page = await openScreen(context, '/manager/staff');
   await expect(page.locator('#savepill')).toHaveText('Saved ✓');
