@@ -97,6 +97,8 @@ service cloud.firestore {
     match /heartbeats/{id}  { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     match /clocks/{id}      { allow read: if signedIn(); allow create, update: if signedIn() && small(); allow delete: if signedIn(); }
     // Phone alert addresses: devices can save their own, but nobody can read the list (only the server does).
+    // Each phone saves under its own secret random id (not the id other collections show), so nobody can
+    // write over another phone's address and quietly take its alerts.
     match /pushTokens/{id} {
       allow read: if false;
       allow create, update: if signedIn()
@@ -121,6 +123,8 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create, update: if signedIn()
         && request.resource.data.keys().hasOnly(['type', 'data', 'id'])
+        // Only pictures: a saved web page here would run as the Tabla site if someone opened the picture on its own.
+        && request.resource.data.type is string && request.resource.data.type.matches('image/[a-z0-9.+-]{1,40}')
         && request.resource.data.data is string
         && request.resource.data.data.size() <= 950000;
       allow delete: if signedIn();
