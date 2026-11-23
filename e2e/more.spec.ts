@@ -92,13 +92,17 @@ test('older orders load only when asked for; old unpaid ones still show under Un
   await expect(page.getByTestId('order-amount')).toContainText('$250');
   await page.getByRole('button', { name: 'Close' }).click();
 
-  // Payments for that old day loads that day.
+  // An old Payments link for that day opens Analytics on that day.
   await page.goto(`/#/manager/more/payments?day=${ymd(old)}`);
-  await expect(page.getByTestId('payments')).toContainText('Old Paid Party');
-  await expect(page.getByTestId('payments')).toContainText('Old Unpaid Party');
-  await expect(page.getByTestId('payment-totals')).toContainText('$250');
-  // Opening an old order from Payments shows it, though it isn't in the recent list.
-  await page.getByTestId('payments').getByRole('link', { name: /Old Paid Party/ }).click();
+  await expect(page.getByRole('heading', { name: 'Analytics' })).toBeVisible();
+  const list = page.getByTestId('an-list');
+  await expect(list).toContainText('Old Paid Party');
+  await expect(list).toContainText('Old Unpaid Party');
+  await expect(page.getByTestId('an-sales')).toContainText('$650');
+  await expect(page.getByTestId('an-money')).toContainText('Collected$250');
+  await expect(page.getByTestId('an-money')).toContainText('Still owed$400');
+  // Opening an old order from Analytics shows it, though it isn't in the recent list.
+  await list.getByRole('link', { name: /Old Paid Party/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Old Paid Party');
   await expect(page.getByTestId('order-amount')).toContainText('$250');
 
@@ -152,5 +156,95 @@ test('the front app has no Export (no ☰ at all)', async ({ browser }) => {
   await expect(page.getByText('Export')).toHaveCount(0);
   await page.goto('/#/front/more/export');
   await expect(page.getByRole('heading', { name: 'Export' })).toHaveCount(0);
+  await context.close();
+});
+
+test('Analytics: sales, collected and owed, how customers paid, who took it, top dishes, and tap-through to the orders', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+  await context.addInitScript(() => {
+    if (localStorage.getItem('tabla:singletons')) return;
+    const days = Array.from({ length: 7 }, () => ({ closed: true }));
+    localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
+  });
+  const page = await openScreen(context, '/manager/more');
+  await expect(page.getByTestId('analytics')).toBeVisible();
+  await expect(page.getByText('Payments', { exact: true })).toHaveCount(0);
+
+  // March 2025: far from the sample orders.
+  const d = (day: number, h = 12) => new Date(2025, 2, day, h).getTime();
+  const base = { phone: '', type: 'pickup', people: null, createdAt: 0, updatedAt: 0, status: 'completed' };
+  const line = (name: string, qty: number, unit: string) => ({ dishId: null, name, qty, unit, note: '' });
+  const dep = (amount: number, method: string, takenBy: string) => ({ amount, method, takenBy, at: 1 });
+  await addData(
+    page,
+    {
+      a1: { ...base, customerName: 'Anita', dueAt: d(3), items: '', lines: [line('Chicken Biryani', 2, 'Full tray'), line('Samosa', 50, 'Pieces')] },
+      a2: { ...base, customerName: 'Bala', dueAt: d(10), type: 'delivery', items: 'Chicken Biryani 1 half tray' },
+      a3: { ...base, customerName: 'Chitra', dueAt: d(17), status: 'open', items: 'Paneer Tikka Masala 1 full tray' },
+      a4: { ...base, customerName: 'Imported Party', dueAt: d(20), items: 'Veg Biryani 1 full tray' },
+      a5: { ...base, customerName: 'Called Off', dueAt: d(25), status: 'cancelled', items: 'Samosa 100' },
+      other: { ...base, customerName: 'April Party', dueAt: new Date(2025, 3, 1, 12).getTime(), items: 'Tea' },
+    },
+    {
+      a1: { amount: 340, paid: true, method: 'card', takenBy: 'Siri', deposits: [dep(100, 'zelle', 'Tarun')], updatedAt: 0 },
+      a2: { amount: 85, paid: true, method: 'cash', takenBy: 'Ravi', updatedAt: 0 },
+      a3: { amount: 200, paid: false, deposits: [dep(50, 'cash', 'Ravi')], updatedAt: 0 },
+      a4: { amount: null, paid: true, updatedAt: 0 },
+      a5: { amount: 300, deposits: [dep(100, 'zelle', 'Tarun')], refundNote: 'Refunded by Zelle', updatedAt: 0 },
+      other: { amount: 999, paid: true, method: 'cash', takenBy: 'Ravi', updatedAt: 0 },
+    },
+  );
+  await page.goto('/#/manager/more/analytics?d=2025-03-01');
+  await expect(page.getByTestId('an-period')).toHaveText('March 2025');
+  // 4 orders (the cancelled one is out of every total), 3 with an amount: 340 + 85 + 200.
+  await expect(page.getByTestId('an-sales')).toContainText('$625');
+  await expect(page.getByTestId('an-sales')).toContainText('4 orders · average $208');
+  await expect(page.getByTestId('an-money')).toContainText('Collected$475');
+  await expect(page.getByTestId('an-money')).toContainText('Still owed$150');
+  await expect(page.getByTestId('an-noamount')).toContainText('1 order has no amount');
+  // Card 240 (340 less the Zelle deposit), Cash 85 + 50, Zelle 100 (not the cancelled order's).
+  await expect(page.getByTestId('an-methods')).toContainText('Card$240');
+  await expect(page.getByTestId('an-methods')).toContainText('Cash$135');
+  await expect(page.getByTestId('an-methods')).toContainText('Zelle$100');
+  await expect(page.getByTestId('an-staff')).toContainText('Siri$240');
+  await expect(page.getByTestId('an-staff')).toContainText('Ravi$135');
+  await expect(page.getByTestId('an-dishes').locator('li').first()).toContainText('Chicken Biryani');
+  await expect(page.getByTestId('an-dishes').locator('li').first()).toContainText('2 orders · 2-1/2 full trays');
+  await expect(page.getByTestId('an-list')).not.toContainText('April Party');
+  await shot(page, 'analytics-top');
+
+  // Tap Cash: just the cash orders, with the cash part of each.
+  await page.getByTestId('an-methods').getByRole('button', { name: /Cash/ }).click();
+  const list = page.getByTestId('an-list');
+  await expect(list.getByRole('link')).toHaveCount(2);
+  await expect(list.getByRole('link', { name: /Chitra/ })).toContainText('$50');
+  await page.getByRole('button', { name: 'Clear filter' }).click();
+  await expect(list.getByRole('link')).toHaveCount(5);
+  // Still owed: the unpaid ones.
+  await page.getByRole('button', { name: /Still owed/ }).click();
+  await expect(list.getByRole('link')).toHaveCount(1);
+  await expect(list).toContainText('Chitra');
+  await expect(list).toContainText('$150 still owed');
+  await shot(page, 'analytics-owed');
+
+  // The chart: tap a bar to read it.
+  await page.getByTestId('an-chart').getByRole('button', { name: 'Mon, Mar 3: $340' }).click();
+  await expect(page.getByTestId('an-chart')).toContainText('$340 · Mon, Mar 3 · 1 order');
+
+  // Year, then picked dates; a backwards range asks for a fix.
+  await page.getByRole('button', { name: 'Year', exact: true }).click();
+  await page.getByRole('button', { name: 'Year before' }).click();
+  await expect(page.getByTestId('an-period')).toHaveText('Last year');
+  await page.getByRole('button', { name: 'Dates', exact: true }).click();
+  await page.getByTestId('an-from').fill('2025-03-10');
+  await page.getByTestId('an-to').fill('2025-03-10');
+  await expect(page.getByTestId('an-sales')).toContainText('$85');
+  await page.getByTestId('an-to').fill('2025-03-01');
+  await expect(page.getByRole('alert')).toContainText('Please pick a start date');
+
+  // An old Statistics link opens that week.
+  await page.goto('/#/manager/more/statistics?week=2025-03-10');
+  await expect(page.getByTestId('an-period')).toHaveText('Week of Mar 10, 2025');
+  await expect(page.getByTestId('an-sales')).toContainText('$85');
   await context.close();
 });

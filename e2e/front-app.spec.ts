@@ -47,7 +47,7 @@ test('manager app: every tab opens with no PIN', async ({ context }) => {
   await expect(page.getByTestId('staff-planner')).toBeVisible();
 
   await page.getByRole('link', { name: 'More' }).click();
-  await expect(page.getByTestId('statistics')).toBeVisible();
+  await expect(page.getByTestId('analytics')).toBeVisible();
   await expect(page.getByText('Manager PIN')).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/manager-more.png` });
 });
