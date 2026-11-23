@@ -5,7 +5,7 @@
 
 import { matchesFilter, recentSince, type CollectionFilter } from './filter';
 import type { DataStore, Unsubscribe, WithId } from './store';
-import { clean, newId } from './store';
+import { clean, isAppend, newId } from './store';
 import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, DeviceRecord, Picture, ScannedOrder } from './types';
 import { currentApp } from './access';
 
@@ -118,7 +118,10 @@ export class LocalStore implements DataStore {
 
   async updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void> {
     const t = this.read(col);
-    t[id] = { ...((t[id] as object) || {}), ...clean(patch as object), id };
+    const cur = ((t[id] as Record<string, unknown>) || {});
+    const next: Record<string, unknown> = { ...cur };
+    for (const [k, v] of Object.entries(clean(patch as object))) next[k] = isAppend(v) ? [...(Array.isArray(cur[k]) ? (cur[k] as unknown[]) : []), ...v] : v;
+    t[id] = { ...next, id };
     this.write(col, t);
   }
 

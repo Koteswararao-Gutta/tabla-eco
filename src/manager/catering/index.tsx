@@ -851,8 +851,8 @@ function PayView({ order, pay, now, onBack }: { order: Order; pay: Pay; now: num
       const at = store.now();
       if (kind === 'deposit') {
         const amount = parseAmount(depositText)!;
-        await savePay(order.id, (cur) => ({
-          patch: { deposits: [...cur.deposits, { amount, method, takenBy, at }] },
+        await savePay(order.id, () => ({
+          addDeposits: [{ amount, method, takenBy, at }],
           events: [{ kind: 'deposit', amount, method, takenBy }],
         }));
       } else {

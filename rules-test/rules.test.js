@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, test } from 'node:test';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { deleteDoc, doc, getDoc, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
+import { arrayUnion, deleteDoc, doc, getDoc, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
 
 setLogLevel('silent'); // refused writes are expected here; keep the output readable
 
@@ -193,4 +193,16 @@ test('locked: only approved devices read or save; the lock and the code are serv
   // A claim with the wrong value is not approval.
   const fake = env.authenticatedContext('fake', { tabla: 'yes' }).firestore();
   await assertFails(getDoc(doc(fake, 'orders/o1')));
+});
+
+test('orderAmounts: a deposit saved from a stale copy is refused if it rewrites the log, kept if it appends', async () => {
+  // Another phone already added a deposit; this phone (offline) only knew the empty log.
+  const other = pay('deposit', 2);
+  await seed('orderAmounts/o1', { ...amount, deposits: [{ amount: 100, method: 'cash', takenBy: 'Ravi', at: 2 }], log: [other] });
+  const mine = pay('deposit', 3, { amount: 50 });
+  const myDeposit = { amount: 50, method: 'card', takenBy: 'Siri', at: 3 };
+  await assertFails(setDoc(doc(db, 'orderAmounts/o1'), { deposits: [myDeposit], log: [mine], updatedAt: 3, id: 'o1' }, { merge: true }));
+  await assertSucceeds(setDoc(doc(db, 'orderAmounts/o1'), { deposits: arrayUnion(myDeposit), log: arrayUnion(mine), updatedAt: 3, id: 'o1' }, { merge: true }));
+  const saved = (await getDoc(doc(db, 'orderAmounts/o1'))).data();
+  if (saved.deposits.length !== 2 || saved.log.length !== 2 || saved.log[0].at !== 2) throw new Error('both deposits should be kept, in order');
 });
