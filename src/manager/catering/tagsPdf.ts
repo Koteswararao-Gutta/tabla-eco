@@ -121,11 +121,10 @@ function drawText(ctx: CanvasRenderingContext2D, page: HTMLElement, origin: DOMR
     const fontH = ascent + (metrics.fontBoundingBoxDescent ?? parseFloat(s.fontSize) * 0.25);
     // A name longer than two lines is cut off on paper; leave out what the paper doesn't show.
     const clip = el.closest('.nt-name')?.getBoundingClientRect();
-    for (let i = 0; i < node.data.length; i++) {
-      const ch = node.data[i];
+    for (const { ch, i } of letters(node.data)) {
       if (!ch.trim()) continue;
       range.setStart(node, i);
-      range.setEnd(node, i + 1);
+      range.setEnd(node, i + ch.length);
       const r = range.getClientRects()[0];
       if (!r || !r.width) continue;
       if (clip && r.top + r.height / 2 > clip.bottom) continue;
@@ -135,6 +134,14 @@ function drawText(ctx: CanvasRenderingContext2D, page: HTMLElement, origin: DOMR
     }
   }
   range.detach?.();
+}
+
+/** The text's letters as people see them, with where each starts: a Telugu or Hindi letter with its vowel sign,
+ *  or an emoji, is one piece (drawn one code unit at a time they came out broken, or as "?" boxes). */
+export function letters(text: string): { ch: string; i: number }[] {
+  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: 'grapheme' }) => { segment(t: string): Iterable<{ segment: string; index: number }> } }).Segmenter;
+  if (Seg) return [...new Seg(undefined, { granularity: 'grapheme' }).segment(text)].map((g) => ({ ch: g.segment, i: g.index }));
+  return [...text].reduce<{ ch: string; i: number }[]>((out, ch) => (out.push({ ch, i: out.length ? out[out.length - 1].i + out[out.length - 1].ch.length : 0 }), out), []);
 }
 
 /** The veg (green dot) or non-veg (red triangle) mark in its small square. */

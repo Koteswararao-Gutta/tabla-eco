@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { jpegSize, pdfOf } from './tagsPdf';
+import { jpegSize, letters, pdfOf } from './tagsPdf';
 
 // A JPEG header with just a start-of-frame: 1700 wide, 2200 high.
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x08, 0x98, 0x06, 0xa4, 0x03, 0, 0, 0, 0xff, 0xd9]);
+
+describe('letters drawn on the tags', () => {
+  it('keeps a Telugu letter with its vowel sign, and an emoji, in one piece', () => {
+    expect(letters('Ab').map((l) => l.ch)).toEqual(['A', 'b']);
+    expect(letters('గో').map((l) => l.ch)).toEqual(['గో']);
+    expect(letters('पनीर').map((l) => l.ch)).toEqual(['प', 'नी', 'र']);
+    expect(letters('65 🌶️🔥')).toEqual([{ ch: '6', i: 0 }, { ch: '5', i: 1 }, { ch: ' ', i: 2 }, { ch: '🌶️', i: 3 }, { ch: '🔥', i: 6 }]);
+  });
+});
 
 describe('name tags PDF', () => {
   it('reads a JPEG size', () => {
