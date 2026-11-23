@@ -36,6 +36,14 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- On a slow first visit the app's code takes a few seconds to arrive: say so instead of a blank white page.
+         Appears only after half a second (no flash on a fast load), never on the TVs, gone once the app is on screen. -->
+    <div id="boot-wait" aria-live="polite">Loading…</div>
+    <style>
+      #boot-wait { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #8a847a; font: 18px/1.4 system-ui, sans-serif; opacity: 0; animation: boot-wait-in 0.2s ease 0.5s forwards; pointer-events: none; }
+      @keyframes boot-wait-in { to { opacity: 1; } }
+      #root:not(:empty) ~ #boot-wait, html.t-dark #boot-wait { display: none; }
+    </style>
     <!-- Shown only if the app never starts (e.g. a very old TV web viewer); hidden as soon as the app is on screen. -->
     <div id="boot-fail" hidden style="position: fixed; top: 0; left: 0; right: 0; padding: 48px; color: #888; font: 24px/1.4 sans-serif">
       This screen's web viewer is too old or failed to start. Update 'Android System WebView' (or Chrome) and restart.
@@ -44,7 +52,7 @@
     <script>
       setTimeout(function () {
         var root = document.getElementById('root');
-        if (root && !root.firstChild) document.getElementById('boot-fail').hidden = false;
+        if (root && !root.firstChild) { document.getElementById('boot-fail').hidden = false; document.getElementById('boot-wait').style.display = 'none'; }
       }, 20000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
