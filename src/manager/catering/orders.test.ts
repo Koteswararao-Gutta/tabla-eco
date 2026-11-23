@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CateringOrder, ScannedOrder } from '@shared/data';
 import { describeChanges, HISTORY_MAX, lastEdit, withEdit } from './orders';
-import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
+import { countdown, dayLabel, duration, emptyForm, formFromOrder, formFromScan, fromInputs, parseQty, groupByDay, groupByDayUpcomingFirst, groupOpen, history, isSoon, monthGrid, orderFields, ordersByDay, sameDayOrders, shareText, showsCountdown, telHref, validate, whatsappHref, NAME_MAX } from './orders';
 
 const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime(); // Nov 2026, local time
 const NOW = at(18, 12, 0); // Wed Nov 18, 12:00
@@ -132,6 +132,13 @@ describe('form', () => {
   it('round-trips an order through the form', () => {
     const o = order(at(19, 12, 0), { type: 'delivery', address: 'X', people: 25, notes: 'N' });
     expect(orderFields(formFromOrder(o))).toEqual({ customerName: 'A', phone: o.phone, dueAt: o.dueAt, type: 'delivery', address: 'X', people: 25, items: 'Rice', notes: 'N', lines: [{ dishId: null, name: 'Rice', qty: null, unit: '', note: '', text: 'Rice' }] });
+  });
+});
+
+describe('parseQty', () => {
+  it('takes 2, 1.5, 1/2 and 1 1/2, and refuses 0, negatives and amounts that round to 0', () => {
+    expect([parseQty('2'), parseQty('1.5'), parseQty('1/2'), parseQty('1 1/2'), parseQty('0.005'), parseQty('')]).toEqual([2, 1.5, 0.5, 1.5, 0.01, null]);
+    for (const bad of ['0', '0.001', '0.004', '-1', 'abc', '100001']) expect(parseQty(bad)).toBeNaN();
   });
 });
 

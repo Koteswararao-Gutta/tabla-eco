@@ -204,7 +204,9 @@ export function parseQty(text: string): number | null {
   if (!text.trim()) return null;
   const n = qtyValue(text);
   if (Number.isNaN(n)) return NaN;
-  return n > 0 && n <= 100_000 ? Math.round(n * 100) / 100 : NaN;
+  // Kept to 2 decimals: anything that rounds to 0 ("0.001") is not a quantity either.
+  const r = Math.round(n * 100) / 100;
+  return r > 0 && n <= 100_000 ? r : NaN;
 }
 
 /** The order's lines from the form's rows: empty rows dropped, checks cleared (whoever saves has seen the form). */
