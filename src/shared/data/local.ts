@@ -6,7 +6,8 @@
 import { matchesFilter, recentSince, type CollectionFilter } from './filter';
 import type { DataStore, Unsubscribe, WithId } from './store';
 import { clean, newId } from './store';
-import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, DeviceRecord, Picture, ScannedOrder } from './types';
+import { currentApp } from './access';
 
 const PREFIX = 'tabla:';
 type Table = Record<string, unknown>;
@@ -182,6 +183,81 @@ export class LocalStore implements DataStore {
     if (url) URL.revokeObjectURL(url);
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
+  }
+
+  // ---------- approved devices ----------
+  // No server here: the same steps, kept in this browser so the screens can be tried and tested.
+  // access/locked (exists = locked) and access/code (the code itself, local only) stand in for the server's.
+  // A tab is one device (its id is kept per tab), so two tabs can play a new and an approved device.
+  private localDeviceId(): string {
+    try {
+      let id = sessionStorage.getItem('tabla-local-device');
+      if (!id) sessionStorage.setItem('tabla-local-device', (id = newId()));
+      return id;
+    } catch {
+      return 'this-device';
+    }
+  }
+
+  private approveHere(how: DeviceRecord['how']) {
+    const d: DeviceRecord = { id: this.localDeviceId(), app: currentApp(), model: 'This browser', name: null, how, approvedAt: this.now(), lastSeen: this.now() };
+    void this.setDoc('devices', d.id, d);
+  }
+
+  private accessNow(): DeviceAccess {
+    if (this.read('devices')[this.localDeviceId()]) return 'ok';
+    if (this.read('access').locked) return 'needs-code';
+    this.approveHere('open');
+    return 'ok';
+  }
+
+  watchAccess(cb: (a: DeviceAccess) => void): Unsubscribe {
+    let last: DeviceAccess | null = null;
+    const run = () => {
+      const a = this.accessNow();
+      if (a !== last) cb((last = a));
+    };
+    run();
+    const a = this.listen('access', run);
+    const d = this.listen('devices', run);
+    return () => {
+      a();
+      d();
+    };
+  }
+
+  thisDeviceId(): string | null {
+    return this.localDeviceId();
+  }
+
+  async enterDeviceCode(code: string): Promise<void> {
+    await new Promise((r) => setTimeout(r, 200));
+    const saved = (this.read('access').code as { code?: string } | undefined)?.code;
+    if (!saved) throw new Error('No restaurant code is set yet. Set one in the manager app: More > Devices.');
+    if (code !== saved) throw new Error("That code didn't work. Please try again.");
+    this.approveHere('code');
+  }
+
+  async manageDevices(req: DeviceAction): Promise<void> {
+    const now = this.now();
+    const info = (this.read('access').info as object | undefined) ?? {};
+    const access = this.read('access');
+    if (req.action === 'setCode') {
+      if (!/^\d{6,10}$/.test(req.code)) throw new Error('The code must be 6 to 10 digits.');
+      this.write('access', { ...access, code: { code: req.code }, info: { ...info, id: 'info', codeSetAt: now, updatedAt: now } });
+    } else if (req.action === 'lock') {
+      if (!access.code) throw new Error('Set the restaurant code first.');
+      this.write('access', { ...access, locked: { at: now }, info: { ...info, id: 'info', locked: true, lockedAt: now, updatedAt: now } });
+    } else if (req.action === 'unlock') {
+      const { locked: _, ...rest } = access;
+      this.write('access', { ...rest, info: { ...info, id: 'info', locked: false, lockedAt: null, updatedAt: now } });
+    } else if (req.action === 'rename') {
+      const name = req.name.replace(/\s+/g, ' ').trim().slice(0, 40) || null;
+      await this.updateDoc('devices', req.uid, { name });
+    } else {
+      if (req.uid === this.localDeviceId()) throw new Error("You can't remove the device you are using.");
+      await this.deleteDoc('devices', req.uid);
+    }
   }
 
   /** No server here: alerts are only pretended, so the screens can be tried. */

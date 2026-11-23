@@ -6,7 +6,7 @@
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
 import type { CollectionFilter } from './filter';
-import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, ScannedOrder } from './types';
 
 export type Unsubscribe = () => void;
 export type WithId<T> = T & { id: string };
@@ -63,6 +63,15 @@ export interface DataStore {
   /** Kitchen tablet app: sends the menu it read from Tabla's Toast ordering page (or why it couldn't) to the
    *  server, which saves it to toastMenu/current. Throws when it can't reach the server. LocalStore does nothing. */
   reportToastMenu(report: ToastMenuReport): Promise<void>;
+
+  /** Approved devices. Calls back at once, then whenever this device's access changes. */
+  watchAccess(cb: (access: DeviceAccess) => void): Unsubscribe;
+  /** The code screen: approves this device when the restaurant code is right. Throws with a plain message. */
+  enterDeviceCode(code: string): Promise<void>;
+  /** More > Devices: set the code, lock or open the app, rename or remove a device. Throws with a plain message. */
+  manageDevices(req: DeviceAction): Promise<void>;
+  /** This device's id in the `devices` list (its sign-in id), or null before it is known. */
+  thisDeviceId(): string | null;
 
   /** Whether this device gets the 1-hour catering alerts. When on, also refreshes the device's alert address. */
   alertState(): Promise<AlertState>;

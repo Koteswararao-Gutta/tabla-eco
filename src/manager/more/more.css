@@ -109,3 +109,16 @@
 .an-chip[aria-pressed='true'] span { color: var(--bg); opacity: 0.8; }
 .an .mo-row-time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-owed { color: var(--bad); }
+
+/* Devices */
+.dv-card { display: flex; flex-direction: column; gap: 10px; }
+.dv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dv-wait { margin: 0; padding: 12px 14px; border-radius: var(--radius); background: var(--accent-soft); font-size: 0.92rem; }
+.dv-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px 10px 14px; min-height: 64px; flex-wrap: wrap; }
+.dv-row .mo-row-main b { display: flex; align-items: center; gap: 8px; white-space: normal; }
+.dv-me { flex: none; }
+.dv-actions { display: flex; gap: 0; margin-left: auto; }
+.dv-actions .t-btn { padding: 0 12px; }
+.dv-text { margin: 0; }
+.dv-error { margin: 0; color: var(--bad); font-weight: 600; }
+.dv-code { font-size: 1.4rem; letter-spacing: 0.2em; }

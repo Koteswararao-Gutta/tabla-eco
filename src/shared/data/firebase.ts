@@ -7,7 +7,7 @@
 // - now() is corrected to the server clock, so every TV agrees on the loop position.
 
 import { initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, onIdTokenChanged, signInAnonymously, type Auth } from 'firebase/auth';
 import {
   deleteDoc as fsDelete,
   doc,
@@ -38,7 +38,8 @@ import { clean, newId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import { swUrl } from './sw';
-import type { AlertState, CollectionName, Collections, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, ScannedOrder } from './types';
+import { currentApp } from './access';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
@@ -50,6 +51,7 @@ export class FirebaseStore implements DataStore {
   private ready: Promise<void>;
   private offset = 0;
   private urlCache = new Map<string, Promise<string | null>>();
+  private auth: Auth;
 
   constructor(config: FirebaseOptions) {
     const app = (this.app = initializeApp(config));
@@ -57,7 +59,7 @@ export class FirebaseStore implements DataStore {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
       ignoreUndefinedProperties: true,
     });
-    const auth = getAuth(app);
+    const auth = (this.auth = getAuth(app));
     let signingIn = false;
     const signIn = () => {
       if (signingIn) return;
@@ -89,6 +91,7 @@ export class FirebaseStore implements DataStore {
         if (!user) signIn();
       }),
     );
+    this.ready.then(() => this.startAccessChecks());
     // Every 30 s until the first sync works, then hourly; again when the internet returns or the
     // device's own clock is changed.
     this.ready.then(() => scheduleClockSync(() => this.syncClock(), { events: typeof window === 'undefined' ? null : window }));
@@ -293,6 +296,99 @@ export class FirebaseStore implements DataStore {
     return id;
   }
 
+  // ---------- approved devices ----------
+  // A device is approved when its sign-in carries the claim { tabla: true } (put there by the server).
+  // Approved: known at once, even offline. Not approved: the server's checkIn answers (it approves the device
+  // by itself while the app is not locked). No answer (offline) keeps 'checking', and screens show as usual.
+  private access: DeviceAccess = 'checking';
+  private accessWatchers = new Set<(a: DeviceAccess) => void>();
+  private accessRetry: ReturnType<typeof setTimeout> | undefined;
+  private lastCheckIn = 0;
+
+  private setAccess(a: DeviceAccess) {
+    if (a === this.access) return;
+    this.access = a;
+    this.accessWatchers.forEach((cb) => cb(a));
+  }
+
+  watchAccess(cb: (a: DeviceAccess) => void): Unsubscribe {
+    this.accessWatchers.add(cb);
+    cb(this.access);
+    return () => void this.accessWatchers.delete(cb);
+  }
+
+  thisDeviceId(): string | null {
+    return this.auth.currentUser?.uid ?? null;
+  }
+
+  private startAccessChecks() {
+    // Runs for the first sign-in, a new sign-in (after a lost one: it starts unapproved, so the code screen
+    // shows rather than a silent lock-out), and each token refresh (a removed device's refresh fails, which
+    // signs it out; the app then signs in again as a new device).
+    onIdTokenChanged(this.auth, () => void this.checkAccess());
+    if (typeof window === 'undefined') return;
+    window.addEventListener('online', () => void this.checkAccess());
+    // Every 15 minutes: refresh the sign-in (so a removed device finds out), and tell the server it's still in use.
+    setInterval(() => {
+      if (navigator.onLine === false) return;
+      this.auth.currentUser?.getIdToken(true).catch(() => {});
+      void this.checkAccess();
+    }, 15 * 60_000);
+  }
+
+  private checkAccess = singleFlight(async () => {
+    clearTimeout(this.accessRetry);
+    const user = this.auth.currentUser;
+    if (!user) return this.setAccess('checking');
+    try {
+      const approved = (await user.getIdTokenResult()).claims.tabla === true;
+      if (approved) this.setAccess('ok');
+      // Approved devices tell the server at most every 3 hours (it keeps "last seen" for the Devices list).
+      if (approved && Date.now() - this.lastCheckIn < 3 * 3600_000) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const res = await this.call<{ approved: boolean }>('checkIn', { app: currentApp(), model: navigator.userAgent.slice(0, 300) });
+      this.lastCheckIn = Date.now();
+      if (this.auth.currentUser !== user) return; // signed in as someone else meanwhile: that check runs instead
+      if (res.approved) {
+        if (!approved) await user.getIdToken(true); // picks up the new claim
+        this.setAccess('ok');
+      } else {
+        this.setAccess('needs-code');
+        // The manager may open the app again: ask again now and then.
+        this.accessRetry = setTimeout(() => void this.checkAccess(), 5 * 60_000);
+      }
+    } catch (e) {
+      console.warn('device check', e);
+      this.accessRetry = setTimeout(() => void this.checkAccess(), 60_000);
+    }
+  });
+
+  private async call<T>(name: string, data: object): Promise<T> {
+    await this.ready;
+    const { getFunctions, httpsCallable } = await import('firebase/functions');
+    return (await httpsCallable<object, T>(getFunctions(this.app), name, { timeout: 30_000 })(data)).data;
+  }
+
+  async enterDeviceCode(code: string): Promise<void> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please try again when online.');
+    try {
+      await this.call('enterCode', { code, app: currentApp(), model: navigator.userAgent.slice(0, 300) });
+    } catch (e) {
+      throw new Error(plainError(e, "Couldn't check the code right now. Please try again."));
+    }
+    await this.auth.currentUser?.getIdToken(true);
+    this.setAccess('ok');
+  }
+
+  async manageDevices(req: DeviceAction): Promise<void> {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please try again when online.');
+    try {
+      await this.call('manageDevices', req);
+    } catch (e) {
+      throw new Error(plainError(e, "Couldn't save that right now. Please try again."));
+    }
+  }
+
   // ---------- pictures ----------
   async uploadPicture(file: Blob, name: string): Promise<WithId<Picture>> {
     const fitted = await fitPicture(file);
@@ -429,6 +525,13 @@ export class FirebaseStore implements DataStore {
       throw new Error(`Couldn't read the ${what} right now. Please try again, or type the order in.`);
     }
   }
+}
+
+/** The server's own plain message (wrong code, too many tries, ...), else `fallback` (no connection, server down). */
+function plainError(e: unknown, fallback: string): string {
+  const err = e as { code?: string; message?: string };
+  const plain = ['functions/permission-denied', 'functions/resource-exhausted', 'functions/failed-precondition', 'functions/invalid-argument', 'functions/not-found'];
+  return err?.code && plain.includes(err.code) && err.message ? err.message : fallback;
 }
 
 /** Phone alerts: the browser's push address for this device, saved in `pushTokens/<device id>`.

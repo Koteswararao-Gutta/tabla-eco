@@ -1,6 +1,7 @@
 // Tabla server code (Firebase Cloud Functions). Deployed by .github/workflows/functions.yml.
 import Anthropic from '@anthropic-ai/sdk';
 import { initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getFunctions } from 'firebase-admin/functions';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -10,6 +11,10 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
+import {
+  ALL_TRIES, afterWrong, appName, cleanName, CODE_RE, CODE_RULE, codeMatches, DEVICE_TRIES, deviceModel, hashCode, MAX_DEVICES,
+  SEEN_EVERY_MS, shortId, triesLeft, waitMinutes,
+} from './devices.js';
 import { editAlertFor, kitchenEdit } from './edits.js';
 import { checkRequest, LIMIT_REACHED, menuNames, readError, readOrderPhoto, takeDailyRead, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
 import { alertFor, chunks, deadTokens, onRing, planReminder, sendShouldRetry, shouldSchedule, TIME_ZONE } from './reminders.js';
@@ -23,7 +28,7 @@ const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 export const readOrder = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB', maxInstances: 3 },
   async (req) => {
-    if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+    await mustBeAllowed(req);
     const problem = checkRequest(req.data);
     if (problem) throw new HttpsError('invalid-argument', problem);
     // At most DAILY_LIMIT reads a day (restaurant time), so a stuck button or a leaked link can't run up the bill.
@@ -150,7 +155,7 @@ export const morningSummary = onSchedule(
  * toastMenu/current only when something changed, keeps toastMenu/status, and alerts the phones once if it keeps failing.
  */
 export const reportToastMenu = onCall({ memory: '256MiB', timeoutSeconds: 30, maxInstances: 2 }, async (req) => {
-  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  await mustBeAllowed(req);
   if (JSON.stringify(req.data ?? null).length > 3_000_000) throw new HttpsError('invalid-argument', 'Menu report too big.');
   const db = getFirestore();
   const currentRef = db.doc('toastMenu/current');
@@ -223,3 +228,135 @@ async function sendToAllDevices(alert, tag, urgency = 'normal') {
   else logger.info(`${tag} alert: sent ${sent}, failed ${failed}, removed ${removed}`);
   return { sent, failed, removed };
 }
+
+// ---------- Approved devices ----------
+// See devices.js. access/locked exists = locked; access/code = the code's hash (server only);
+// access/info = what the Devices screen shows; devices/{uid} = one approved device; codeTries/* = wrong-code counters.
+
+const isApproved = (req) => req.auth?.token?.tabla === true;
+const isLocked = async () => (await getFirestore().doc('access/locked').get()).exists;
+
+/** Server calls from the apps: an approved device, or any signed-in device while the app is still open. */
+async function mustBeAllowed(req) {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  if (!isApproved(req) && (await isLocked())) throw new HttpsError('permission-denied', 'This device is not approved yet.');
+}
+
+/** Marks a device approved: the claim on its sign-in, and its row in the Devices list. */
+async function approve(uid, how, data) {
+  const db = getFirestore();
+  const count = (await db.collection('devices').count().get()).data().count;
+  if (count >= MAX_DEVICES) throw new HttpsError('resource-exhausted', 'Too many devices. Please remove old ones in More > Devices.');
+  await getAuth().setCustomUserClaims(uid, { tabla: true });
+  const now = Date.now();
+  await db.doc(`devices/${uid}`).set({ id: uid, app: appName(data?.app), model: deviceModel(data?.model), name: null, how, approvedAt: now, lastSeen: now });
+  logger.info(`device ${shortId(uid)} approved (${how}, ${appName(data?.app)})`);
+}
+
+/**
+ * Every app calls this when it opens (and every few hours). Approved: refreshes "last seen".
+ * Not approved: approves it while the app is open (not locked); when locked, says a code is needed.
+ */
+export const checkIn = onCall({ memory: '256MiB', timeoutSeconds: 20, maxInstances: 3 }, async (req) => {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  const uid = req.auth.uid;
+  const ref = getFirestore().doc(`devices/${uid}`);
+  const saved = isApproved(req) ? await ref.get() : null;
+  if (saved?.exists) {
+    const now = Date.now();
+    const app = appName(req.data?.app);
+    if (now - (saved.get('lastSeen') ?? 0) >= SEEN_EVERY_MS || saved.get('app') !== app) await ref.update({ lastSeen: now, app });
+    return { approved: true };
+  }
+  // Not approved (or approved but no longer in the list: a leftover of a removed device).
+  if (await isLocked()) {
+    if (saved) await getAuth().setCustomUserClaims(uid, null);
+    return { approved: false };
+  }
+  await approve(uid, 'open', req.data);
+  return { approved: true };
+});
+
+/** The code screen: approves this device when the restaurant code is right. Wrong codes are limited. */
+export const enterCode = onCall({ memory: '256MiB', timeoutSeconds: 20, maxInstances: 2 }, async (req) => {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  const uid = req.auth.uid;
+  const code = typeof req.data?.code === 'string' ? req.data.code.trim() : '';
+  const db = getFirestore();
+  const mine = db.doc(`codeTries/${uid}`);
+  const all = db.doc('codeTries/all');
+  const now = Date.now();
+  // Counted in one step, so many tries at once can't slip past the limit.
+  const verdict = await db.runTransaction(async (tx) => {
+    const [m, a, saved] = await Promise.all([tx.get(mine), tx.get(all), tx.get(db.doc('access/code'))]);
+    if (triesLeft(m.data(), DEVICE_TRIES, now) === 0) return { wait: waitMinutes(m.data(), DEVICE_TRIES, now) };
+    if (triesLeft(a.data(), ALL_TRIES, now) === 0) return { wait: waitMinutes(a.data(), ALL_TRIES, now) };
+    if (!saved.exists) return { noCode: true };
+    if (CODE_RE.test(code) && codeMatches(code, saved.data())) return { ok: true };
+    tx.set(mine, afterWrong(m.data(), DEVICE_TRIES, now));
+    tx.set(all, afterWrong(a.data(), ALL_TRIES, now));
+    return { wrong: true };
+  });
+  if (verdict.wait) throw new HttpsError('resource-exhausted', `Too many wrong codes. Please wait ${verdict.wait} minute${verdict.wait === 1 ? '' : 's'} and try again.`);
+  if (verdict.noCode) throw new HttpsError('failed-precondition', 'No restaurant code is set yet. Set one in the manager app: More > Devices.');
+  if (verdict.wrong) {
+    logger.warn(`enterCode: wrong code from device ${shortId(uid)}`);
+    throw new HttpsError('permission-denied', "That code didn't work. Please try again.");
+  }
+  await approve(uid, 'code', req.data);
+  await mine.delete().catch(() => {});
+  return { approved: true };
+});
+
+/** More > Devices (approved devices only): set the code, lock or open the app, rename or remove a device. */
+export const manageDevices = onCall({ memory: '256MiB', timeoutSeconds: 30, maxInstances: 2 }, async (req) => {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
+  if (!isApproved(req)) throw new HttpsError('permission-denied', 'This device is not approved.');
+  const db = getFirestore();
+  const { action } = req.data ?? {};
+  const now = Date.now();
+  const info = db.doc('access/info');
+  if (action === 'setCode') {
+    const code = typeof req.data.code === 'string' ? req.data.code.trim() : '';
+    if (!CODE_RE.test(code)) throw new HttpsError('invalid-argument', CODE_RULE);
+    await db.doc('access/code').set({ ...hashCode(code), at: now });
+    await info.set({ codeSetAt: now, updatedAt: now }, { merge: true });
+    await db.doc('codeTries/all').delete().catch(() => {});
+    logger.info(`restaurant code changed by device ${shortId(req.auth.uid)}`);
+    return { ok: true };
+  }
+  if (action === 'lock') {
+    if (!(await db.doc('access/code').get()).exists) throw new HttpsError('failed-precondition', 'Set the restaurant code first.');
+    await db.doc('access/locked').set({ at: now });
+    await info.set({ locked: true, lockedAt: now, updatedAt: now }, { merge: true });
+    logger.info(`app locked to approved devices by device ${shortId(req.auth.uid)}`);
+    return { ok: true };
+  }
+  if (action === 'unlock') {
+    await db.doc('access/locked').delete();
+    await info.set({ locked: false, lockedAt: null, updatedAt: now }, { merge: true });
+    logger.info(`app opened again by device ${shortId(req.auth.uid)}`);
+    return { ok: true };
+  }
+  const uid = typeof req.data.uid === 'string' ? req.data.uid : '';
+  if (!uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'Which device?');
+  const ref = db.doc(`devices/${uid}`);
+  if (action === 'rename') {
+    if (!(await ref.get()).exists) throw new HttpsError('not-found', 'That device is no longer in the list.');
+    await ref.update({ name: cleanName(req.data.name) });
+    return { ok: true };
+  }
+  if (action === 'remove') {
+    if (uid === req.auth.uid) throw new HttpsError('failed-precondition', "You can't remove the device you are using.");
+    await ref.delete();
+    // Deleting its sign-in signs it out within minutes; the app then signs in again as a new, unapproved device.
+    try {
+      await getAuth().deleteUser(uid);
+    } catch (e) {
+      if (e?.code !== 'auth/user-not-found') throw e;
+    }
+    logger.info(`device ${shortId(uid)} removed by device ${shortId(req.auth.uid)}`);
+    return { ok: true };
+  }
+  throw new HttpsError('invalid-argument', 'Unknown action.');
+});
