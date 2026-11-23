@@ -1408,7 +1408,17 @@ function OrderFormView(props: SheetProps & { dirty: { current: boolean }; onSave
             autoComplete="off"
             data-testid="amount-input"
           />
-          {amountErr ? <small className="c-err" role="alert">{amountErr}</small> : <small className="c-hint">Not shown on the kitchen tablet.</small>}
+          {amountErr ? (
+            <small className="c-err" role="alert">{amountErr}</small>
+          ) : props.pay?.paid && amountChanged ? (
+            // Paid in full stays paid when the amount changes (also when another phone marked it paid while
+            // this form was open), so say so before Save rather than show "$350 ✓ Paid" for $300 taken.
+            <small className="c-check" role="status" data-testid="amount-paid-note">
+              Already marked paid{props.pay.amount != null ? ` at ${amountLabel(props.pay.amount)}` : ''}. A new amount doesn't change that. If they owe more, tap Undo on the payment first.
+            </small>
+          ) : (
+            <small className="c-hint">Not shown on the kitchen tablet.</small>
+          )}
         </Field>
       )}
 
