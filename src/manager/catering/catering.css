@@ -75,13 +75,14 @@
   .c-head-actions .t-btn.accent { padding: 0 10px; }
 }
 /* On a 375 px phone (iPhone SE, mini) logo + title + three buttons don't fit and "Catering" was cut to
-   "Cate…": the logo gives way first. Below 350 px the buttons move under the title instead. */
+   "Cate…": the logo gives way first. */
 @media (max-width: 385px) {
   .c-page > .t-header .t-logo { display: none; }
-}
-@media (max-width: 350px) {
+  /* Never cut the title: if the buttons still don't fit (a wider phone font), they move under it. */
   .c-page > .t-header { flex-wrap: wrap; }
   .c-page > .t-header .t-title { flex: none; }
+}
+@media (max-width: 350px) {
   .c-filter { padding: 2px; }
   .c-filter button { padding: 8px 4px; gap: 4px; font-size: 0.9rem; min-width: 0; }
   .c-filter .c-count { min-width: 20px; height: 20px; padding: 0 5px; }
