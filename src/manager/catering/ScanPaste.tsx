@@ -1,6 +1,6 @@
 // "Scan paper" and "Paste message": Claude reads a photo of a handwritten order or a customer's message
 // and fills the form. Used by New order and New estimate; each form decides how to fill itself.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { store, type ScannedOrder } from '@shared/data';
 
 export type ScanFrom = 'photo' | 'message';
@@ -23,7 +23,11 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
     onPending?.(t.trim() !== '');
   };
 
+  // Set at once (before the button greys out), so a double tap never reads the same message twice:
+  // each read costs a little and counts toward the day's limit.
+  const busy = useRef(false);
   const fillFrom = async (from: ScanFrom, read: () => Promise<ScannedOrder>) => {
+    busy.current = true;
     setScan({ state: 'reading', from });
     try {
       const got = await read();
@@ -36,16 +40,21 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
       setPasting(false);
     } catch (e) {
       setScan({ state: 'failed', from, message: e instanceof Error ? e.message : `Couldn't read the ${from}.` });
+    } finally {
+      busy.current = false;
     }
   };
-  const scanPhoto = (photo: File | undefined) => photo && fillFrom('photo', () => store.readOrderPhoto(photo));
+  const scanPhoto = (photo: File | undefined) => photo && !busy.current && fillFrom('photo', () => store.readOrderPhoto(photo));
   const readPasted = (text = pasted) => {
+    if (busy.current) return;
     if (text.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
     fillFrom('message', () => store.readOrderText(text));
   };
   // One tap: read what was copied and fill the form at once. If the phone won't share the clipboard,
   // the box opens instead, and pasting into it fills the form the same way.
   const openPaste = async () => {
+    if (busy.current) return;
+    busy.current = true; // while the clipboard is read: a second tap waits for this one
     setScan({ state: 'idle' });
     let copied = '';
     try {
@@ -53,6 +62,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
     } catch {
       /* not allowed here: the person pastes into the box */
     }
+    busy.current = false;
     if (copied.trim().length >= 5) {
       setPasted(copied);
       readPasted(copied);
