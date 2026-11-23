@@ -43,6 +43,10 @@ describe('guessDiet', () => {
 });
 
 describe('tagsForOrder', () => {
+  it('keeps every dish named in Telugu or Hindi (they are not repeats of each other)', () => {
+    const tags = tagsForOrder({ items: 'గోంగూర చికెన్, 1 tray\nపులిహోర, 1 tray\nपनीर बटर मसाला, 1 tray\nపులిహోర, 2 trays' }, null);
+    expect(tags.map((t) => t.name)).toEqual(['గోంగూర చికెన్', 'పులిహోర', 'पनीर बटर मसाला']);
+  });
   it('makes one tag per dish, skips repeats and blank lines, and uses the Toast group', () => {
     const menu = { groups: [{ id: 'g', name: 'Non Veg Appetizers', items: [{ id: 'i', name: 'Apollo Special' }] }] };
     const tags = tagsForOrder({ items: 'Rose Milk - 15 Gallons\n\nApollo Special - 2 FT\nrose milk\n  \nAndhra Chicken Curry (Bone-in) - 4 FT' }, menu);

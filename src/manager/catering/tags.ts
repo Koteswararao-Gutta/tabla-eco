@@ -84,7 +84,9 @@ export function tagsForOrder(order: Partial<Pick<CateringOrder, 'items' | 'lines
     // from its text once, without its amount). The text is never read again here.
     const raw = menuDish?.name ?? line.name;
     const { name, mark } = tagName(raw);
-    const key = name.toLowerCase().split(/[^a-z0-9]+/).map((w) => (w.length > 3 ? w.replace(/s$/, '') : w)).join('');
+    // A name in another script (Telugu, Hindi) has no a-z letters: it is its own key, so it isn't taken for a repeat.
+    const latin = name.toLowerCase().split(/[^a-z0-9]+/).map((w) => (w.length > 3 ? w.replace(/s$/, '') : w)).join('');
+    const key = latin || name.toLowerCase().replace(/\s+/g, '');
     if (!name || seen.has(key)) continue;
     seen.add(key);
     const dish = menuDish ?? findDish(raw, dishes) ?? findDish(name, dishes);
