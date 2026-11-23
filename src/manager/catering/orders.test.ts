@@ -171,6 +171,18 @@ describe('formFromScan with structured lines', () => {
       { dish: 'Kaju Katli', qty: '', unit: '', note: '', unsure: false },
     ],
   };
+  it('marks a dish matched only by the start of its name, and keeps a plain "Samosa" as the menu "Samosa (2)"', () => {
+    const menu = [['c65', 'Chicken 65'], ['pt', 'Paneer Tikka'], ['s2', 'Samosa (2)']].map(([id, name]) => ({ id, name, group: '', description: '' }));
+    const read = (dish: string) => ({ dish, qty: '1', unit: 'Full tray', note: '', unsure: false });
+    const { form } = formFromScan({ ...scan, lines: [read('Chicken'), read('paneer'), read('Chicken 65 Biryani'), read('samosa'), read('Chicken 65')] }, emptyForm(NOW), menu);
+    expect(form.lines.map((l) => [l.name, !!l.check])).toEqual([
+      ['Chicken 65', true],
+      ['Paneer Tikka', true],
+      ['Chicken 65', true],
+      ['Samosa (2)', false],
+      ['Chicken 65', false],
+    ]);
+  });
   it('matches menu dishes, makes units standard and marks rows to check', () => {
     const { form } = formFromScan(scan, emptyForm(NOW), dishes);
     expect(form.lines).toEqual([

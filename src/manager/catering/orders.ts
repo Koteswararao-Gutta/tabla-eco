@@ -1,7 +1,7 @@
 // Pure helpers for catering orders, shared by the manager Catering tab and the kitchen tablet.
 // No React, no store: everything takes `now` so it is easy to test.
 import type { CateringOrder, EditedBy, OrderEdit, OrderLine, ScannedOrder } from '@shared/data';
-import { cleanLine, findDish, itemLines, itemTexts, linesText, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
+import { cleanLine, findDish, itemLines, itemTexts, linesText, norm, normalizeUnit, orderLines, qtyValue, type Dish } from './lines';
 
 export { itemLines };
 
@@ -304,8 +304,13 @@ export function orderFields(f: OrderForm): Pick<Order, 'customerName' | 'phone' 
 
 const FORM_KEYS: (keyof OrderForm)[] = ['customerName', 'phone', 'date', 'time', 'type', 'address', 'people', 'lines', 'notes'];
 
+/** True when the menu dish is the dish as read, not a guess from the start of its name ("Chicken" read as
+ *  "Chicken 65", "Paneer" as "Paneer Tikka"). "Samosa" is the same dish as "Samosa (2)" on the menu. */
+const sameDish = (menuName: string, read: string) =>
+  norm(menuName) === norm(read) || norm(menuName.replace(/\s*[([][^)\]]*[)\]]/g, '')) === norm(read);
+
 /** The item rows from what the AI read: menu dishes matched by name, units made standard. A row is marked
- *  to check when the AI was unsure, the dish isn't on the menu, or there's no quantity. */
+ *  to check when the AI was unsure, the dish isn't on the menu (or only matched by a guess), or there's no quantity. */
 export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes: Dish[]): LineDraft[] {
   const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   if (Array.isArray(s.lines) && s.lines.length) {
@@ -316,7 +321,7 @@ export function draftsFromScan(s: Pick<ScannedOrder, 'items' | 'lines'>, dishes:
         const qty = parseQty(text(l.qty).replace(/[^\d.,/\s½¼¾-]/g, ''));
         const unit = normalizeUnit(text(l.unit));
         const d: LineDraft = { dishId: dish?.id ?? null, name: dish?.name ?? text(l.dish), qty: qty === null || Number.isNaN(qty) ? '' : String(qty), unit: unit.unit, note: text(l.note) };
-        if (l.unsure === true || !dish || !d.qty || !unit.sure) d.check = true;
+        if (l.unsure === true || !dish || !sameDish(dish.name, text(l.dish)) || !d.qty || !unit.sure) d.check = true;
         return d;
       });
   }
