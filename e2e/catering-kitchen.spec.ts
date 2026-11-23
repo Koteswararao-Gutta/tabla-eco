@@ -1719,3 +1719,44 @@ test('calendar: moving to another month clears the day list until a day there is
   await shot(manager, 'manager-calendar');
   await context.close();
 });
+
+test('small phones: the Catering title is never cut short, and the Unpaid count fits', async ({ browser }) => {
+  for (const width of [320, 375]) {
+    const context = await newContext(browser, { viewport: { width, height: 667 } });
+    const manager = await openScreen(context, '/manager/catering');
+    const title = manager.getByRole('heading', { name: 'Catering' });
+    await expect(title).toBeVisible();
+    expect(await title.evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
+    const count = manager.getByTestId('unpaid-filter').locator('.c-count');
+    await expect(count).toBeVisible();
+    const box = await count.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width - 16);
+    await context.close();
+  }
+});
+
+test('Mark paid on an order with no amount asks for the amount first and saves it on the order', async ({ browser }) => {
+  const context = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const manager = await openScreen(context, '/manager/catering');
+  await manager.getByRole('button', { name: /Priya Sharma/ }).click();
+  const details = manager.getByRole('dialog', { name: 'Order details' });
+  await details.getByRole('button', { name: 'Mark paid', exact: true }).click();
+  const pay = manager.getByRole('dialog', { name: 'Mark paid' });
+  await pay.getByRole('button', { name: 'Cash' }).click();
+  await pay.getByLabel('Taken by').selectOption({ index: 1 });
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(pay.getByText('Please enter the order amount.')).toBeVisible();
+  // A deposit doesn't ask for it.
+  await pay.getByRole('button', { name: 'Deposit' }).click();
+  await expect(pay.getByTestId('full-amount-input')).toHaveCount(0);
+  await pay.getByRole('button', { name: /Paid in full/ }).click();
+  await pay.getByTestId('full-amount-input').fill('640');
+  await pay.getByRole('button', { name: '✓ Mark paid' }).click();
+  await expect(details.getByTestId('order-amount')).toContainText('$640');
+  await expect(details.getByTestId('order-amount')).toContainText('✓ Paid');
+  const amounts = await readCollection<{ id: string; amount: number | null; paid?: boolean; itemsAt?: string | null }>(manager, 'orderAmounts');
+  const a = amounts.find((x) => x.amount === 640)!;
+  expect(a).toMatchObject({ amount: 640, paid: true, method: 'cash' });
+  expect(a.itemsAt).toBeTruthy();
+  await context.close();
+});

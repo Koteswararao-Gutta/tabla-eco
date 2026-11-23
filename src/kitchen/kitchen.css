@@ -44,7 +44,7 @@
 .k-countdown { font-size: 1.15rem; font-weight: 700; color: var(--ink); white-space: nowrap; }
 .k-card.soon .k-countdown { color: var(--accent); }
 .k-countdown.late, .k-card.soon .k-countdown.late { color: var(--bad); }
-.k-type { font-size: 1rem; padding: 4px 14px; }
+.k-type { font-size: 1rem; padding: 4px 14px; white-space: nowrap; flex: none; }
 .k-who { display: flex; flex-direction: column; gap: 2px; }
 .k-name { font-size: 1.45rem; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
 .k-phone, .k-people { color: var(--muted); font-size: 1.1rem; }
