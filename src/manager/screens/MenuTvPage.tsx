@@ -254,11 +254,13 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
   const [seconds, setSeconds] = useState('10');
   const [transition, setTransition] = useState<Transition>('fade');
   const [ends, setEnds] = useState('');
+  const [badFile, setBadFile] = useState<File | null>(null);
+  const bad = !!file && badFile === file;
   const { busy, error, setError, run } = useSaver();
   const secs = parseSeconds(seconds);
 
   const save = () => {
-    if (!file) return setError('Choose a picture first.');
+    if (!file || bad) return setError('Choose a picture first.');
     if (secs == null) return setError(SECONDS_ERROR);
     const endsAt = kind !== 'menu' && ends ? fromLocalInput(ends) : null;
     if (kind !== 'menu' && ends && endsAt == null) return setError('That end date is not a valid date.');
@@ -274,7 +276,7 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
 
   return (
     <Sheet open title={`Add a picture to ${screenName(tv)}`} onClose={onClose}>
-      {file && <FilePreview file={file} />}
+      {file && <FilePreview file={file} onBroken={() => setBadFile(file)} />}
       <PictureInput label={file ? 'Choose a different picture' : 'Choose a picture'} className={'t-btn block' + (file ? '' : ' accent')} onFile={setFile} testId="add-file" />
       <div className="t-field" role="group" aria-label="Type">
         <span>Type</span>
@@ -288,16 +290,19 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
       )}
       <p className="sc-hint" data-testid="add-hint">{addHint(tv, kind)}</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
-      <SheetEnd label={busy ? 'Saving…' : 'Add picture'} onSave={save} onCancel={onClose} disabled={busy || !file} />
+      <SheetEnd label={busy ? 'Saving…' : 'Add picture'} onSave={save} onCancel={onClose} disabled={busy || !file || bad} />
     </Sheet>
   );
 }
 
 function FillSheet({ tv, sorted, slot, replace, onClose }: { tv: ScreenId; sorted: S[]; slot: S; replace: boolean; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
+  const [badFile, setBadFile] = useState<File | null>(null);
+  const bad = !!file && badFile === file;
   const { busy, error, run } = useSaver();
   const save = () =>
     file &&
+    !bad &&
     run(async () => {
       const old = slot.pictures[tv];
       const pic = await store.uploadPicture(file, file.name);
@@ -309,11 +314,11 @@ function FillSheet({ tv, sorted, slot, replace, onClose }: { tv: ScreenId; sorte
     }, 'That file could not be saved as a picture. Try another one.');
   return (
     <Sheet open title={replace ? 'Replace picture' : `Add a picture for ${screenName(tv)}`} onClose={onClose}>
-      {file && <FilePreview file={file} />}
+      {file && <FilePreview file={file} onBroken={() => setBadFile(file)} />}
       <PictureInput label={file ? 'Choose a different picture' : 'Choose a picture'} className={'t-btn block' + (file ? '' : ' accent')} onFile={setFile} testId="fill-file" />
       <p className="sc-hint">Keeps this spot's seconds and transition ({slotLine(slot, store.now())}).</p>
       {error && <p className="sc-error" role="alert">{error}</p>}
-      <SheetEnd label={busy ? 'Saving…' : 'Save'} onSave={save} onCancel={onClose} disabled={busy || !file} />
+      <SheetEnd label={busy ? 'Saving…' : 'Save'} onSave={save} onCancel={onClose} disabled={busy || !file || bad} />
     </Sheet>
   );
 }
