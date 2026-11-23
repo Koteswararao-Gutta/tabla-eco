@@ -1712,3 +1712,18 @@ test('calendar: moving to another month clears the day list until a day there is
   await shot(manager, 'manager-calendar');
   await context.close();
 });
+
+test('small phones: the Catering title is never cut short, and the Unpaid count fits', async ({ browser }) => {
+  for (const width of [320, 375]) {
+    const context = await newContext(browser, { viewport: { width, height: 667 } });
+    const manager = await openScreen(context, '/manager/catering');
+    const title = manager.getByRole('heading', { name: 'Catering' });
+    await expect(title).toBeVisible();
+    expect(await title.evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
+    const count = manager.getByTestId('unpaid-filter').locator('.c-count');
+    await expect(count).toBeVisible();
+    const box = await count.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width - 16);
+    await context.close();
+  }
+});

@@ -74,6 +74,18 @@
   .c-head-actions { gap: 4px; }
   .c-head-actions .t-btn.accent { padding: 0 10px; }
 }
+/* On a 375 px phone (iPhone SE, mini) logo + title + three buttons don't fit and "Catering" was cut to
+   "Cate…": the logo gives way first. Below 350 px the buttons move under the title instead. */
+@media (max-width: 385px) {
+  .c-page > .t-header .t-logo { display: none; }
+}
+@media (max-width: 350px) {
+  .c-page > .t-header { flex-wrap: wrap; }
+  .c-page > .t-header .t-title { flex: none; }
+  .c-filter button { padding: 8px 6px; gap: 4px; }
+}
+/* A link inside a hint (e.g. "Change the price list") uses the app's colour, not the browser's blue. */
+.c-hint a { color: var(--accent); font-weight: 600; }
 
 /* Same-day orders under date and time */
 .c-sameday { margin: -4px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
