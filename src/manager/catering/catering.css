@@ -82,7 +82,9 @@
 @media (max-width: 350px) {
   .c-page > .t-header { flex-wrap: wrap; }
   .c-page > .t-header .t-title { flex: none; }
-  .c-filter button { padding: 8px 6px; gap: 4px; }
+  .c-filter { padding: 2px; }
+  .c-filter button { padding: 8px 4px; gap: 4px; font-size: 0.9rem; min-width: 0; }
+  .c-filter .c-count { min-width: 20px; height: 20px; padding: 0 5px; }
 }
 /* A link inside a hint (e.g. "Change the price list") uses the app's colour, not the browser's blue. */
 .c-hint a { color: var(--accent); font-weight: 600; }
