@@ -124,7 +124,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 body:has(.t-offline) .t-page { padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px)); }
 
 /* "Not saved" banner (SaveFailedBanner): red, on top of the page until dismissed; never on TVs */
-.t-savefail { position: fixed; top: 0; left: 0; right: 0; z-index: 46; display: flex; justify-content: center; padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 0; pointer-events: none; }
+/* Above open sheets (50): the "Not saved" banner must stay readable and its Dismiss tappable. */
+.t-savefail { position: fixed; top: 0; left: 0; right: 0; z-index: 55; display: flex; justify-content: center; padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 0; pointer-events: none; }
 html.t-tz-on .t-savefail { top: var(--t-tz-h, 64px); }
 .t-savefail > div { pointer-events: auto; width: 100%; max-width: 536px; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; border-radius: var(--radius); background: var(--bad-soft); border: 1px solid var(--bad); color: var(--bad); box-shadow: var(--shadow); }
 .t-savefail p { margin: 0; flex: 1; font-weight: 600; line-height: 1.35; }

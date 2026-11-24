@@ -13,7 +13,9 @@ import {
   doc,
   collection,
   documentId,
+  arrayUnion,
   getDoc as fsGet,
+  getDocFromCache,
   getDocFromServer,
   getDocsFromServer,
   runTransaction,
@@ -34,7 +36,7 @@ import {
 import { filterKey, idChunks, recentSince, type CollectionFilter } from './filter';
 import { fitPicture } from './local';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
-import { clean, newId } from './store';
+import { clean, isAppend, newId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import { swUrl } from './sw';
@@ -43,6 +45,8 @@ import { currentApp } from './access';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
+/** How long a read waits for the server before it uses the copy on this phone. */
+const GET_WAIT_MS = 3000;
 
 export class FirebaseStore implements DataStore {
   readonly mode = 'firebase' as const;
@@ -244,7 +248,14 @@ export class FirebaseStore implements DataStore {
 
   async getDoc<C extends CollectionName>(col: C, id: string): Promise<WithId<Collections[C]> | null> {
     await this.ready;
-    const s = await fsGet(this.ref(col, id));
+    const ref = this.ref(col, id);
+    // On weak internet (the phone still says online) a server read can take 10 s or more, and a save that reads
+    // first sat on "Saving…" all that time. After 3 s use the copy on this phone; if there is none, the read fails
+    // like an offline read does ('unavailable').
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<'slow'>((res) => (timer = setTimeout(() => res('slow'), GET_WAIT_MS)));
+    const first = await Promise.race([fsGet(ref), slow]).finally(() => clearTimeout(timer));
+    const s = first === 'slow' ? await getDocFromCache(ref) : first;
     return s.exists() ? ({ ...s.data(), id } as WithId<Collections[C]>) : null;
   }
 
@@ -282,7 +293,9 @@ export class FirebaseStore implements DataStore {
 
   async updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void> {
     await this.ready;
-    await queued(fsSet(this.ref(col, id), { ...clean(patch as object), id }, { merge: true }), `updateDoc ${col}/${id}`);
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(clean(patch as object))) data[k] = isAppend(v) ? arrayUnion(...v) : v;
+    await queued(fsSet(this.ref(col, id), { ...data, id }, { merge: true }), `updateDoc ${col}/${id}`);
   }
 
   async deleteDoc(col: CollectionName, id: string): Promise<void> {

@@ -83,6 +83,24 @@ export interface DataStore {
 export type ToastMenuReport = { menus: unknown[] } | { error: string };
 
 /** Removes undefined top-level values (Firestore rejects them). */
+const APPEND = Symbol('append');
+
+/**
+ * For updateDoc: these items go on the END of the list as saved on the server when the save arrives, instead of
+ * replacing the list. A save made offline then never drops entries another phone added meanwhile (the money log
+ * is add-only, so a replaced list would be refused and the save lost).
+ */
+export function appendItems<T>(items: T[]): T[] {
+  const a = [...items];
+  Object.defineProperty(a, APPEND, { value: true });
+  return a;
+}
+
+/** True for a list made by appendItems. */
+export function isAppend(v: unknown): v is unknown[] {
+  return Array.isArray(v) && (v as unknown as Record<symbol, unknown>)[APPEND] === true;
+}
+
 export function clean<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }

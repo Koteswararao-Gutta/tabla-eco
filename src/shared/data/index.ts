@@ -9,7 +9,7 @@ import type { CollectionName, Collections, DeviceAccess, ScreenId, SingletonId, 
 
 export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
-export { newId } from './store';
+export { appendItems, newId } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export { swUrl, isFrontPage } from './sw';
 export { appLabel, currentApp, deviceLabel } from './access';
