@@ -29,3 +29,21 @@ export function deviceLabel(d: Pick<DeviceRecord, 'name' | 'app'>): string {
 
 /** The app's own name for what a device opens, e.g. "Front app". */
 export const appLabel = (app: DeviceApp): string => APP_LABELS[app] ?? 'Device';
+
+/** A device not seen for this long is hidden in More > Devices and no longer counts as a manager phone
+ *  (the server uses the same rule: functions/devices.js). */
+export const STALE_MS = 30 * 24 * 3600_000;
+
+/** True when this device was seen in the last 30 days. */
+export const isRecent = (d: Pick<DeviceRecord, 'lastSeen'>, now: number): boolean => typeof d.lastSeen === 'number' && now - d.lastSeen < STALE_MS;
+
+/** Manager phones still in use. */
+export const activeManagers = <T extends Pick<DeviceRecord, 'manager' | 'lastSeen'>>(devices: T[], now: number): T[] =>
+  devices.filter((d) => d.manager === true && isRecent(d, now));
+
+/** Whether device `uid` may change the code, the lock and the list: any device while no manager phone is
+ *  marked, else only a manager phone. The server checks the same (manageDevices). */
+export function mayManage(uid: string | null, devices: Pick<DeviceRecord, 'id' | 'manager' | 'lastSeen'>[], now: number): boolean {
+  const managers = activeManagers(devices, now);
+  return managers.length === 0 || (!!uid && managers.some((d) => d.id === uid));
+}

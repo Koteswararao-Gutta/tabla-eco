@@ -2,13 +2,15 @@
 // Open (the start): every device that opens the app adds itself here. When all the restaurant's devices are
 // listed, the manager sets a code and locks: from then on a new device needs the code once, and the database
 // refuses every device that isn't in this list. The server does every change (store.manageDevices).
+// Manager phones: once a device is marked "Manager phone", only manager phones can change the code, the lock
+// and the list (the server checks it too). Devices not seen for 30 days are folded away, but stay approved.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  appLabel, deviceLabel, MENU_SCREENS, store, useCollection, useDoc, useNow,
+  activeManagers, appLabel, deviceLabel, isRecent, mayManage, MENU_SCREENS, store, useCollection, useDoc, useNow,
   type DeviceAction, type DeviceRecord, type ScreenId,
 } from '@shared/data';
-import { PageHeader, Sheet, useSheetClose } from '@shared/ui';
+import { PageHeader, Segmented, Sheet, useSheetClose } from '@shared/ui';
 
 /** A screen that reported in this recently is "in use" (and should be in the list before locking). */
 const IN_USE_MS = 2 * 24 * 3600_000;
@@ -19,12 +21,21 @@ export default function Devices() {
   const beats = useCollection('heartbeats');
   const now = useNow(60_000);
   const me = store.thisDeviceId();
-  const [sheet, setSheet] = useState<null | 'code' | 'lock' | 'unlock' | { rename: DeviceRecord } | { remove: DeviceRecord }>(null);
+  const [sheet, setSheet] = useState<null | 'code' | 'lock' | 'unlock' | { edit: DeviceRecord } | { remove: DeviceRecord }>(null);
+  const [showOld, setShowOld] = useState(false);
   const close = () => setSheet(null);
 
   const locked = !!info?.locked;
   const codeSet = !!info?.codeSetAt;
   const list = (devices ?? []).slice().sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : deviceLabel(a).localeCompare(deviceLabel(b))));
+  // Only manager phones may change anything here, once one is marked (before that, any approved device).
+  const canManage = mayManage(me, list, now);
+  const managers = activeManagers(list, now);
+  // Not seen for 30 days (e.g. a phone whose browser data was cleared comes back as a new device): folded away.
+  // They are still approved, so they can be shown and removed.
+  const recent = list.filter((d) => d.id === me || isRecent(d, now));
+  const old = list.filter((d) => !recent.includes(d));
+  const shown = showOld ? list : recent;
   // Screens that ran lately but aren't in the list yet (they add themselves the next time they open the app).
   const waiting = (beats ?? [])
     .filter((b) => now - (b.lastSeen ?? 0) < IN_USE_MS && [...MENU_SCREENS, 'tv5', 'kitchen'].includes(b.id))
@@ -52,20 +63,31 @@ export default function Devices() {
                 Every device that opens the app adds itself below. When every phone, tablet and TV you use is listed, set a restaurant code and lock.
               </p>
             )}
-            {locked ? (
+            {!canManage ? null : locked ? (
               <button className="t-btn block" onClick={() => setSheet('unlock')} data-testid="dv-unlock">Open the app to anyone again</button>
             ) : (
               <button className="t-btn accent block" onClick={() => setSheet('lock')} disabled={!codeSet} data-testid="dv-lock">
                 Lock to these {list.length} devices
               </button>
             )}
-            {!locked && !codeSet && <p className="mo-note">Set the restaurant code first.</p>}
+            {canManage && !locked && !codeSet && <p className="mo-note">Set the restaurant code first.</p>}
           </section>
+
+          {!canManage ? (
+            <p className="dv-wait" data-testid="dv-not-manager">
+              Only a manager phone can change the code, the lock or this list. Please ask the manager.
+            </p>
+          ) : managers.length === 0 ? (
+            <p className="dv-wait" data-testid="dv-no-manager">
+              Right now every phone that opens the manager app can change these settings. Tap Edit on your own phone and
+              make it a manager phone, so only it can.
+            </p>
+          ) : null}
 
           <section className="t-card dv-card">
             <div className="dv-head">
               <h2 className="mo-h2">Restaurant code</h2>
-              <button className="t-btn" onClick={() => setSheet('code')} data-testid="dv-set-code">{codeSet ? 'Change' : 'Set code'}</button>
+              {canManage && <button className="t-btn" onClick={() => setSheet('code')} data-testid="dv-set-code">{codeSet ? 'Change' : 'Set code'}</button>}
             </div>
             <p className="mo-note">
               {codeSet
@@ -81,27 +103,35 @@ export default function Devices() {
           )}
 
           <ul className="mo-list" data-testid="dv-list">
-            {list.map((d) => (
+            {shown.map((d) => (
               <li key={d.id} className="dv-row" data-testid="dv-row">
                 <div className="mo-row-main">
                   <b>
                     {deviceLabel(d)}
                     {d.id === me && <span className="t-badge dv-me">This device</span>}
+                    {d.manager && <span className="t-badge accent dv-me" data-testid="dv-manager">Manager</span>}
                   </b>
                   <span className="mo-row-time">
                     {[d.name ? appLabel(d.app) : null, d.model, seen(d.lastSeen, now)].filter(Boolean).join(' · ')}
                   </span>
                 </div>
-                <div className="dv-actions">
-                  <button className="t-btn ghost" onClick={() => setSheet({ rename: d })}>Rename</button>
-                  {d.id !== me && (
-                    <button className="t-btn ghost danger" onClick={() => setSheet({ remove: d })} data-testid="dv-remove">Remove</button>
-                  )}
-                </div>
+                {canManage && (
+                  <div className="dv-actions">
+                    <button className="t-btn ghost" onClick={() => setSheet({ edit: d })} data-testid="dv-edit">Edit</button>
+                    {d.id !== me && (
+                      <button className="t-btn ghost danger" onClick={() => setSheet({ remove: d })} data-testid="dv-remove">Remove</button>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
             {list.length === 0 && <li className="mo-empty">No devices yet.</li>}
           </ul>
+          {old.length > 0 && (
+            <button className="t-btn ghost block" onClick={() => setShowOld((v) => !v)} data-testid="dv-show-old">
+              {showOld ? 'Hide devices not seen for 30 days' : `Show ${old.length} more not seen for 30 days (still approved)`}
+            </button>
+          )}
         </div>
       )}
 
@@ -119,9 +149,9 @@ export default function Devices() {
       <Sheet open={sheet === 'unlock'} title="Open the app to anyone?" onClose={close}>
         <Confirm text="Anyone with a link will be able to open the app again, and new devices add themselves to the list." button="Open the app" req={{ action: 'unlock' }} onDone={close} />
       </Sheet>
-      {sheet && typeof sheet === 'object' && 'rename' in sheet && (
-        <Sheet open title="Rename device" onClose={close}>
-          <RenameForm device={sheet.rename} onDone={close} />
+      {sheet && typeof sheet === 'object' && 'edit' in sheet && (
+        <Sheet open title="Edit device" onClose={close}>
+          <EditForm device={sheet.edit} isMe={sheet.edit.id === me} anyManager={managers.length > 0} onDone={close} />
         </Sheet>
       )}
       {sheet && typeof sheet === 'object' && 'remove' in sheet && (
@@ -154,11 +184,11 @@ function seen(at: number, now: number): string {
 function useSave(onDone: () => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = async (req: DeviceAction) => {
+  const run = async (...reqs: DeviceAction[]) => {
     setBusy(true);
     setError(null);
     try {
-      await store.manageDevices(req);
+      for (const req of reqs) await store.manageDevices(req);
       onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -212,18 +242,39 @@ function CodeForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function RenameForm({ device, onDone }: { device: DeviceRecord; onDone: () => void }) {
+function EditForm({ device, isMe, anyManager, onDone }: { device: DeviceRecord; isMe: boolean; anyManager: boolean; onDone: () => void }) {
   const [name, setName] = useState(device.name ?? '');
+  const [manager, setManager] = useState<'yes' | 'no'>(device.manager ? 'yes' : 'no');
   const { busy, error, run } = useSave(onDone);
+  const save = () => {
+    const reqs: DeviceAction[] = [];
+    if (name.trim() !== (device.name ?? '')) reqs.push({ action: 'rename', uid: device.id, name });
+    // The manager mark goes last: taking it off this phone ends its right to make changes.
+    if ((manager === 'yes') !== !!device.manager) reqs.push({ action: 'setManager', uid: device.id, manager: manager === 'yes' });
+    return reqs.length ? run(...reqs) : onDone();
+  };
   return (
-    <form className="t-stack" onSubmit={(e) => (e.preventDefault(), run({ action: 'rename', uid: device.id, name }))}>
+    <form className="t-stack" onSubmit={(e) => (e.preventDefault(), save())}>
       <label className="t-field">
         <span>Name</span>
         <input className="t-input" maxLength={40} placeholder={appLabel(device.app)} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <p className="mo-note">For example "Ravi's phone" or "TV over the counter". Empty uses "{appLabel(device.app)}".</p>
+      <div className="t-field">
+        <span>Manager phone</span>
+        <Segmented label="Manager phone" value={manager} onChange={setManager} options={[{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]} />
+      </div>
+      <p className="mo-note" data-testid="dv-manager-note">
+        {manager === 'yes'
+          ? 'Only manager phones can change the code, lock or open the app, and edit or remove devices.'
+          : isMe && device.manager
+            ? 'This phone will no longer be able to change these settings.'
+            : !anyManager && !isMe
+              ? 'Make your own phone a manager phone first, or you will lose these settings on this phone.'
+              : 'It can use the app as usual, but not change these settings.'}
+      </p>
       {error && <p className="dv-error" role="alert">{error}</p>}
-      <button className="t-btn accent block" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+      <button className="t-btn accent block" type="submit" disabled={busy} data-testid="dv-edit-save">{busy ? 'Saving…' : 'Save'}</button>
     </form>
   );
 }

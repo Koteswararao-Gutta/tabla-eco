@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Field, PageHeader, RefreshButton, Segmented, Sheet, useSheetClose } from '@shared/ui';
-import { recentSince, store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
+import { recentSince, removeItems, store, useCollection, useDoc, useNow, useSingleton, type AlertState, type CateringOrder, type EditedBy, type OrderEdit, type OrderLine, type PayMethod, type ScannedOrder, type WithId } from '@shared/data';
 import {
   amountError, amountInput, amountLabel, dayLabel, dayStart, describeChanges, parseAmount, EDITED_BY_LABEL, emptyForm, formFromOrder, formFromScan, fromInputs, groupOpen, history, NAME_MAX, orderFields, sameDayOrders, shareText, telHref, timeLabel, validate, whatsappHref, withEdit,
   type FormErrors, type OrderForm,
@@ -765,7 +765,8 @@ function PaymentsList({ order, pay, now }: { order: Order; pay: Pay; now: number
         const i = cur.deposits.findIndex((x) => x.at === d.at && x.amount === d.amount);
         if (i < 0) return { events: [] };
         return {
-          patch: { deposits: cur.deposits.filter((_, j) => j !== i) },
+          // Only this one deposit is taken out, as the server has the list: one another phone took meanwhile stays.
+          patch: { deposits: removeItems([cur.deposits[i]]) },
           events: [{ kind: 'depositRemoved', amount: d.amount, method: d.method, takenBy: d.takenBy }],
         };
       });

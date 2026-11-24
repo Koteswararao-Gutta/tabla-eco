@@ -5,8 +5,13 @@ const fake = vi.hoisted(() => ({
   updateDoc: vi.fn(async (..._args: unknown[]) => {}),
   now: () => 1000,
 }));
-vi.mock('@shared/data', () => ({ store: fake, appendItems: <T,>(a: T[]) => Object.defineProperty([...a], 'appended', { value: true }) }));
+vi.mock('@shared/data', () => ({
+  store: fake,
+  appendItems: <T,>(a: T[]) => Object.defineProperty([...a], 'appended', { value: true }),
+  removeItems: <T,>(a: T[]) => Object.defineProperty([...a], 'removed', { value: true }),
+}));
 
+import { removeItems } from '@shared/data';
 import { isOfflineError, savePay } from './payWrite';
 
 const offline = Object.assign(new Error('Failed to get document because the client is offline.'), { code: 'unavailable' });
@@ -48,6 +53,16 @@ describe('savePay', () => {
     expect(saved.log).toEqual([{ kind: 'deposit', amount: 20, method: 'cash', takenBy: 'Ravi', at: 1000 }]);
     expect(saved.log.appended).toBe(true);
     expect(saved.deposits.appended).toBe(true);
+  });
+
+  it('a removed deposit is taken out on its own: the saved list is never rewritten', async () => {
+    const d1 = { amount: 20, method: 'cash', takenBy: 'Ravi', at: 5 };
+    const d2 = { amount: 30, method: 'card', takenBy: 'Anu', at: 6 };
+    fake.getDoc.mockResolvedValue({ id: 'o1', amount: 300, paid: false, log: [], deposits: [d1, d2] });
+    await savePay('o1', (cur) => ({ patch: { deposits: removeItems([cur.deposits[0]]) }, events: [] }));
+    const saved = fake.updateDoc.mock.calls[0][2] as { deposits: unknown[] & { removed?: boolean } };
+    expect(saved.deposits).toEqual([d1]);
+    expect(saved.deposits.removed).toBe(true);
   });
 
   it('online, a failed read still fails the save', async () => {

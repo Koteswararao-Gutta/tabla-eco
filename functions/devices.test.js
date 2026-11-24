@@ -47,3 +47,31 @@ test('device model and app names are plain and safe', () => {
   assert.equal(cleanName('   '), null);
   assert.equal(cleanName('x'.repeat(80)).length, 40);
 });
+
+test('manager phones: everyone may manage until one is marked; then only active manager phones may', async () => {
+  const { mayManage, activeManagers, STALE_MS } = await import('./devices.js');
+  const now = 100 * STALE_MS;
+  const fresh = now - 1000;
+  assert.ok(mayManage('a', [], now)); // nobody marked yet
+  assert.ok(mayManage('a', [{ id: 'b', manager: false, lastSeen: fresh }], now));
+  const boss = { id: 'boss', manager: true, lastSeen: fresh };
+  assert.ok(mayManage('boss', [boss], now));
+  assert.ok(!mayManage('staff', [boss], now));
+  // A manager phone not seen for 30 days no longer counts (a lost phone never locks everyone out for good).
+  const gone = { id: 'boss', manager: true, lastSeen: now - STALE_MS };
+  assert.deepEqual(activeManagers([gone], now), []);
+  assert.ok(mayManage('staff', [gone], now));
+  assert.ok(!mayManage('staff', [gone, { id: 'boss2', manager: true, lastSeen: fresh }], now));
+});
+
+test('stale devices: not seen for 30 days, oldest first', async () => {
+  const { staleDevices, STALE_MS } = await import('./devices.js');
+  const now = 100 * STALE_MS;
+  const list = [
+    { id: 'new', lastSeen: now - 1000 },
+    { id: 'old', lastSeen: now - 2 * STALE_MS },
+    { id: 'older', lastSeen: now - 3 * STALE_MS },
+    { id: 'edge', lastSeen: now - STALE_MS },
+  ];
+  assert.deepEqual(staleDevices(list, now).map((d) => d.id), ['older', 'old', 'edge']);
+});

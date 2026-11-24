@@ -13,6 +13,7 @@ import {
   doc,
   collection,
   documentId,
+  arrayRemove,
   arrayUnion,
   getDoc as fsGet,
   getDocFromCache,
@@ -36,7 +37,7 @@ import {
 import { filterKey, idChunks, recentSince, type CollectionFilter } from './filter';
 import { fitPicture } from './local';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
-import { clean, isAppend, newId } from './store';
+import { clean, isAppend, isRemove, newId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import { swUrl } from './sw';
@@ -294,7 +295,7 @@ export class FirebaseStore implements DataStore {
   async updateDoc<C extends CollectionName>(col: C, id: string, patch: Partial<Collections[C]>): Promise<void> {
     await this.ready;
     const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(clean(patch as object))) data[k] = isAppend(v) ? arrayUnion(...v) : v;
+    for (const [k, v] of Object.entries(clean(patch as object))) data[k] = isAppend(v) ? arrayUnion(...v) : isRemove(v) ? arrayRemove(...v) : v;
     await queued(fsSet(this.ref(col, id), { ...data, id }, { merge: true }), `updateDoc ${col}/${id}`);
   }
 
