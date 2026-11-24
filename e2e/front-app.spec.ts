@@ -53,6 +53,13 @@ test('manager app: every tab opens with no PIN', async ({ context }) => {
 });
 
 test('↻ Refresh reloads the app in place: front, manager and kitchen', async ({ context }) => {
+  // Staff hours "closed", so a sample order due within the hour can't cover the kitchen keypad with the
+  // full-screen alarm (it did when CI ran at 5:48 PM Arizona time).
+  await context.addInitScript(() => {
+    if (localStorage.getItem('tabla:singletons')) return;
+    const days = Array.from({ length: 7 }, () => ({ closed: true }));
+    localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
+  });
   for (const path of ['/front/catering', '/manager/catering']) {
     const page = await openScreen(context, path);
     await expect(page.getByRole('heading', { name: 'Catering' })).toBeVisible();
