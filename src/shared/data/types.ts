@@ -306,6 +306,8 @@ export interface DeviceRecord {
   how: 'open' | 'code';
   approvedAt: number;
   lastSeen: number;
+  /** A manager phone: only these may change the code, lock, rename or remove devices (once one is marked). */
+  manager?: boolean;
 }
 
 /** access/info: shown in More > Devices. Missing means open and no code set. */
@@ -326,7 +328,8 @@ export type DeviceAction =
   | { action: 'lock' }
   | { action: 'unlock' }
   | { action: 'rename'; uid: string; name: string }
-  | { action: 'remove'; uid: string };
+  | { action: 'remove'; uid: string }
+  | { action: 'setManager'; uid: string; manager: boolean };
 
 /** Single documents, by id. Use useSingleton / saveSingleton from @shared/data. */
 export interface Singletons {

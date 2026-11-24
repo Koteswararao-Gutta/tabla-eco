@@ -33,6 +33,7 @@ test('open at first; set a code and lock; a new device needs the code once; remo
   await expect(tv.getByTestId('access-code')).toHaveCount(0);
   await expect(manager.getByTestId('dv-row')).toHaveCount(2);
   await expect(manager.getByTestId('dv-list')).toContainText('TV 1');
+  await expect(manager.getByTestId('dv-no-manager')).toBeVisible();
   await shot(manager, 'devices-open');
 
   // Set the code (too short can't be saved), then lock.
@@ -79,7 +80,7 @@ test('open at first; set a code and lock; a new device needs the code once; remo
 
   // Rename TV 1, then remove it: it is asked for the code again.
   const tvRow = manager.getByTestId('dv-row').filter({ hasText: 'TV 1' });
-  await tvRow.getByRole('button', { name: 'Rename' }).click();
+  await tvRow.getByTestId('dv-edit').click();
   await manager.getByRole('dialog').getByRole('textbox').fill('Counter TV left');
   await manager.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
   await expect(manager.getByTestId('dv-list')).toContainText('Counter TV left');
@@ -94,4 +95,50 @@ test('open at first; set a code and lock; a new device needs the code once; remo
   await manager.getByTestId('dv-unlock').click();
   await manager.getByTestId('dv-confirm').click();
   await expect(front.getByTestId('access-code')).toHaveCount(0);
+});
+
+test('manager phones: once one is marked, other devices can see the list but not change it', async ({ context }) => {
+  await context.addInitScript(() => {
+    if (localStorage.getItem('tabla:singletons')) return;
+    const days = Array.from({ length: 7 }, () => ({ closed: true }));
+    localStorage.setItem('tabla:singletons', JSON.stringify({ staffConfig: { id: 'staffConfig', settings: { days } } }));
+  });
+  const boss = await openScreen(context, '/manager/more/devices');
+  const staff = await openScreen(context, '/manager/more/devices');
+  await expect(boss.getByTestId('dv-row')).toHaveCount(2);
+  await expect(staff.getByTestId('dv-set-code')).toBeVisible();
+
+  // The manager marks their own phone.
+  await boss.getByTestId('dv-row').filter({ hasText: 'This device' }).getByTestId('dv-edit').click();
+  await boss.getByRole('dialog').getByRole('button', { name: 'Yes' }).click();
+  await shot(boss, 'devices-edit-manager');
+  await boss.getByTestId('dv-edit-save').click();
+  await expect(boss.getByTestId('dv-manager')).toHaveCount(1);
+  await expect(boss.getByTestId('dv-no-manager')).toHaveCount(0);
+  await expect(boss.getByTestId('dv-set-code')).toBeVisible();
+
+  // The other phone: no buttons, a plain note.
+  await expect(staff.getByTestId('dv-not-manager')).toBeVisible();
+  await expect(staff.getByTestId('dv-set-code')).toHaveCount(0);
+  await expect(staff.getByTestId('dv-lock')).toHaveCount(0);
+  await expect(staff.getByTestId('dv-edit')).toHaveCount(0);
+  await shot(staff, 'devices-not-manager');
+
+  // A device not seen for 30 days is folded away, and can be shown and removed.
+  await boss.evaluate(() => {
+    const devices = JSON.parse(localStorage.getItem('tabla:devices') || '{}');
+    devices.olddevice = { id: 'olddevice', app: 'front', model: 'iPhone', name: null, how: 'open', approvedAt: 1, lastSeen: Date.now() - 40 * 24 * 3600_000 };
+    localStorage.setItem('tabla:devices', JSON.stringify(devices));
+  });
+  await boss.reload();
+  await expect(boss.getByTestId('dv-row')).toHaveCount(2);
+  await expect(boss.getByTestId('dv-lock')).toBeDisabled();
+  await expect(boss.getByTestId('dv-lock')).toHaveText('Lock to these 3 devices');
+  await boss.getByTestId('dv-show-old').click();
+  await expect(boss.getByTestId('dv-row')).toHaveCount(3);
+  await shot(boss, 'devices-old-shown');
+  await boss.getByTestId('dv-row').filter({ hasText: 'seen 40 days ago' }).getByTestId('dv-remove').click();
+  await boss.getByTestId('dv-confirm').click();
+  await expect(boss.getByTestId('dv-row')).toHaveCount(2);
+  await expect(boss.getByTestId('dv-show-old')).toHaveCount(0);
 });

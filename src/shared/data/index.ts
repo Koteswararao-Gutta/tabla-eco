@@ -9,10 +9,10 @@ import type { CollectionName, Collections, DeviceAccess, ScreenId, SingletonId, 
 
 export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
-export { appendItems, newId } from './store';
+export { appendItems, newId, removeItems } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export { swUrl, isFrontPage } from './sw';
-export { appLabel, currentApp, deviceLabel } from './access';
+export { activeManagers, appLabel, currentApp, deviceLabel, isRecent, mayManage } from './access';
 export type { CollectionFilter } from './filter';
 export type { SaveFailure } from './resync';
 export { recentSince, RECENT_DAYS } from './filter';

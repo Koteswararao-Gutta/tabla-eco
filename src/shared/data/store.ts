@@ -101,6 +101,35 @@ export function isAppend(v: unknown): v is unknown[] {
   return Array.isArray(v) && (v as unknown as Record<symbol, unknown>)[APPEND] === true;
 }
 
+const REMOVE = Symbol('remove');
+
+/**
+ * For updateDoc: exactly these items are taken OUT of the list as saved on the server when the save arrives,
+ * instead of replacing the list. An item another phone added meanwhile stays. Each item must be exactly as saved
+ * (a copy read from the store), since only equal items are removed.
+ */
+export function removeItems<T>(items: T[]): T[] {
+  const a = [...items];
+  Object.defineProperty(a, REMOVE, { value: true });
+  return a;
+}
+
+/** True for a list made by removeItems. */
+export function isRemove(v: unknown): v is unknown[] {
+  return Array.isArray(v) && (v as unknown as Record<symbol, unknown>)[REMOVE] === true;
+}
+
+/** Same value, the way Firestore compares list items (maps by their keys, in any order). */
+export function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
 export function clean<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }

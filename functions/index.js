@@ -13,7 +13,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import {
   ALL_TRIES, afterWrong, appName, cleanName, CODE_RE, CODE_RULE, codeMatches, DEVICE_TRIES, deviceModel, hashCode, MAX_DEVICES,
-  SEEN_EVERY_MS, shortId, triesLeft, waitMinutes,
+  mayManage, SEEN_EVERY_MS, shortId, staleDevices, triesLeft, waitMinutes,
 } from './devices.js';
 import { editAlertFor, kitchenEdit } from './edits.js';
 import { checkRequest, LIMIT_REACHED, menuNames, readError, readOrderPhoto, takeDailyRead, UNREADABLE, UNREADABLE_TEXT } from './readOrder.js';
@@ -245,7 +245,20 @@ async function mustBeAllowed(req) {
 /** Marks a device approved: the claim on its sign-in, and its row in the Devices list. */
 async function approve(uid, how, data) {
   const db = getFirestore();
-  const count = (await db.collection('devices').count().get()).data().count;
+  let count = (await db.collection('devices').count().get()).data().count;
+  if (count >= MAX_DEVICES) {
+    // Make room: devices not seen for 30 days (each lost sign-in leaves one behind) are removed like "Remove" does.
+    const all = (await db.collection('devices').get()).docs.map((d) => ({ ...d.data(), id: d.id }));
+    const old = staleDevices(all, Date.now()).slice(0, 50);
+    for (const d of old) {
+      await db.doc(`devices/${d.id}`).delete();
+      await getAuth().deleteUser(d.id).catch((e) => {
+        if (e?.code !== 'auth/user-not-found') logger.warn(`could not remove the sign-in of old device ${shortId(d.id)}`, e);
+      });
+    }
+    if (old.length) logger.info(`removed ${old.length} devices not seen for 30 days to make room`);
+    count -= old.length;
+  }
   if (count >= MAX_DEVICES) throw new HttpsError('resource-exhausted', 'Too many devices. Please remove old ones in More > Devices.');
   await getAuth().setCustomUserClaims(uid, { tabla: true });
   const now = Date.now();
@@ -308,13 +321,18 @@ export const enterCode = onCall({ memory: '256MiB', timeoutSeconds: 20, maxInsta
   return { approved: true };
 });
 
-/** More > Devices (approved devices only): set the code, lock or open the app, rename or remove a device. */
+/** More > Devices (manager phones only, see mayManage): set the code, lock or open the app, rename, remove or
+ *  mark a device as a manager phone. */
 export const manageDevices = onCall({ memory: '256MiB', timeoutSeconds: 30, maxInstances: 2 }, async (req) => {
   if (!req.auth) throw new HttpsError('unauthenticated', 'Please open the Tabla app.');
   if (!isApproved(req)) throw new HttpsError('permission-denied', 'This device is not approved.');
   const db = getFirestore();
   const { action } = req.data ?? {};
   const now = Date.now();
+  const managers = (await db.collection('devices').where('manager', '==', true).get()).docs.map((d) => ({ ...d.data(), id: d.id }));
+  if (!mayManage(req.auth.uid, managers, now)) {
+    throw new HttpsError('permission-denied', 'Only a manager phone can change this. Please ask the manager.');
+  }
   const info = db.doc('access/info');
   if (action === 'setCode') {
     const code = typeof req.data.code === 'string' ? req.data.code.trim() : '';
@@ -344,6 +362,12 @@ export const manageDevices = onCall({ memory: '256MiB', timeoutSeconds: 30, maxI
   if (action === 'rename') {
     if (!(await ref.get()).exists) throw new HttpsError('not-found', 'That device is no longer in the list.');
     await ref.update({ name: cleanName(req.data.name) });
+    return { ok: true };
+  }
+  if (action === 'setManager') {
+    if (!(await ref.get()).exists) throw new HttpsError('not-found', 'That device is no longer in the list.');
+    await ref.update({ manager: req.data.manager === true });
+    logger.info(`device ${shortId(uid)} ${req.data.manager === true ? 'made' : 'no longer'} a manager phone by device ${shortId(req.auth.uid)}`);
     return { ok: true };
   }
   if (action === 'remove') {

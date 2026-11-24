@@ -5,9 +5,9 @@
 
 import { matchesFilter, recentSince, type CollectionFilter } from './filter';
 import type { DataStore, Unsubscribe, WithId } from './store';
-import { clean, isAppend, newId } from './store';
+import { clean, isAppend, isRemove, newId, sameValue } from './store';
 import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, DeviceRecord, Picture, ScannedOrder } from './types';
-import { currentApp } from './access';
+import { currentApp, mayManage } from './access';
 
 const PREFIX = 'tabla:';
 type Table = Record<string, unknown>;
@@ -120,7 +120,10 @@ export class LocalStore implements DataStore {
     const t = this.read(col);
     const cur = ((t[id] as Record<string, unknown>) || {});
     const next: Record<string, unknown> = { ...cur };
-    for (const [k, v] of Object.entries(clean(patch as object))) next[k] = isAppend(v) ? [...(Array.isArray(cur[k]) ? (cur[k] as unknown[]) : []), ...v] : v;
+    for (const [k, v] of Object.entries(clean(patch as object))) {
+      const was = Array.isArray(cur[k]) ? (cur[k] as unknown[]) : [];
+      next[k] = isAppend(v) ? [...was, ...v] : isRemove(v) ? was.filter((x) => !v.some((r) => sameValue(r, x))) : v;
+    }
     t[id] = { ...next, id };
     this.write(col, t);
   }
@@ -243,6 +246,8 @@ export class LocalStore implements DataStore {
 
   async manageDevices(req: DeviceAction): Promise<void> {
     const now = this.now();
+    const devices = Object.values(this.read('devices')) as DeviceRecord[];
+    if (!mayManage(this.localDeviceId(), devices, now)) throw new Error('Only a manager phone can change this. Please ask the manager.');
     const info = (this.read('access').info as object | undefined) ?? {};
     const access = this.read('access');
     if (req.action === 'setCode') {
@@ -254,6 +259,8 @@ export class LocalStore implements DataStore {
     } else if (req.action === 'unlock') {
       const { locked: _, ...rest } = access;
       this.write('access', { ...rest, info: { ...info, id: 'info', locked: false, lockedAt: null, updatedAt: now } });
+    } else if (req.action === 'setManager') {
+      await this.updateDoc('devices', req.uid, { manager: req.manager });
     } else if (req.action === 'rename') {
       const name = req.name.replace(/\s+/g, ' ').trim().slice(0, 40) || null;
       await this.updateDoc('devices', req.uid, { name });

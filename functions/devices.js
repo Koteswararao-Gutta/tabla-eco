@@ -19,6 +19,10 @@ export const DEVICE_TRIES = { max: 5, windowMs: 15 * 60_000 };
 export const ALL_TRIES = { max: 20, windowMs: 60 * 60_000 };
 /** Most devices that can ever be listed (stops junk sign-ins filling the list while open). */
 export const MAX_DEVICES = 200;
+/** A device not seen for this long is hidden in the Devices list, can be cleared to make room, and (for a
+ *  manager phone) no longer counts as a manager: a lost manager phone never locks everyone out for good. */
+export const STALE_MS = 30 * 24 * 3600_000;
+
 /** checkIn refreshes a device's "last seen" at most this often. */
 export const SEEN_EVERY_MS = 60 * 60_000;
 
@@ -74,3 +78,25 @@ export function cleanName(name) {
 
 /** A short id for logs (never the full sign-in id). */
 export const shortId = (uid) => createHash('sha256').update(String(uid)).digest('hex').slice(0, 8);
+
+/**
+ * Who may change the code, lock, unlock, rename, remove or mark devices: the manager phones (devices marked
+ * manager and seen in the last 30 days). While there are none (the start), every approved device may,
+ * so the manager can mark their own phone first.
+ */
+export function mayManage(uid, devices, now) {
+  const managers = activeManagers(devices, now);
+  return managers.length === 0 || managers.some((d) => d.id === uid);
+}
+
+/** Manager phones still in use: marked manager and seen in the last 30 days. */
+export function activeManagers(devices, now) {
+  return devices.filter((d) => d?.manager === true && typeof d.lastSeen === 'number' && now - d.lastSeen < STALE_MS);
+}
+
+/** Rows that can be cleared to make room for a new device: not seen for 30 days, oldest first. */
+export function staleDevices(devices, now) {
+  return devices
+    .filter((d) => typeof d?.lastSeen !== 'number' || now - d.lastSeen >= STALE_MS)
+    .sort((a, b) => (a.lastSeen ?? 0) - (b.lastSeen ?? 0));
+}
