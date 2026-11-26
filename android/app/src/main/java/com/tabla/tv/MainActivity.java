@@ -139,6 +139,7 @@ public class MainActivity extends Activity {
                 prefs.edit().putString("screen", route).apply();
                 Watchdog.quiet(this, false);
                 showScreen(route);
+                finishSetup(route);
             });
             list.addView(b);
             if (first == null) first = b;
@@ -197,6 +198,17 @@ public class MainActivity extends Activity {
         scroll.addView(list);
         setContentView(scroll);
         if (first != null) first.requestFocus();
+    }
+
+    /** On a TV device: give Tabla the settings that otherwise need a computer (see SelfSetup).
+     *  Not on tablets or phones: their debugging doesn't listen on the network, and their own settings work. */
+    private void finishSetup(String route) {
+        boolean tv = SelfSetup.amazon() || getPackageManager().hasSystemFeature("android.software.leanback");
+        if (!tv || SelfSetup.phone(route) || !SelfSetup.needed(this)) return;
+        SelfSetup.run(this, route, message -> {
+            if (isFinishing()) return;
+            android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+        });
     }
 
     private Button button(String text) {
