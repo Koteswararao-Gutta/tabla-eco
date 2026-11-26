@@ -646,6 +646,64 @@ test('one tap on Paste message reads what was copied and fills the form', async 
   await context.close();
 });
 
+/** A small PNG, standing in for a screenshot of a WhatsApp order. */
+const SCREENSHOT_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+test('paste message takes a screenshot too: picked, pasted, or copied', async ({ browser }) => {
+  const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const manager = await openScreen(context, '/manager/catering');
+  const open = async () => {
+    await manager.getByRole('button', { name: '+ New order' }).click();
+    return manager.getByRole('dialog', { name: 'New order' });
+  };
+  const close = async () => {
+    await manager.keyboard.press('Escape');
+    const discard = manager.getByRole('button', { name: /^(Discard|Close without saving)/ });
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    await expect(manager.getByRole('dialog', { name: 'New order' })).toHaveCount(0);
+  };
+
+  // 1. Nothing copied: the box opens, with a button to pick a screenshot or photo.
+  await manager.evaluate(() => navigator.clipboard.writeText(''));
+  let sheet = await open();
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
+  await expect(sheet.getByLabel("Customer's message")).toBeVisible();
+  await expect(sheet.getByText('Photo or screenshot')).toBeVisible();
+  await shot(manager, 'manager-paste-photo-open');
+  await sheet.getByLabel('Message photo or screenshot').setInputFiles({ name: 'whatsapp.png', mimeType: 'image/png', buffer: SCREENSHOT_PNG });
+  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByLabel("Customer's message")).toHaveCount(0);
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await shot(manager, 'manager-paste-photo-filled');
+  await close();
+
+  // 2. A screenshot pasted into the box fills the form the same way.
+  sheet = await open();
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
+  const box = sheet.getByLabel("Customer's message");
+  await box.evaluate((el, b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, SCREENSHOT_PNG.toString('base64'));
+  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await close();
+
+  // 3. One tap on Paste message with a copied screenshot: no box, the form fills at once.
+  await manager.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
+  }, SCREENSHOT_PNG.toString('base64'));
+  sheet = await open();
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
+  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByLabel("Customer's message")).toHaveCount(0);
+  await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
+  await context.close();
+});
+
 test('calendar shows the month, and a new order from it warns about a nearby order', async ({ browser }) => {
   const context = await newContext(browser, { deviceScaleFactor: 1, viewport: { width: 390, height: 844 } });
   const manager = await openScreen(context, '/manager/catering');

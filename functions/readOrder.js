@@ -43,10 +43,10 @@ export const ScannedOrder = z.object({
     .describe('Fields that were hard to read or that you had to guess'),
 });
 
-const SYSTEM = `You read catering orders for Tabla, an Indian restaurant, and copy them into a form. An order is either a photo of a handwritten or printed paper, or a text message or email a customer sent, pasted as is.
+const SYSTEM = `You read catering orders for Tabla, an Indian restaurant, and copy them into a form. An order is either a photo of a handwritten or printed paper, a text message or email a customer sent (pasted as is), or a screenshot or photo of such a message or chat.
 Rules:
 - Copy only what is written. Never invent a name, phone number, address or item. Leave a field empty when it is not in the order.
-- A pasted message may hold a whole chat, greetings or signatures. Use only what describes the order; a name or phone number in a signature counts.
+- A pasted message or a screenshot may hold a whole chat, greetings or signatures. Use only what describes the order; a name or phone number in a signature counts.
 - Work out relative dates ("tomorrow", "Sat", "12/5") from today's date given below. Dates are US style (month/day).
 - Times like "5", "5pm" or "17:00" become 24-hour HH:MM. A lunch or dinner time with no am/pm is pm unless it reads like a morning time.
 - Put each item on its own entry, split into dish, quantity, unit and note.

@@ -25,8 +25,10 @@ test('a double tap on Paste message reads the copied message once', async ({ bro
   await page.evaluate(() => {
     const w = window as unknown as { reads: number };
     w.reads = 0;
-    const read = navigator.clipboard.readText.bind(navigator.clipboard);
-    navigator.clipboard.readText = () => (w.reads++, read());
+    const readText = navigator.clipboard.readText.bind(navigator.clipboard);
+    navigator.clipboard.readText = () => (w.reads++, readText());
+    const read = navigator.clipboard.read.bind(navigator.clipboard);
+    navigator.clipboard.read = () => (w.reads++, read());
   });
   await page.evaluate(() => navigator.clipboard.writeText('2 full tray chicken biryani, 50 pcs samosa, Saturday 6 pm. Ramesh 480-555-0199'));
   await page.getByRole('button', { name: '+ New order' }).click();

@@ -40,6 +40,7 @@
 .c-scan-btn.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .c-scan-btn:disabled { cursor: progress; opacity: 0.7; }
 .c-paste { display: flex; flex-direction: column; gap: 8px; }
+.c-scan-row .c-paste-fill { flex: 1 1 140px; width: auto; }
 .c-paste-box { min-height: 120px; resize: vertical; font: inherit; }
 .c-scan-note { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .c-check { color: var(--warn); font-size: 0.88rem; font-weight: 500; }
