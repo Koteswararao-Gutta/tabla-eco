@@ -21,16 +21,25 @@ Any TV screen (TV 1 to TV 5) can run on any of the TV devices; you pick it when 
 2. **Time zone: Arizona (Phoenix).** Settings > Date & time (Fire TV: Settings > Preferences > Time zone). Automatic time ON, time zone "Phoenix" / "Mountain Standard Time (Arizona)". Not "Denver" (Arizona has no daylight saving).
 3. Check for system updates. The web viewer updates separately: on a Google TV box or the tablet, update **Android System WebView** (and Chrome) in the Play Store; on Fire TV it comes with the system update.
 
+## Quick version (any TV device)
+
+1. Turn on developer options and **ADB debugging** (Fire TV) / **USB debugging** (Google TV), and allow installs from **Downloader** (steps below).
+2. In Downloader, type `koteswararao-gutta.github.io/tabla-eco/tabla.apk`, Install, Open.
+3. Pick the screen (TV 1 to TV 5). The TV asks **"Allow USB debugging?"**: tick **Always allow from this computer** and press **OK**.
+4. A note says "Tabla is set up". Done: it opens by itself when the TV turns on, and installs its own updates at night with no questions. Never install it again.
+
+Leave ADB / USB debugging **on**: Tabla uses it to install its updates quietly. If a TV ever shows "Allow USB debugging?" when nobody is setting it up, press **Cancel**.
+
 ## Google TV box
 
-1. **Allow the install:** Settings > System > About > click "Android TV OS build" 7 times (turns on developer options). Then Settings > Apps > Security & restrictions > Unknown sources: turn on for the app you download with (Downloader from the Play Store is easiest).
-2. **Install:** open Downloader, type the download address above, install, Open.
-3. **Choose the screen** (TV 1 to TV 5). The bottom of this page shows "Web viewer: Chrome N". If it shows a red "too old" warning, update **Android System WebView** in the Play Store and restart.
-4. **Auto-start:** on the same page press "Allow auto-start" and turn on "Display over other apps" for Tabla (or Settings > Apps > Special app access > Display over other apps). If the box has no such setting, use a computer with adb (as for Fire TV below): `adb connect <box-ip>:5555`, then `adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow`.
-5. **Automatic updates:** on the same page press "Allow automatic updates" and turn it on for Tabla (Settings > Apps > Special app access > Install unknown apps > Tabla). The button is gone once it is allowed.
-6. **Tabla as the home app (optional, best):** if pressing Home shows "Choose a home app", pick Tabla > Always. Most Google TV boxes don't ask; then, from a computer with adb: `adb shell cmd package set-home-activity com.tabla.tv/.MainActivity`. To undo it, uninstall Tabla.
-7. **Never sleep:** Settings > System > Energy (or Power & energy) > "Turn off display" / "When inactive": Never. Settings > System > Ambient mode (screensaver): Off.
-8. **On the Vizio:** Settings > System > Power Mode: Quick Start. Turn off Sleep Timer, Auto Power Off and any Eco / energy-saving mode. Keep CEC on (System > CEC) so the Vizio remote turns both on together.
+1. **Developer options:** Settings > System > About > click "Android TV OS build" 7 times. Then Settings > System > Developer options: turn on **USB debugging**.
+2. **Downloader:** install "Downloader" (by AFTVnews) from the Play Store. Settings > Apps > Security & restrictions > Unknown sources > Downloader: ON.
+3. **Install:** open Downloader, type the download address above, Install, Open.
+4. **Choose the screen** and answer the "Allow USB debugging?" question as in the quick version. Tabla gives itself auto-start, automatic updates and becomes the home app (Home leads back to it).
+   If the note says it couldn't finish (some newer boxes don't offer this), press Back 5 times, then "Allow auto-start" (turn on "Display over other apps" for Tabla) and "Allow automatic updates". On Android 12+ boxes updates are quiet anyway.
+5. Check the "Web viewer" line at the bottom of the chooser. If it shows a red "too old" warning, update **Android System WebView** in the Play Store and restart.
+6. **Never sleep:** Settings > System > Energy (or Power & energy) > "Turn off display" / "When inactive": Never. Settings > System > Ambient mode (screensaver): Off.
+7. **On the Vizio:** Settings > System > Power Mode: Quick Start. Turn off Sleep Timer, Auto Power Off and any Eco / energy-saving mode. Keep CEC on (System > CEC) so the Vizio remote turns both on together.
 
 ## Fire TV Stick
 
@@ -40,14 +49,9 @@ Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself whe
 
 1. **Developer options:** Settings > My Fire TV > About > click the device name 7 times. Then My Fire TV > Developer options: turn on **ADB debugging**.
 2. **Downloader:** search for "Downloader" (by AFTVnews) and install it. Settings > My Fire TV > Developer options > Install unknown apps > Downloader: ON.
-3. **Install:** in Downloader, type the download address above, Install, Open. Choose the screen. Check the "Web viewer" line (see above; on Fire TV, update with My Fire TV > About > Check for updates).
-4. **Auto-start (needed):** Fire TV hides "Display over other apps", so grant it from a computer on the same Wi-Fi. Find the IP in My Fire TV > About > Network, then:
-   ```
-   adb connect <fire-tv-ip>:5555
-   adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow
-   ```
-   Accept the "Allow USB debugging?" prompt on the TV the first time.
-   **Automatic updates:** Settings > My Fire TV > Developer options > Install unknown apps > **Tabla**: ON.
+3. **Install:** in Downloader, type the download address above, Install, Open.
+4. **Choose the screen** and answer "Allow USB debugging?" (tick Always allow, OK). Tabla gives itself auto-start and quiet updates; no computer needed. Check the "Web viewer" line (update with My Fire TV > About > Check for updates).
+   Only if that fails and keeps failing: from a computer on the same Wi-Fi, `adb connect <fire-tv-ip>:5555` then `adb shell appops set com.tabla.tv SYSTEM_ALERT_WINDOW allow` (IP in My Fire TV > About > Network).
 5. **Never sleep:** Settings > Display & Sounds (or Display & Audio) > Screensaver: Start time **Never**, Sleep **Never**. Turn off any "Energy saver" / auto power-off. Settings > Display & Sounds > Power Controls / HDMI CEC Device Control: ON.
 6. **On the TV itself:** turn off its own sleep timer, auto power-off and eco mode.
 
@@ -103,7 +107,7 @@ See [backups.md](backups.md): turn them on once, and how to get back a lost orde
 
 - **Menus, pictures, music, orders:** change them in the Manager app; the screens show them right away.
 - **The web app:** updates by itself. The kitchen tablet picks up a new version within a few minutes when nobody is using it; phones when the app is opened again; TVs reload once a night after 4 AM (or as soon as they are on again).
-- **The screen app (`tabla.apk`):** updates itself. TVs and the kitchen tablet install a new version only between 3 and 5 AM, so leave them on overnight; phones may update any time. The screen goes dark for a few seconds and Tabla opens again on the same screen. On newer Android (12+) this is silent after the first update. On Fire TV and older Android a box asks "Do you want to install an update?" at that time; nobody is there to press **Install**, so it asks again the next night. To update such a screen during the day, download and install `tabla.apk` again the same way as the first time. The screen chooser (Back 5 times) shows the installed version as "Tabla app: 1.N".
+- **The screen app (`tabla.apk`):** updates itself. TVs and the kitchen tablet install a new version only between 3 and 5 AM, so leave them on overnight; phones may update any time. The screen goes dark for a few seconds and Tabla opens again on the same screen. On a TV that Tabla set up itself (ADB / USB debugging on, "Allow USB debugging?" answered once) this is always silent. Without that, newer Android (12+) is silent after the first update, while Fire TV and older Android show "Install update?" at night, which nobody answers; then turn debugging on and choose the screen again (Back 5 times) to fix it for good. The screen chooser shows the installed version as "Tabla app: 1.N".
 - Copies installed before automatic updates existed (versions below 1.1000) must be updated by hand once: download and install again the same way. If Android says the app "conflicts" with an installed one (only for an early test copy), uninstall Tabla first, then install and choose the screen again.
 
 ## 24-hour test before opening day

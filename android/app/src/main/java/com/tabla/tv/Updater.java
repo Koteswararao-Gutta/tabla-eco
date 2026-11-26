@@ -81,7 +81,39 @@ public class Updater extends BroadcastReceiver {
         SharedPreferences p = prefs(app);
         if (p.getInt("updateAskedFor", 0) == latest
             && System.currentTimeMillis() - p.getLong("updateAskedAt", 0) < ASK_AGAIN_MS) return;
+        if (SelfSetup.adbReady(app) && Build.VERSION.SDK_INT >= 24 && installThroughAdb(app, latest)) return;
         install(app, latest);
+    }
+
+    /**
+     * Fire TV and Android 11 or older would ask "Install update?" (nobody is there at 4 AM). When Tabla set
+     * itself up through ADB (SelfSetup), it installs the update that way instead: no question at all.
+     * False if ADB is off now; then the normal install (with its question) runs.
+     */
+    private static boolean installThroughAdb(Context app, int version) {
+        java.io.File apk = new java.io.File(app.getCacheDir(), "tabla-update.apk");
+        try {
+            HttpURLConnection c = open(BASE + "tabla.apk?v=" + version);
+            try (InputStream in = c.getInputStream(); OutputStream out = new java.io.FileOutputStream(apk)) {
+                byte[] buf = new byte[65536];
+                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            } finally {
+                c.disconnect();
+            }
+            try (AdbSelf adb = AdbSelf.connect("127.0.0.1", AdbSelf.PORT, app.getFilesDir(), 0);
+                 InputStream in = new java.io.FileInputStream(apk)) {
+                // Android stops Tabla while it replaces it; BootReceiver opens it again afterwards.
+                String said = adb.exec("cmd package install -r -S " + apk.length(), in);
+                return said.contains("Success");
+            }
+        } catch (AdbSelf.NotAllowed e) {
+            SelfSetup.forget(app); // the key was removed on the TV: show the setup again next time
+            return false;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            apk.delete();
+        }
     }
 
     private static int latestVersion() throws Exception {
