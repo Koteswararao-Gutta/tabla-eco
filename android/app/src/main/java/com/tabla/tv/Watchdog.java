@@ -13,8 +13,9 @@ import android.os.SystemClock;
 
 /**
  * Brings Tabla back to the front when something else is showing: when the screen turns on, when the
- * device is unlocked, and every ~5 minutes (an inexact alarm that never wakes a sleeping device, so it
- * costs almost no battery). Mainly for Fire TV, where Tabla cannot be the home app.
+ * device is unlocked, and within 30 seconds (a check every 30 seconds while Tabla's process is running).
+ * If Android has stopped the process, an alarm every ~5 minutes (never wakes a sleeping device) starts
+ * it again. Mainly for Fire TV, where Tabla cannot be the home app.
  *
  * On Android 10 and newer, an app in the background may only open itself if it has the
  * "Display over other apps" permission (the device setup guide grants it). Without it the attempt is
@@ -25,11 +26,14 @@ import android.os.SystemClock;
  */
 public class Watchdog extends BroadcastReceiver {
     static final long EVERY_MS = 5 * 60_000;
+    /** Someone pressed Home: back within this long. */
+    static final long SOON_MS = 30_000;
     static final long QUIET_MS = 30 * 60_000;
 
     /** True while MainActivity is the screen in front (set in its onResume / onPause). */
     static volatile boolean inFront;
     private static boolean screenEventsHeard;
+    private static android.os.Handler loop;
 
     /** Safe to call many times: the alarm is replaced, the screen listener is added once. */
     static void start(Context context) {
@@ -50,6 +54,15 @@ public class Watchdog extends BroadcastReceiver {
         synchronized (Watchdog.class) {
             if (screenEventsHeard) return;
             screenEventsHeard = true;
+            // The 30-second check, for as long as this process lives (the alarm above restarts it).
+            loop = new android.os.Handler(android.os.Looper.getMainLooper());
+            loop.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    bringBack(app);
+                    loop.postDelayed(this, SOON_MS);
+                }
+            }, SOON_MS);
         }
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_SCREEN_ON);
@@ -68,6 +81,11 @@ public class Watchdog extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        start(context); // after Android stopped the process: start the 30-second check again
+        bringBack(context);
+    }
+
+    private static void bringBack(Context context) {
         if (inFront) return;
         SharedPreferences p = prefs(context);
         String screen = p.getString("screen", null);

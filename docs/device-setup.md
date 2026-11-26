@@ -43,7 +43,7 @@ Leave ADB / USB debugging **on**: Tabla uses it to install its updates quietly. 
 
 ## Fire TV Stick
 
-Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself when the TV turns on, and within up to 10 minutes if someone leaves it.
+Fire TV cannot use Tabla as its home app. Instead Tabla comes back by itself when the TV turns on, and within 30 seconds if someone leaves it.
 
 **Check the model first:** the newest Fire TV Sticks running **Vega OS** (for example Fire TV Stick 4K Select) are not Android and cannot install `tabla.apk`. Use an Android-based Fire TV Stick or a Google TV box instead.
 
@@ -101,7 +101,7 @@ See [backups.md](backups.md): turn them on once, and how to get back a lost orde
 
 - **Press Back 5 times quickly** (within 3 seconds). The "Which screen is this?" page opens. From there you can pick a different screen, allow auto-start, or press **Open device settings**.
 - While that page has been opened, Tabla waits 30 minutes before pulling itself back to the front, so you have time in settings.
-- On Fire TV, Home also leaves Tabla; it comes back within up to 10 minutes, or when the TV is turned off and on.
+- On Fire TV, Home also leaves Tabla; it comes back within 30 seconds, or when the TV is turned off and on.
 
 ## Updates
 
@@ -117,7 +117,7 @@ Leave every screen running for a full day and tick each one:
 - [ ] Each screen shows the right thing (TV 1 left, TV 2 right, TV 3/4 mirror, TV 5 music, kitchen).
 - [ ] Pull the power plug, plug it back in: the screen comes back by itself (no remote).
 - [ ] Turn the TV off and on with its remote: the screen comes back.
-- [ ] Press Home: Tabla comes back (straight away on Google TV/tablet, within up to 10 minutes on Fire TV).
+- [ ] Press Home: Tabla comes back (straight away on Google TV/tablet, within 30 seconds on Fire TV).
 - [ ] Unplug the internet router for 10 minutes: screens keep showing; they catch up after it is back.
 - [ ] Change a menu picture in the Manager app: all menu TVs show it.
 - [ ] TV 5 plays music with sound; a catering clip shows between songs.

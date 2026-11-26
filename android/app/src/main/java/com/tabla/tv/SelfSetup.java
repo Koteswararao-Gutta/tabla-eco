@@ -51,6 +51,7 @@ final class SelfSetup {
     static void run(Context context, String screen, Done done) {
         Context app = context.getApplicationContext();
         Handler main = new Handler(Looper.getMainLooper());
+        Watchdog.quiet(app, true); // the "Allow USB debugging?" box must not be covered while someone reads it
         new Thread(() -> {
             String message;
             try (AdbSelf adb = AdbSelf.connect("127.0.0.1", AdbSelf.PORT, app.getFilesDir(), 90_000)) {
@@ -73,6 +74,7 @@ final class SelfSetup {
                 message = "Setup could not finish (" + e.getClass().getSimpleName() + "). Press Back 5 times and choose the screen again.";
             }
             final String m = message;
+            Watchdog.quiet(app, false);
             main.post(() -> done.done(m));
         }, "tabla-setup").start();
     }
