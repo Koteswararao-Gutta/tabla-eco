@@ -39,6 +39,23 @@ test('a double tap on Paste message reads the copied message once', async ({ bro
   await context.close();
 });
 
+test('a refused clipboard opens the paste box without asking a second time', async ({ browser }) => {
+  const { context, page } = await phone(browser);
+  // As on iPhone when the Paste bubble is dismissed: read() is refused, and readText() must not pop up another bubble.
+  await page.evaluate(() => {
+    const w = window as unknown as { textReads: number };
+    w.textReads = 0;
+    navigator.clipboard.read = () => Promise.reject(new DOMException('Refused', 'NotAllowedError'));
+    navigator.clipboard.readText = () => (w.textReads++, Promise.reject(new DOMException('Refused', 'NotAllowedError')));
+  });
+  await page.getByRole('button', { name: '+ New order' }).click();
+  const sheet = page.getByRole('dialog', { name: 'New order' });
+  await sheet.getByRole('button', { name: 'Paste message' }).click();
+  await expect(sheet.getByLabel("Customer's message")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { textReads: number }).textReads)).toBe(0);
+  await context.close();
+});
+
 /** Adds one open order for today (5 PM) with an amount, and reloads. */
 async function addOrder(page: Page, id: string, name: string, deposit = false) {
   await page.evaluate(

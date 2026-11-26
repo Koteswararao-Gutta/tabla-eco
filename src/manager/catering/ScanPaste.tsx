@@ -15,7 +15,8 @@ type Props = {
 };
 
 export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
-  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; from?: ScanFrom; message?: string }>({ state: 'idle' });
+  // `pasted`: a picture that came through Paste message (a copied screenshot), not Scan paper.
+  const [scan, setScan] = useState<{ state: 'idle' | 'reading' | 'done' | 'failed'; from?: ScanFrom; pasted?: boolean; message?: string }>({ state: 'idle' });
   const [pasting, setPasting] = useState(false);
   const [pasted, setPastedText] = useState('');
   const setPasted = (t: string) => {
@@ -26,25 +27,30 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
   // Set at once (before the button greys out), so a double tap never reads the same message twice:
   // each read costs a little and counts toward the day's limit.
   const busy = useRef(false);
-  const fillFrom = async (from: ScanFrom, read: () => Promise<ScannedOrder>) => {
+  const fillFrom = async (from: ScanFrom, read: () => Promise<ScannedOrder>, pasted = from === 'message') => {
     busy.current = true;
-    setScan({ state: 'reading', from });
+    setScan({ state: 'reading', from, pasted });
     try {
       const got = await read();
       if (!got.isOrder) {
-        const message = from === 'photo' ? "This photo doesn't look like an order. Please try another photo." : "This message doesn't look like an order. Please check what you pasted.";
-        return setScan({ state: 'failed', from, message });
+        const message =
+          from === 'message'
+            ? "This message doesn't look like an order. Please check what you pasted."
+            : pasted
+              ? "This picture doesn't look like an order. Please try another one."
+              : "This photo doesn't look like an order. Please try another photo.";
+        return setScan({ state: 'failed', from, pasted, message });
       }
       onFilled(got, from);
-      setScan({ state: 'done', from });
+      setScan({ state: 'done', from, pasted });
       setPasting(false);
     } catch (e) {
-      setScan({ state: 'failed', from, message: e instanceof Error ? e.message : `Couldn't read the ${from}.` });
+      setScan({ state: 'failed', from, pasted, message: e instanceof Error ? e.message : `Couldn't read the ${from}.` });
     } finally {
       busy.current = false;
     }
   };
-  const scanPhoto = (photo: Blob | undefined) => photo && !busy.current && fillFrom('photo', () => store.readOrderPhoto(photo));
+  const scanPhoto = (photo: Blob | undefined, pasted = false) => photo && !busy.current && fillFrom('photo', () => store.readOrderPhoto(photo), pasted);
   const readPasted = (text = pasted) => {
     if (busy.current) return;
     if (text.trim().length < 5) return setScan({ state: 'failed', from: 'message', message: 'Please paste the customer’s message first.' });
@@ -67,7 +73,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
     }
     busy.current = false;
     if (copied.trim().length < 5 && picture) {
-      scanPhoto(picture);
+      scanPhoto(picture, true);
     } else if (copied.trim().length >= 5) {
       setPasted(copied);
       readPasted(copied);
@@ -76,10 +82,12 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
     }
   };
 
+  const reading = (from: ScanFrom, pasted: boolean) => scan.state === 'reading' && scan.from === from && !!scan.pasted === pasted;
+
   return (
     <div className="c-scan">
       <div className="c-scan-row">
-        <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
+        <label className={'t-btn block c-scan-btn' + (reading('photo', false) ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
           <input
             type="file"
             accept="image/*"
@@ -91,7 +99,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
               e.target.value = '';
             }}
           />
-          {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : 'Scan paper'}
+          {reading('photo', false) ? 'Reading…' : 'Scan paper'}
         </label>
         <button
           type="button"
@@ -100,7 +108,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
           aria-expanded={pasting}
           onClick={() => (pasting ? setPasting(false) : openPaste())}
         >
-          {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : 'Paste message'}
+          {scan.state === 'reading' && scan.pasted ? 'Reading…' : 'Paste message'}
         </button>
       </div>
       {pasting && (
@@ -118,7 +126,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
               const picture = pastedPicture(e.clipboardData);
               if (picture && !e.clipboardData.getData('text').trim()) {
                 e.preventDefault();
-                scanPhoto(picture);
+                scanPhoto(picture, true);
                 return;
               }
               const text = e.clipboardData.getData('text').slice(0, 8000);
@@ -129,7 +137,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
             }}
           />
           <div className="c-scan-row">
-            <label className={'t-btn block c-scan-btn' + (scan.state === 'reading' && scan.from === 'photo' ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
+            <label className={'t-btn block c-scan-btn' + (reading('photo', true) ? ' busy' : '')} aria-disabled={scan.state === 'reading'}>
               <input
                 type="file"
                 accept="image/*"
@@ -137,11 +145,11 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
                 disabled={scan.state === 'reading'}
                 aria-label="Message photo or screenshot"
                 onChange={(e) => {
-                  scanPhoto(e.target.files?.[0]);
+                  scanPhoto(e.target.files?.[0], true);
                   e.target.value = '';
                 }}
               />
-              {scan.state === 'reading' && scan.from === 'photo' ? 'Reading…' : 'Photo or screenshot'}
+              {reading('photo', true) ? 'Reading…' : 'Photo or screenshot'}
             </label>
             <button type="button" className="t-btn primary block c-paste-fill" disabled={scan.state === 'reading'} onClick={() => readPasted()}>
               {scan.state === 'reading' && scan.from === 'message' ? 'Reading…' : 'Fill the form'}
@@ -151,7 +159,7 @@ export function ScanPaste({ onFilled, saveLabel, onPending }: Props) {
       )}
       {scan.state === 'done' && (
         <p className="c-scan-note" role="status">
-          Filled in from the {scan.from === 'message' ? 'message' : 'photo'}. Please check every field, then tap {saveLabel}.
+          Filled in from the {scan.from === 'message' ? 'message' : scan.pasted ? 'picture' : 'photo'}. Please check every field, then tap {saveLabel}.
         </p>
       )}
       {scan.state === 'failed' && (
@@ -188,8 +196,10 @@ async function readClipboard(): Promise<{ text: string; picture?: Blob }> {
         if (type) return { text: '', picture: await item.getType(type) };
       }
       return { text: '' };
-    } catch {
-      /* some browsers allow only readText: try that */
+    } catch (e) {
+      // Refused (the Paste bubble was dismissed, or the phone said no): asking again with readText
+      // would only pop up a second Paste bubble on iPhone. Other errors: some browsers allow only readText.
+      if ((e as Error)?.name === 'NotAllowedError') throw e;
     }
   }
   return { text: (await clip?.readText?.()) ?? '' };
