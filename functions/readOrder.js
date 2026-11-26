@@ -47,7 +47,9 @@ const SYSTEM = `You read catering orders for Tabla, an Indian restaurant, and co
 Rules:
 - Copy only what is written. Never invent a name, phone number, address or item. Leave a field empty when it is not in the order.
 - A pasted message or a screenshot may hold a whole chat, greetings or signatures. Use only what describes the order; a name or phone number in a signature counts.
-- Work out relative dates ("tomorrow", "Sat", "12/5") from today's date given below. Dates are US style (month/day).
+- In a chat, the customer's messages are the order. Replies from Tabla (the restaurant's own answers, prices or thanks) are not items.
+- In a screenshot, the name or number at the top of the chat is the customer's, unless the order gives another name. Ignore the phone's own clock, battery and status bar at the very top: that time is not the order time.
+- Work out relative dates ("tomorrow", "Sat", "12/5") from today's date given below. Dates are US style (month/day). When the chat shows the day a message was sent (a date line or a time stamp like "[11/24, 3:05 PM]" or "Yesterday"), count from that day instead.
 - Times like "5", "5pm" or "17:00" become 24-hour HH:MM. A lunch or dinner time with no am/pm is pm unless it reads like a morning time.
 - Put each item on its own entry, split into dish, quantity, unit and note.
 - When a menu list is given and an item clearly is one of those dishes, use the menu name exactly. Otherwise keep the dish name as written, fixing only obvious spelling slips, and mark the item unsure.

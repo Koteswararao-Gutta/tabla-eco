@@ -671,7 +671,7 @@ test('paste message takes a screenshot too: picked, pasted, or copied', async ({
   await expect(sheet.getByText('Photo or screenshot')).toBeVisible();
   await shot(manager, 'manager-paste-photo-open');
   await sheet.getByLabel('Message photo or screenshot').setInputFiles({ name: 'whatsapp.png', mimeType: 'image/png', buffer: SCREENSHOT_PNG });
-  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByText('Filled in from the picture.')).toBeVisible();
   await expect(sheet.getByLabel("Customer's message")).toHaveCount(0);
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
   await shot(manager, 'manager-paste-photo-filled');
@@ -687,7 +687,7 @@ test('paste message takes a screenshot too: picked, pasted, or copied', async ({
     dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   }, SCREENSHOT_PNG.toString('base64'));
-  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByText('Filled in from the picture.')).toBeVisible();
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
   await close();
 
@@ -698,7 +698,7 @@ test('paste message takes a screenshot too: picked, pasted, or copied', async ({
   }, SCREENSHOT_PNG.toString('base64'));
   sheet = await open();
   await sheet.getByRole('button', { name: 'Paste message' }).click();
-  await expect(sheet.getByText('Filled in from the photo.')).toBeVisible();
+  await expect(sheet.getByText('Filled in from the picture.')).toBeVisible();
   await expect(sheet.getByLabel("Customer's message")).toHaveCount(0);
   await expect(sheet.getByLabel('Customer name')).toHaveValue('Meera Iyer');
   await context.close();
