@@ -1,0 +1,21 @@
+name: Fill TV 1 spot 3
+# One-off (removed again right after it runs): tools/menu-pictures/fill-tv1.mjs
+on:
+  push:
+    branches: [claude/project-thread-x73hnz]
+    paths: [tools/menu-pictures/fill-tv1.mjs]
+permissions:
+  contents: read
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install --no-save --no-audit --no-fund firebase-admin@14.5.1
+        working-directory: tools/menu-pictures
+      - run: node tools/menu-pictures/fill-tv1.mjs
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
