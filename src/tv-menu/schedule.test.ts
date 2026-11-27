@@ -33,9 +33,28 @@ describe('targetFor', () => {
     expect(targetFor(slots, screens, null, 'tv4', base).pictureId).toBe('a2');
   });
 
-  it('a menu slot with no picture for this TV shows nothing (idle)', () => {
+  it('a menu slot with no picture for this TV shows its own next picture again, never the partner\'s', () => {
     const t = targetFor(slots, screens, null, 'tv2', base + 10_000);
-    expect(t).toMatchObject({ slotId: 'b', pictureId: null, key: 'b|' });
+    expect(t).toMatchObject({ slotId: 'b', pictureId: 'a2', key: 'b|a2' });
+    expect(targetFor(slots, screens, null, 'tv2', base).nextPictureId).toBe('a2');
+  });
+
+  it('TV 1 with 2 menus and TV 2 with 3: TV 1 shows its first menu again in spot 3', () => {
+    const three = [
+      slot('m1', 1, 15, { pictures: { tv1: 'breads', tv2: 'nonveg' } }),
+      slot('m2', 2, 15, { pictures: { tv1: 'indoasian', tv2: 'entrees' } }),
+      slot('m3', 3, 15, { pictures: { tv2: 'chaat' } }),
+    ];
+    const b = 45_000 * 1000;
+    expect(targetFor(three, screens, null, 'tv1', b + 30_000)).toMatchObject({ slotId: 'm3', pictureId: 'breads' });
+    expect(targetFor(three, screens, null, 'tv3', b + 30_000)).toMatchObject({ slotId: 'm3', pictureId: 'breads' });
+    expect(targetFor(three, screens, null, 'tv1', b + 15_000).nextPictureId).toBe('breads');
+    expect(targetFor(three, screens, null, 'tv2', b + 30_000).pictureId).toBe('chaat');
+  });
+
+  it('a TV with no picture anywhere stays idle', () => {
+    const onlyTv1 = [slot('a', 1, 10, { pictures: { tv1: 'a1' } })];
+    expect(targetFor(onlyTv1, screens, null, 'tv2', base)).toMatchObject({ slotId: 'a', pictureId: null });
   });
 
   it('a spot with only a TV 3 picture never shows on TV 1 / TV 2', () => {
@@ -47,7 +66,7 @@ describe('targetFor', () => {
     const b3 = 25_000 * 1000;
     expect(targetFor(withThree, own, null, 'tv3', b3)).toMatchObject({ slotId: 'a', pictureId: 'a1' });
     expect(targetFor(withThree, own, null, 'tv3', b3 + 15_000)).toMatchObject({ slotId: 'c', pictureId: 'c3' });
-    expect(targetFor(withThree, own, null, 'tv4', b3 + 15_000)).toMatchObject({ slotId: 'c', pictureId: null });
+    expect(targetFor(withThree, own, null, 'tv4', b3 + 15_000)).toMatchObject({ slotId: 'c', pictureId: 'a2' });
   });
 
   it('nothing playing gives an empty target', () => {

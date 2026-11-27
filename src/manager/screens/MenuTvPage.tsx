@@ -220,7 +220,7 @@ function addHint(tv: ScreenId, kind: Kind): string {
   const other = partner ? screenName(partner) : 'The other TV';
   const mainsSame = MAIN_OF[tv] ? ' TV 1 and TV 2 don\'t change.' : '';
   return (kind === 'menu'
-    ? `${screenName(tv)} shows it right away, then in this spot in the loop. ${other} shows the restaurant name in this spot until you add its picture.`
+    ? `${screenName(tv)} shows it right away, then in this spot in the loop. ${other} shows its own next picture again in this spot until you add one.`
     : `It shows right away, then in this spot in the loop. ${other} shows it too until you add a picture for ${other}.`) + mainsSame;
 }
 

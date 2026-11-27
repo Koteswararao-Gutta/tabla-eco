@@ -1,5 +1,5 @@
 // Pure helpers for the menu TV: what to show and when to look again.
-import { loopPosition, loopSlots, pictureFor } from '@shared/clock/loop';
+import { activeSlots, loopPosition, loopSlots, pictureFor } from '@shared/clock/loop';
 import type { LoopAnchor, Screen, ScreenId, Slot, Transition } from '@shared/data';
 
 /** Small margin after a boundary so the timer never wakes a hair too early. */
@@ -25,16 +25,35 @@ export function targetFor(
   screenId: ScreenId,
   now: number,
 ): Target {
-  const pos = loopPosition(loopSlots(slots, screenId, screens), now, loop);
+  const mine = loopSlots(slots, screenId, screens);
+  const pos = loopPosition(mine, now, loop);
   if (!pos) return { key: 'none', slotId: null, pictureId: null, transition: 'fade', nextPictureId: null };
-  const pictureId = pictureFor(pos.slot, screenId, screens);
+  const order = activeSlots(mine, now);
+  const pictureId = shownIn(pos.slot, order, screenId, screens);
   return {
     key: pos.slot.id + '|' + (pictureId ?? ''),
     slotId: pos.slot.id,
     pictureId,
     transition: pos.slot.transition ?? 'fade',
-    nextPictureId: pictureFor(pos.next, screenId, screens),
+    nextPictureId: shownIn(pos.next, order, screenId, screens),
   };
+}
+
+/**
+ * The picture this TV shows in a slot. When one TV of a pair has fewer pictures than the other (a menu spot
+ * with nothing for this TV), it shows its own next picture in play order again instead of the name screen.
+ * It never borrows the partner's menu picture. Null only when this TV has no picture anywhere in the loop.
+ */
+export function shownIn(slot: Slot, order: readonly Slot[], screenId: ScreenId, screens: readonly Screen[]): string | null {
+  const own = pictureFor(slot, screenId, screens);
+  if (own) return own;
+  const at = order.findIndex((s) => s.id === slot.id);
+  if (at < 0) return null;
+  for (let step = 1; step < order.length; step++) {
+    const pic = pictureFor(order[(at + step) % order.length], screenId, screens);
+    if (pic) return pic;
+  }
+  return null;
 }
 
 /** Milliseconds until the picture could next change: the end of the current slot,
