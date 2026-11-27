@@ -24,3 +24,14 @@ test('app fails to start: grey message on black after 20 s', async ({ page }) =>
   await page.clock.resume(); // let the page paint for the screenshot
   await page.screenshot({ path: 'test-results/boot-fail-tv.png' });
 });
+
+test('a TV that failed to start tries again by itself a minute later', async ({ page }) => {
+  await page.route(/\/assets\/.*\.js$/, (route) => route.abort());
+  await page.clock.install();
+  await page.goto('/#/tv/2');
+  await page.clock.runFor(21_000);
+  await expect(page.getByText(MESSAGE)).toBeInViewport();
+  const reloaded = page.waitForEvent('framenavigated');
+  await page.clock.runFor(61_000);
+  await reloaded;
+});

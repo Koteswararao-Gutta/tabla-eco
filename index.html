@@ -60,7 +60,13 @@
     <script>
       setTimeout(function () {
         var root = document.getElementById('root');
-        if (root && !root.firstChild) { document.getElementById('boot-fail').hidden = false; document.getElementById('boot-wait').style.display = 'none'; }
+        if (root && !root.firstChild) {
+          document.getElementById('boot-fail').hidden = false;
+          document.getElementById('boot-wait').style.display = 'none';
+          // A screen nobody touches (TVs, kitchen) tries again by itself every minute, e.g. after the Wi-Fi
+          // was down when it reloaded, instead of showing this message until someone restarts it.
+          if (/^#\/(tv|kitchen)/.test(location.hash)) setTimeout(function () { location.reload(); }, 60000);
+        }
       }, 20000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
