@@ -1,0 +1,26 @@
+name: Fetch ad videos (one-off)
+# One-off, approved by the owner on 2026-11-27: copies the two catering ad videos from Higgsfield into
+# public/ads/ on this branch (checked against their SHA-256), then removes itself.
+on:
+  push:
+    branches: [claude/project-thread-mn3nya]
+    paths: [.github/workflows/fetch-ads.yml]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          set -e
+          mkdir -p public/ads
+          curl -sSfL -o public/ads/catering-left-1.mp4 "https://d2ol7oe51mr4n9.cloudfront.net/user_3MgCBcaEE3m6GfZyMTnv6Stez9y/17da4819-dac9-40e7-9283-b01d121750e8.mp4"
+          curl -sSfL -o public/ads/catering-right-1.mp4 "https://d2ol7oe51mr4n9.cloudfront.net/user_3MgCBcaEE3m6GfZyMTnv6Stez9y/258040d3-aebe-4685-810c-9591f2e8b80b.mp4"
+          printf '%s\n' "67c5be9894020d3566a39c0eceda080d439faf3aa1bc5b8c77fe47092561c33f  public/ads/catering-left-1.mp4" "79c47cf2e64ea61c724fff7294cb1506a36395f4010881bf8e1b8d667f1aef69  public/ads/catering-right-1.mp4" | sha256sum -c
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/fetch-ads.yml
+          git add public/ads
+          git commit -m "Add the two catering ad videos (15 s, 1920x1080)"
+          git push
