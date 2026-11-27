@@ -23,6 +23,17 @@ export interface Picture {
   width: number;
   height: number;
   createdAt: number;
+  /** Set when this picture stands for a video (an ad): menu TVs play the video in this picture's spot and
+   *  show the picture itself while it loads or if it can't play. Missing or null: a plain picture. */
+  video?: PictureVideo | null;
+}
+
+/** A video shipped with the site (public/ads/). The file name carries a version, so it is never changed in place. */
+export interface PictureVideo {
+  /** Path from the site's top folder, e.g. "ads/catering-left-1.mp4". */
+  src: string;
+  /** true: play with sound through the TV's speaker. false: always muted. */
+  sound: boolean;
 }
 
 /**

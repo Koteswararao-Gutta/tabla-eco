@@ -80,6 +80,7 @@ type Open =
 function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slots: S[]; screens: Screen[]; now: number; readOnly?: boolean }) {
   const [open, setOpen] = useState<Open>(null);
   const close = () => setOpen(null);
+  const pictures = useCollection('pictures');
   // Only the spots this TV plays: TV 1 and TV 2 never list spots that exist only on TV 3 / TV 4.
   const sorted = sortSlots(loopSlots(slots, tv, screens));
   const name = screenName(tv);
@@ -114,8 +115,10 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           const ended = slot.endsAt != null && slot.endsAt <= now;
           const kind = slot.kind ?? 'menu';
           const inner = <StoredPicture id={shown} alt={`Picture ${i + 1}`} />;
+          const video = shown ? pictures?.find((p) => p.id === shown)?.video : null;
           const badges = (
             <>
+              {video && <span className="t-badge" data-testid="video-badge">{video.sound ? 'Video with sound' : 'Video'}</span>}
               {kind !== 'menu' && <span className="t-badge accent">{kind === 'special' ? 'Special' : 'Catering'}</span>}
               {shared && main && shown === slot.pictures[main] ? (
                 <span className="t-badge">Same as {screenName(main)}</span>

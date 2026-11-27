@@ -51,6 +51,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Built files have the version in their name, so a cached copy never goes stale.
+  // Ad videos for the menu TVs (ads/): the file name carries a version too. Only whole-file requests are kept
+  // (the TV fetches the file in one go); a video's own range requests go straight to the network.
+  if (rel.startsWith('ads/') && !req.headers.has('range')) {
+    event.respondWith(cacheFirst(req));
+    return;
+  }
   if (rel.startsWith('assets/')) {
     event.respondWith(cacheFirst(req));
     return;
