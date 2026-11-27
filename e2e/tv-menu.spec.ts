@@ -210,3 +210,36 @@ test('a TV opened once still starts with no internet (its own code is kept for o
   await expect(tv.locator('.tvm-layer img').first()).toBeVisible();
   await context.setOffline(false);
 });
+
+test('an ad video plays in its spot, from the same point on every TV, and falls back to its picture', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  await context.route('**/ads/e2e-ad-1.webm', (r) => r.fulfill({ status: 200, contentType: 'video/webm', body: video }));
+  await context.route('**/ads/missing-1.webm', (r) => r.fulfill({ status: 404, body: '' }));
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const { tv1: left, tv2: right } = all['slot-menu-1'].pictures;
+  await control.evaluate(({ left, right }) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[left] = { ...pics[left], video: { src: 'ads/e2e-ad-1.webm', sound: true } };
+    pics[right] = { ...pics[right], video: { src: 'ads/missing-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { left, right });
+  await setLoop(control, { seconds: 30, firstSlotId: 'slot-menu-1' });
+  const [tv1, tv2, tv3] = await tvs();
+  // TV 1 and its mirror TV 3 play the video (sound is allowed to fall back to muted in a headless browser)
+  for (const tv of [tv1, tv3]) {
+    await expect(now(tv)).toHaveAttribute('data-video', 'playing');
+    await expect.poll(() => tv.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 5_000 }).toBeGreaterThan(0.2);
+  }
+  const times = await Promise.all([tv1, tv3].map((p) => p.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime)));
+  expect(Math.abs(times[0] - times[1])).toBeLessThan(0.6);
+  // TV 2's video can't load: it shows the picture instead
+  await expect(now(tv2)).toHaveAttribute('data-picture-id', right);
+  await expect(now(tv2)).toHaveAttribute('data-video', '');
+  await expect(tv2.getByTestId('menu-tv-video')).toHaveCount(0);
+  // a TV that reloads mid-spot joins the video at the same point, not from the start
+  await tv1.waitForTimeout(1_500);
+  await tv1.reload();
+  await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
+  await expect.poll(() => tv1.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(1.5);
+});

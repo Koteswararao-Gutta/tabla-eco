@@ -3,8 +3,8 @@
 // with a timer aimed at the exact end of the slot, so they switch together without talking to each other.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Idle, ScreenSurface } from '@shared/ui';
-import { store, useCollection, useHeartbeat, useSingleton, type ScreenId, type Slot, type Transition } from '@shared/data';
-import { loopSlots } from '@shared/clock/loop';
+import { store, useCollection, useHeartbeat, useSingleton, type PictureVideo, type ScreenId, type Slot, type Transition } from '@shared/data';
+import { loopPosition, loopSlots } from '@shared/clock/loop';
 import { msUntilNextChange, targetFor, type Target } from './schedule';
 import './tv-menu.css';
 
@@ -20,6 +20,8 @@ interface Layer {
   pictureId: string | null;
   /** How this layer came in: the slot's transition, or none for the first picture after a (re)load. */
   anim: Transition;
+  /** Shared-clock time this slot started, so a video joins at the same point on every TV. */
+  startedAt: number;
 }
 
 /** Loads picture URLs (and decodes them) ahead of time. `undefined` = still loading, `null` = missing or broken.
@@ -57,6 +59,60 @@ function usePictures(ids: (string | null)[], retry: number) {
   return { urls, broken };
 }
 
+/** Loads the videos ahead of time into memory (a blob), so they start at once and play without the internet
+ *  (the service worker keeps the file too, for a reload while offline). `undefined` = loading, `null` = failed:
+ *  the TV then shows the picture instead. A failure is asked again on the next slot change, like pictures. */
+function useVideos(videos: (PictureVideo | null | undefined)[], retry: number) {
+  const [urls, setUrls] = useState<Record<string, string | null>>({});
+  const asked = useRef(new Set<string>());
+  const key = videos.map((v) => v?.src ?? '').join('|');
+  useEffect(() => {
+    for (const v of videos) {
+      const src = v?.src;
+      if (!src || asked.current.has(src)) continue;
+      asked.current.add(src);
+      fetch(new URL(src, location.href).href)
+        .then((r) => (r.ok ? r.blob() : null))
+        .then((b) => (b && b.size ? URL.createObjectURL(b) : null))
+        .catch(() => null)
+        .then((url) => {
+          if (!url) asked.current.delete(src);
+          setUrls((m) => ({ ...m, [src]: url }));
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, retry]);
+  const broken = (src: string) => {
+    asked.current.delete(src);
+    setUrls((m) => ({ ...m, [src]: null }));
+  };
+  return { videoUrls: urls, videoBroken: broken };
+}
+
+/** Plays an ad video from where the slot is now (so every TV is at the same point), with sound when the
+ *  picture says so. If sound is refused it plays muted rather than not at all; if it can't play, `onFail`. */
+function AdVideo({ url, sound, startedAt, onFail }: { url: string; sound: boolean; startedAt: number; onFail: () => void }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    const start = () => {
+      const into = (store.now() - startedAt) / 1000;
+      // Joining late (a reload mid-spot): jump to the same point; past the end it stays on the last frame.
+      if (into > 0.3) v.currentTime = Math.min(into, Math.max(v.duration - 0.05, 0) || into);
+      v.play().catch(() => {
+        v.muted = true;
+        v.play().catch(onFail);
+      });
+    };
+    if (v.readyState >= 1) start();
+    else v.addEventListener('loadedmetadata', start, { once: true });
+    return () => v.removeEventListener('loadedmetadata', start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+  return <video ref={ref} className="tvm-pic tvm-video" src={url} muted={!sound} playsInline preload="auto" onError={onFail} data-testid="menu-tv-video" />;
+}
+
 export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   useHeartbeat(screenId);
   // A half-saved slot (no pictures or seconds) is skipped, never allowed to break the TV.
@@ -66,6 +122,8 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   // Only the spots this TV plays (a picture added to TV 3 alone is not a spot on TV 1).
   const mine = useMemo(() => slots && screens && loopSlots(slots, screenId, screens), [slots, screens, screenId]);
   const loop = useSingleton('loop');
+  const pictures = useCollection('pictures');
+  const videoOf = (id: string | null | undefined) => (id && pictures?.find((p) => p.id === id)?.video) || null;
   const settings = useSingleton('settings');
   const name = settings?.restaurantName || 'Tabla';
 
@@ -85,6 +143,7 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
 
   const target: Target | null = ready ? targetFor(slots!, screens!, loop ?? null, screenId, store.now()) : null;
   const { urls, broken } = usePictures([target?.pictureId ?? null, target?.nextPictureId ?? null], tick);
+  const { videoUrls, videoBroken } = useVideos([videoOf(target?.pictureId), videoOf(target?.nextPictureId)], tick);
   const resolved = !!target && (target.pictureId === null || urls[target.pictureId] !== undefined);
 
   // Switch once the new picture is ready, so the old one stays up instead of a black flash.
@@ -112,6 +171,7 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
       slotId: target.slotId,
       pictureId: target.pictureId,
       anim: shown ? target.transition : 'none',
+      startedAt: (mine && loopPosition(mine, store.now(), loop ?? null)?.startedAt) ?? store.now(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.key, canSwitch]);
@@ -126,26 +186,32 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
   const layer = (l: Layer, out: boolean) => {
     const url = urlOf(l);
     const anim = out ? (shown?.anim ?? 'none') : l.anim;
+    const video = videoOf(l.pictureId);
+    const videoUrl = video ? videoUrls[video.src] : null;
     return (
       <div key={l.n} className={`tvm-layer tvm-${out ? 'out' : 'in'}-${anim}`} aria-hidden={out || undefined}>
         {url ? (
           <img className="tvm-pic" src={url} alt="" draggable={false} onError={() => l.pictureId && broken(l.pictureId)} />
-        ) : url === null ? (
+        ) : url === null && !videoUrl ? (
           <Idle line={name} />
         ) : null}
+        {video && videoUrl && !out && <AdVideo key={videoUrl} url={videoUrl} sound={video.sound} startedAt={l.startedAt} onFail={() => videoBroken(video.src)} />}
       </div>
     );
   };
 
   const shownUrl = shown ? urlOf(shown) : undefined;
+  const shownVideo = shown ? videoOf(shown.pictureId) : null;
+  const playing = !!shownVideo && !!videoUrls[shownVideo.src];
   return (
     <ScreenSurface testId="menu-tv">
       <div
         className="tvm"
         data-testid="menu-tv-now"
-        data-state={shownUrl === undefined ? 'loading' : shownUrl ? 'picture' : 'idle'}
+        data-state={playing || shownUrl ? 'picture' : shownUrl === undefined ? 'loading' : 'idle'}
         data-slot-id={shown?.slotId ?? ''}
         data-picture-id={shownUrl ? shown!.pictureId! : ''}
+        data-video={playing ? 'playing' : ''}
       >
         {leaving && shown && leaving.n !== shown.n && layer(leaving, true)}
         {shown && layer(shown, false)}
