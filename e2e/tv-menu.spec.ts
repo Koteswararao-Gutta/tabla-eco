@@ -122,14 +122,15 @@ test('a slot change written in another window shows on the TVs', async ({ contex
   await expect(now(tv1)).toHaveAttribute('data-slot-id', 'slot-catering', { timeout: 2_000 });
 });
 
-test('no picture, a broken picture or an empty loop shows the idle look', async ({ context }) => {
+test('a missing TV picture, a broken picture or an empty loop', async ({ context }) => {
   const { control, tvs } = await openTvs(context);
   await setLoop(control, { seconds: 30, firstSlotId: 'slot-menu-1' });
   const [tv1, tv2] = await tvs();
-  // menu slot without a TV 2 picture never borrows: TV 2 is idle
-  await setLoop(control, { patch: { 'slot-menu-1': { pictures: { tv1: (await slots(control))['slot-menu-1'].pictures.tv1 } } }, firstSlotId: 'slot-menu-1' });
-  await expect(now(tv2)).toHaveAttribute('data-state', 'idle');
-  await expect(tv2.getByText('Tabla').last()).toBeVisible();
+  // menu slot without a TV 2 picture never borrows TV 1's: TV 2 shows its own next picture again
+  const before = await slots(control);
+  await setLoop(control, { patch: { 'slot-menu-1': { pictures: { tv1: before['slot-menu-1'].pictures.tv1 } } }, firstSlotId: 'slot-menu-1' });
+  await expect(now(tv2)).toHaveAttribute('data-slot-id', 'slot-menu-1');
+  await expect(now(tv2)).toHaveAttribute('data-picture-id', before['slot-menu-2'].pictures.tv2);
   // broken picture
   await setLoop(control, { patch: { 'slot-menu-1': { pictures: { tv1: 'no-such-picture' } } }, firstSlotId: 'slot-menu-1' });
   await expect(now(tv1)).toHaveAttribute('data-state', 'idle');
