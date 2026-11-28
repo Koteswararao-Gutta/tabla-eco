@@ -247,3 +247,70 @@ test('an ad video plays in its spot, from the same point on every TV, and falls 
   await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
   await expect.poll(() => tv1.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(1.5);
 });
+
+test('an ad after every 2 rounds: all four TVs play the same order, each its own side, the video goes after', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  await context.route('**/ads/e2e-ad-1.webm', (r) => r.fulfill({ status: 200, contentType: 'video/webm', body: video }));
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const m1 = all['slot-menu-1'].pictures;
+  const m2 = all['slot-menu-2'].pictures;
+  const special = all['slot-special'].pictures.tv1;
+  await control.evaluate((ids) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[ids.special] = { ...pics[ids.special], video: { src: 'ads/e2e-ad-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { special });
+  await setLoop(control, {
+    replace: true,
+    patch: {
+      a: { order: 1, seconds: 2, transition: 'none', kind: 'menu', pictures: m1 },
+      b: { order: 2, seconds: 2, transition: 'none', kind: 'menu', pictures: { tv1: m2.tv1, tv2: m1.tv2 } },
+      ad: { order: 3, seconds: 2, transition: 'none', kind: 'catering', every: { by: 'rounds', n: 2 }, pictures: { tv1: special, tv2: m1.tv1 } },
+    },
+  });
+  const pages = await tvs();
+  for (const p of pages) await expect(now(p)).not.toHaveAttribute('data-state', 'loading');
+  for (const p of pages) await record(p);
+  // TV 1 plays the ad's video; TV 2 shows its own side (a still here)
+  await expect(now(pages[0])).toHaveAttribute('data-slot-id', 'ad', { timeout: 12_000 });
+  await expect(now(pages[0])).toHaveAttribute('data-video', 'playing');
+  await expect(now(pages[1])).toHaveAttribute('data-picture-id', m1.tv1);
+  await expect(now(pages[2])).toHaveAttribute('data-video', 'playing');
+  // the video element is gone once the ad is over (its decoder given back)
+  await expect(now(pages[0])).toHaveAttribute('data-slot-id', 'a', { timeout: 4_000 });
+  await expect(pages[0].getByTestId('menu-tv-video')).toHaveCount(0);
+  await control.waitForTimeout(6_500);
+  const logs = await Promise.all(pages.map(logOf));
+  const seqs = logs.map((l) => l.map(([, id]) => id).filter((id, i, a) => id && id !== a[i - 1]));
+  for (const s of seqs) expect(s.slice(0, 8)).toEqual(seqs[0].slice(0, 8));
+  // the pattern: two rounds of a, b, then the ad
+  const text = seqs[0].join(',');
+  expect(text).toMatch(/a,b,a,b,ad,a,b/);
+  expect(text).not.toMatch(/ad,a,b,ad/);
+});
+
+test('an ad video uploaded from the phone (kept in the database) plays on the TV', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const left = all['slot-menu-1'].pictures.tv1;
+  await control.evaluate(async ({ bytes, left }) => {
+    const db: IDBDatabase = await new Promise((ok) => {
+      const r = indexedDB.open('tabla-pictures', 1);
+      r.onsuccess = () => ok(r.result);
+    });
+    await new Promise<void>((ok) => {
+      const tx = db.transaction('blobs', 'readwrite');
+      tx.objectStore('blobs').put(new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), 'video:v1');
+      tx.oncomplete = () => ok();
+    });
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[left] = { ...pics[left], video: { src: 'stored:v1', sound: false, seconds: 3 } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { bytes: [...video], left });
+  await setLoop(control, { seconds: 30, firstSlotId: 'slot-menu-1' });
+  const [tv1] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
+  await expect(tv1.getByTestId('menu-tv-video')).toHaveAttribute('src', /^blob:/);
+});
