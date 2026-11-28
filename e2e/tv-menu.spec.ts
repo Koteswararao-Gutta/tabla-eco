@@ -314,3 +314,36 @@ test('an ad video uploaded from the phone (kept in the database) plays on the TV
   await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
   await expect(tv1.getByTestId('menu-tv-video')).toHaveAttribute('src', /^blob:/);
 });
+
+test('a paused ad\'s video is never downloaded; a live one is', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  const asked: string[] = [];
+  await context.route('**/ads/e2e-*.webm', (r) => {
+    asked.push(new URL(r.request().url()).pathname.split('/').pop()!);
+    return r.fulfill({ status: 200, contentType: 'video/webm', body: video });
+  });
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const m1 = all['slot-menu-1'].pictures;
+  const special = all['slot-special'].pictures.tv1;
+  await control.evaluate((ids) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[ids.m1] = { ...pics[ids.m1], video: { src: 'ads/e2e-paused.webm', sound: false } };
+    pics[ids.special] = { ...pics[ids.special], video: { src: 'ads/e2e-live.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { m1: m1.tv1, special });
+  await setLoop(control, {
+    replace: true,
+    patch: {
+      a: { order: 1, seconds: 2, transition: 'none', kind: 'menu', pictures: { tv1: all['slot-menu-2'].pictures.tv1 } },
+      paused: { order: 2, seconds: 2, transition: 'none', kind: 'catering', endsAt: Date.now() - 1_000, every: { by: 'rounds', n: 1 }, pictures: { tv1: m1.tv1 } },
+      live: { order: 3, seconds: 2, transition: 'none', kind: 'catering', every: { by: 'rounds', n: 1 }, pictures: { tv1: special } },
+    },
+  });
+  const [tv1] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-slot-id', 'live', { timeout: 8_000 });
+  await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
+  await tv1.waitForTimeout(2_500);
+  expect(asked).toContain('e2e-live.webm');
+  expect(asked).not.toContain('e2e-paused.webm');
+});

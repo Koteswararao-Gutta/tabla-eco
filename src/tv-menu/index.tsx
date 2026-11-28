@@ -62,11 +62,14 @@ function usePictures(ids: (string | null)[], retry: number) {
 /** Loads this TV's ad videos ahead of time into memory (a blob: URL from the store), so they start at once and
  *  play without the internet. `undefined` = loading, `null` = failed: the TV then shows the picture instead. A
  *  failure is asked again on the next slot change, like pictures. Videos this TV no longer plays are let go, so
- *  their memory is freed (a Fire TV Stick has little). */
+ *  their memory is freed (a Fire TV Stick has little). Only one video is fetched at a time, so two big
+ *  downloads never fight over a slow connection or the TV's memory. */
 function useVideos(srcs: string[], retry: number) {
   const [urls, setUrls] = useState<Record<string, string | null>>({});
   const asked = useRef(new Set<string>());
   const keep = useRef(new Set<string>());
+  const loading = useRef(false);
+  const [loaded, setLoaded] = useState(0);
   const key = [...new Set(srcs)].sort().join('|');
   useEffect(() => {
     const want = new Set(key ? key.split('|') : []);
@@ -77,16 +80,24 @@ function useVideos(srcs: string[], retry: number) {
       store.releaseVideo(src);
       setUrls(({ [src]: _gone, ...rest }) => rest);
     }
-    for (const src of want) {
-      if (asked.current.has(src)) continue;
-      asked.current.add(src);
-      store.videoUrl(src).then((url) => {
-        if (!keep.current.has(src)) return;
+    if (loading.current) return;
+    const src = [...want].find((s) => !asked.current.has(s));
+    if (!src) return;
+    asked.current.add(src);
+    loading.current = true;
+    store
+      .videoUrl(src)
+      .catch(() => null)
+      .then((url) => {
+        loading.current = false;
+        setLoaded((n) => n + 1);
+        // Let go while it was loading (releaseVideo already frees it): if it is wanted again, the next
+        // run asks afresh.
+        if (!asked.current.has(src) || !keep.current.has(src)) return;
         if (!url) asked.current.delete(src);
         setUrls((m) => ({ ...m, [src]: url }));
       });
-    }
-  }, [key, retry]);
+  }, [key, retry, loaded]);
   useEffect(
     () => () => {
       for (const src of asked.current) store.releaseVideo(src);
@@ -183,17 +194,20 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
 
   const target: Target | null = ready ? targetFor(slots!, screens!, loop ?? null, screenId, store.now()) : null;
   const { urls, broken } = usePictures([target?.pictureId ?? null, target?.nextPictureId ?? null], tick);
-  // Every ad video this TV plays (usually one or two), kept loaded while it is in the loop.
+  // The videos of the ads that are live now (not paused or ended), kept loaded while they are in the loop.
+  // Looked at again on every tick, so a paused ad's video is let go and a resumed one loads again.
   const videoSrcs = useMemo(() => {
     if (!mine || !screens || !pictures) return [];
     const out: string[] = [];
+    const now = store.now();
     for (const s of mine) {
+      if (!(s.seconds > 0) || (s.endsAt != null && s.endsAt <= now)) continue;
       const v = videoOf(pictureFor(s, screenId, screens));
       if (v?.src) out.push(v.src);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mine, screens, pictures, screenId]);
+  }, [mine, screens, pictures, screenId, tick]);
   const { videoUrls, videoBroken } = useVideos(videoSrcs, tick);
   const resolved = !!target && (target.pictureId === null || urls[target.pictureId] !== undefined);
 
