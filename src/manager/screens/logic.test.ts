@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '@shared/data/types';
-import { adLine, adSeconds, adShare, everyProblem, adVideos, everyLabel, isVideoAd, parseEvery, roundsHint, tvsOnOldCode, formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
+import { isPaused, adLine, adSeconds, adShare, everyProblem, adVideos, everyLabel, isVideoAd, parseEvery, roundsHint, tvsOnOldCode, formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
 
 const s = (id: string, order: number, extra: Partial<Slot> = {}): Slot => ({ id, order, seconds: 10, transition: 'fade', pictures: { tv1: 'p' + id }, ...extra });
 
@@ -147,5 +147,20 @@ describe('ads', () => {
     expect(roundsHint(1, 45)).toBe('One round of the menu is now 45 s, so about every 45 s.');
     expect(roundsHint(2, 45)).toBe('One round of the menu is now 45 s, so about every 1½ min.');
     expect(roundsHint(4, 45)).toBe('One round of the menu is now 45 s, so about every 3 min.');
+  });
+});
+
+describe('isPaused', () => {
+  const now = 1_000_000_000;
+  it('counts as paused at once when it stops at the end of the picture showing now, however long that is', () => {
+    const slot = { endsAt: now + 50 * 60_000 };
+    expect(isPaused(slot, now)).toBe(false);
+    expect(isPaused(slot, now, now + 50 * 60_000)).toBe(true);
+    expect(adLine({ ...slot, seconds: 15, every: null }, now, now + 50 * 60_000)).toBe('Paused');
+  });
+  it('an end date later than the current picture is not a pause', () => {
+    expect(isPaused({ endsAt: now + 3 * 3_600_000 }, now, now + 10_000)).toBe(false);
+    expect(isPaused({ endsAt: null }, now, now + 10_000)).toBe(false);
+    expect(isPaused({ endsAt: now + 30_000 }, now)).toBe(true);
   });
 });

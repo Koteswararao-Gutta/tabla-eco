@@ -14,7 +14,7 @@ import { StoredPicture, Switch, VideoInput } from './parts';
 
 type S = WithId<Slot>;
 
-export const SOUND_LINE = "Music plays on all 4 TVs at the same time, whenever the TVs are on. TV 5's music keeps playing.";
+export const SOUND_LINE = "Music plays on all 4 TVs at the same time, whenever the TVs are on. TV 5's music keeps playing. Both videos should have the same music, or keep the right one silent.";
 const UPLOAD_FAILED = "Upload didn't work. Nothing changed on the TVs. Check the internet and try again.";
 const UPLOAD_SLOW = 'The upload is taking too long. It may still finish in the background: look at the list in a minute before you try again.';
 
@@ -229,7 +229,17 @@ function missingLine(left: PickedVideo | null, right: PickedVideo | null): strin
 }
 
 /** The Add sheet with Type = Ad: two videos, sound, how often, stop after. */
-export function AdAddSheet({ typeRow, sorted, after, onClose, onNotice }: { typeRow: ReactNode; sorted: readonly S[]; after: number; onClose: () => void; onNotice: (text: string) => void }) {
+export function AdAddSheet<K extends string>({ typeRow, onKind, sorted, after, onClose, onNotice }: {
+  /** The Type row, built with the change handler to use (so this sheet can lock it or ask first). */
+  typeRow: (onChange: (kind: K) => void) => ReactNode;
+  onKind: (kind: K) => void;
+  sorted: readonly S[];
+  after: number;
+  onClose: () => void;
+  onNotice: (text: string) => void;
+}) {
+  // Another type tapped while videos are picked: asked first, like closing the sheet.
+  const [leaving, setLeaving] = useState<K | null>(null);
   const [left, pickLeft] = usePickedVideo();
   const [right, pickRight] = usePickedVideo();
   const [sound, setSound] = useState(false);
@@ -277,7 +287,19 @@ export function AdAddSheet({ typeRow, sorted, after, onClose, onNotice }: { type
       onClose={up.busy ? () => {} : onClose}
       confirmClose={() => (!up.busy && (left || right) ? 'Discard the videos you picked?' : null)}
     >
-      {typeRow}
+      {/* Locked while uploading: switching away would leave the upload running behind another sheet. */}
+      <fieldset className="sc-plain" disabled={up.busy}>
+        {typeRow((k) => (up.busy ? undefined : left || right ? setLeaving(k) : onKind(k)))}
+      </fieldset>
+      {leaving && (
+        <div className="sc-ask" role="alert" data-testid="ad-leave-ask">
+          <p>Discard the videos you picked?</p>
+          <div className="t-grid2">
+            <button className="t-btn" onClick={() => onKind(leaving)}>Discard</button>
+            <button className="t-btn primary" onClick={() => setLeaving(null)}>Keep editing</button>
+          </div>
+        </div>
+      )}
       <p className="sc-hint">Pick the MP4 files from Files, not Photos. TV 3 and TV 4 show the same as TV 1 and TV 2.</p>
       <VideoPick side="left" picked={left} onFile={pickLeft} testId="ad-file-left" />
       <VideoPick side="right" picked={right} onFile={pickRight} testId="ad-file-right" />
@@ -353,7 +375,7 @@ export function AdSheet({ slot, sorted, side, onClose, onNotice }: { slot: S; so
   const loop = useSingleton('loop');
   const vids = pictures ? adVideos(slot, pictures) : [];
   const now = useNow(2_000);
-  const paused = isPaused(slot, now);
+  const paused = isPaused(slot, now, loop === undefined ? null : loopPosition(sorted, now, loop)?.endsAt);
   const allSound = vids.length > 0 && vids.every((p) => p.video?.sound);
   const someSound = vids.some((p) => p.video?.sound);
   const every = useEvery(slot.every ?? null, slot.seconds);

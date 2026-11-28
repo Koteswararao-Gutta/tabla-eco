@@ -146,11 +146,14 @@ export function everyLabel(every: AdEvery | null | undefined): string {
 
 /** A pause takes effect at the next picture change, so an ad whose end is this close already counts as paused. */
 export const PAUSE_SOON_MS = 60_000;
-export const isPaused = (slot: Pick<Slot, 'endsAt'>, now: number): boolean => slot.endsAt != null && slot.endsAt <= now + PAUSE_SOON_MS;
+/** Paused = it ends within a minute, or by the end of what the TVs show now (`currentEnd`, from loopPosition):
+ *  a pause waits for the current picture to end, which can be up to an hour, and must show as Paused at once. */
+export const isPaused = (slot: Pick<Slot, 'endsAt'>, now: number, currentEnd?: number | null): boolean =>
+  slot.endsAt != null && slot.endsAt <= Math.max(now + PAUSE_SOON_MS, currentEnd ?? 0);
 
 /** The line under an ad: "15 s · every 2 min", "Paused", "15 s · after every round · until Sun 9 PM". */
-export function adLine(slot: Pick<Slot, 'seconds' | 'endsAt' | 'every'>, now: number): string {
-  if (isPaused(slot, now)) return 'Paused';
+export function adLine(slot: Pick<Slot, 'seconds' | 'endsAt' | 'every'>, now: number, currentEnd?: number | null): string {
+  if (isPaused(slot, now, currentEnd)) return 'Paused';
   const parts = [`${slot.seconds} s`, everyLabel(slot.every)];
   if (slot.endsAt != null) parts.push(`until ${formatWhen(slot.endsAt, now)}`);
   return parts.join(' · ');

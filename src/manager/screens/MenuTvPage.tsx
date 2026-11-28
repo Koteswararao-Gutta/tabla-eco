@@ -4,8 +4,8 @@
 // phones editing different things never overwrite each other.
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
-import { MAIN_OF, PARTNER, loopSlots, pictureFor } from '@shared/clock/loop';
+import { newId, restartLoop, store, useCollection, useNow, useSingleton, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
+import { MAIN_OF, PARTNER, loopPosition, loopSlots, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
 import { MIRROR_SOURCE, TRANSITIONS, adLine, fromLocalInput, insertOrder, isVideoAd, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
 import { AdAddSheet, AdSheet } from './AdParts';
@@ -97,6 +97,9 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
   const pictures = useCollection('pictures');
   // Only the spots this TV plays: TV 1 and TV 2 never list spots that exist only on TV 3 / TV 4.
   const sorted = sortSlots(loopSlots(slots, tv, screens));
+  const loop = useSingleton('loop');
+  // When the picture the TVs show now ends: an ad paused to stop there already counts as Paused.
+  const currentEnd = loop === undefined ? null : loopPosition(sorted, now, loop)?.endsAt ?? null;
   const name = screenName(tv);
   const partner = PARTNER[tv];
   const main = MAIN_OF[tv];
@@ -166,10 +169,10 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
               <div className="sc-under">
                 {badges}
                 {readOnly ? (
-                  <p className="sc-meta">{videoAd ? adLine(slot, now) : slotLine(slot, now)}</p>
+                  <p className="sc-meta">{videoAd ? adLine(slot, now, currentEnd) : slotLine(slot, now)}</p>
                 ) : (
                   <button className="sc-meta" data-testid="slot-line" onClick={() => setOpen(videoAd ? { kind: 'ad', slotId: slot.id } : { kind: 'timing', slotId: slot.id })}>
-                    {videoAd ? adLine(slot, now) : slotLine(slot, now)} <span aria-hidden>›</span>
+                    {videoAd ? adLine(slot, now, currentEnd) : slotLine(slot, now)} <span aria-hidden>›</span>
                   </button>
                 )}
               </div>
@@ -297,14 +300,15 @@ function AddSheet({ tv, sorted, after, onClose, onNotice }: { tv: ScreenId; sort
     }, 'That file could not be saved as a picture. Try another one.');
   };
 
-  const typeRow = (
+  const typeRowWith = (onChange: (k: Kind) => void) => (
     <div className="t-field" role="group" aria-label="Type">
       <span>Type</span>
-      <Segmented label="Type" value={kind} options={KINDS} onChange={setKind} />
+      <Segmented label="Type" value={kind} options={KINDS} onChange={onChange} />
     </div>
   );
+  const typeRow = typeRowWith(setKind);
   if (kind === 'catering') {
-    return <AdAddSheet typeRow={typeRow} sorted={sorted} after={after} onClose={onClose} onNotice={onNotice} />;
+    return <AdAddSheet<Kind> typeRow={typeRowWith} onKind={setKind} sorted={sorted} after={after} onClose={onClose} onNotice={onNotice} />;
   }
   return (
     <Sheet open title={`Add a picture to ${screenName(tv)}`} onClose={onClose}>

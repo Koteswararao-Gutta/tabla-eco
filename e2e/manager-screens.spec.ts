@@ -412,6 +412,12 @@ test('the Add sheet offers Menu, Special and Ad; Ad asks for two videos, sound a
   await expect(page.getByText('Discard the videos you picked?')).toBeVisible();
   await page.getByRole('button', { name: 'Keep editing' }).click();
   await expect(sheet.getByRole('heading', { name: 'Add an ad' })).toBeVisible();
+  // switching to another type asks too
+  await sheet.getByRole('button', { name: 'Menu', exact: true }).click();
+  await expect(sheet.getByTestId('ad-leave-ask')).toContainText('Discard the videos you picked?');
+  await sheet.getByTestId('ad-leave-ask').getByRole('button', { name: 'Keep editing' }).click();
+  await expect(sheet.getByTestId('ad-leave-ask')).toHaveCount(0);
+  await expect(sheet.getByRole('heading', { name: 'Add an ad' })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Discard' }).click();
   await expect(sheet).toBeHidden();
