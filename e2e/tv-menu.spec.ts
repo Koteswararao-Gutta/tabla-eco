@@ -347,3 +347,36 @@ test('a paused ad\'s video is never downloaded; a live one is', async ({ context
   expect(asked).toContain('e2e-live.webm');
   expect(asked).not.toContain('e2e-paused.webm');
 });
+
+test('an ad video that drifts away from the other TVs comes back in sync by itself', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test-long.webm', import.meta.url));
+  await context.route('**/ads/e2e-ad-long.webm', (r) => r.fulfill({ status: 200, contentType: 'video/webm', body: video }));
+  const { control, tvs } = await openTvs(context);
+  const { tv1: left } = (await slots(control))['slot-menu-1'].pictures;
+  await control.evaluate((left) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[left] = { ...pics[left], video: { src: 'ads/e2e-ad-long.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, left);
+  await setLoop(control, { seconds: 30, firstSlotId: 'slot-menu-1' });
+  const [tv1, , tv3] = await tvs();
+  const vid = (p: Page) => p.getByTestId('menu-tv-video');
+  // Where each video is, taken back to one moment (both windows share this computer's clock).
+  const pos = (p: Page) => vid(p).evaluate((v: HTMLVideoElement) => v.currentTime - Date.now() / 1000);
+  const gap = async () => Math.abs((await pos(tv1)) - (await pos(tv3)));
+  for (const tv of [tv1, tv3]) {
+    await expect(now(tv)).toHaveAttribute('data-video', 'playing');
+    await expect.poll(() => vid(tv).evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 5_000 }).toBeGreaterThan(0.5);
+  }
+  await expect.poll(gap, { timeout: 4_000 }).toBeLessThan(0.05);
+
+  // A small slip (TV 3 falls 0.15 s behind): it plays a little faster until it is back.
+  await vid(tv3).evaluate((v: HTMLVideoElement) => (v.currentTime -= 0.15));
+  await expect.poll(() => vid(tv3).evaluate((v: HTMLVideoElement) => v.playbackRate), { timeout: 2_000 }).toBeGreaterThan(1);
+  await expect.poll(gap, { timeout: 6_000 }).toBeLessThan(0.05);
+
+  // A big slip (TV 1 jumps 2 s ahead): it jumps straight back.
+  await vid(tv1).evaluate((v: HTMLVideoElement) => (v.currentTime += 2));
+  await expect.poll(gap, { timeout: 3_000 }).toBeLessThan(0.1);
+  await expect.poll(gap, { timeout: 4_000 }).toBeLessThan(0.05);
+});

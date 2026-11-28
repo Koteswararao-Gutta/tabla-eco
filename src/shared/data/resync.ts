@@ -233,3 +233,28 @@ export function queued(write: Promise<void>, what: string, waitMs = SAVE_WAIT_MS
 }
 
 const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+
+// ---------- clock samples ----------
+/** One clock reading: device time before the write (t0), when the server confirmed it (t1), and the
+ *  server's own time stamped on that write. */
+export interface ClockSample {
+  t0: number;
+  t1: number;
+  server: number;
+}
+
+/** Clock samples taken per sync. The quickest round trip has the smallest error, so a few tries help a lot. */
+export const CLOCK_SAMPLES = 5;
+
+/** The offset (server minus device) from the quickest usable sample, or null when none is usable.
+ *  The server stamped the write somewhere inside the round trip, so the middle of the quickest one is the
+ *  closest guess (error at most half that round trip). */
+export function bestOffset(samples: ClockSample[], maxRoundTripMs = 5000): number | null {
+  let best: ClockSample | null = null;
+  for (const s of samples) {
+    const rtt = s.t1 - s.t0;
+    if (!(rtt >= 0 && rtt < maxRoundTripMs) || !Number.isFinite(s.server)) continue;
+    if (!best || rtt < best.t1 - best.t0) best = s;
+  }
+  return best ? best.server - (best.t0 + best.t1) / 2 : null;
+}
