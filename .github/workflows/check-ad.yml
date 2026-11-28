@@ -1,0 +1,46 @@
+name: Check new ad (one-off)
+# One-off, 2026-11-28: the owner asked for a look at a 1-minute ad. Downloads it, writes facts and contact
+# sheets (small JPEGs only, never the videos) to ad-check/, then removes itself.
+on:
+  push:
+    branches: [claude/project-thread-onea2e]
+    paths: [.github/workflows/check-ad.yml]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          set -e
+          sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg >/dev/null
+          pip install -q opencv-python-headless
+          mkdir -p /tmp/v ad-check
+          B=https://d2ol7oe51mr4n9.cloudfront.net/user_3MgCBcaEE3m6GfZyMTnv6Stez9y
+          curl -sSfL -o /tmp/v/left.mp4 $B/dd20b670-3039-4bb2-acdb-431a52f24516.mp4
+          curl -sSfL -o /tmp/v/right.mp4 $B/136542e6-de6d-4a84-8956-e1cefa6c45e6.mp4
+          for s in left right; do
+            f=/tmp/v/$s.mp4
+            { echo "== $s"; ls -l $f; sha256sum $f
+              ffprobe -v error -show_entries format=duration,bit_rate:stream=codec_type,codec_name,profile,width,height,r_frame_rate,pix_fmt,codec_tag_string -of compact $f
+              ffmpeg -hide_banner -i $f -af volumedetect -f null - 2>&1 | grep -E "mean_volume|max_volume" || echo "no audio"
+              ffprobe -v error -select_streams v -show_entries frame=pict_type,pts_time -of csv $f | grep ",I" | wc -l | sed 's/^/keyframes: /'
+            } >> ad-check/info.txt
+            D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 $f)
+            ffmpeg -v error -y -i $f -vf "fps=20/$D,scale=480:-1,tile=4x5" -frames:v 1 -q:v 4 ad-check/$s-sheet.jpg
+            ffmpeg -v error -y -sseof -0.2 -i $f -frames:v 1 /tmp/v/$s-last.png
+            for t in 5 20 40; do ffmpeg -v error -y -ss $t -i $f -frames:v 1 /tmp/v/$s-$t.png; done
+          done
+          python3 -c "
+          import cv2,glob
+          d=cv2.QRCodeDetector()
+          for p in sorted(glob.glob('/tmp/v/right-*.png')): print('QR', p, d.detectAndDecode(cv2.imread(p))[0])
+          " >> ad-check/info.txt
+          cat ad-check/info.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/check-ad.yml
+          git add ad-check
+          git commit -m "Facts and contact sheets of the 1-minute ad (for review; removed after)"
+          git push
