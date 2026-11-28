@@ -193,6 +193,13 @@ test('slots: how often an ad plays', async () => {
   await assertFails(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'rounds', n: 2, x: 1 } }));
 });
 
+test('slots: at most an hour on screen (the app caps seconds at 3600)', async () => {
+  const s = { id: 'm', order: 1, transition: 'fade', pictures: { tv1: 'x' } };
+  await assertSucceeds(setDoc(doc(db, 'slots/m'), { ...s, seconds: 3600 }));
+  await assertFails(setDoc(doc(db, 'slots/m'), { ...s, seconds: 3601 }));
+  await assertFails(setDoc(doc(db, 'slots/m'), { ...s, seconds: 86400 }));
+});
+
 // ---------- approved devices (More > Devices) ----------
 
 test('open (not locked): any signed-in device gets in; signed-out still refused', async () => {

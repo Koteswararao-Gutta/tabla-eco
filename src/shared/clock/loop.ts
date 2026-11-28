@@ -200,7 +200,9 @@ let walkCache: { key: string; at: Item; state: WalkState } | null = null;
  * - The walk starts at the latest of the loop anchor, 4:00 AM Arizona time today, and the end of a menu picture's
  *   "stop after"; every item ends by the next 4:00 AM, so all TVs start the day together and a walk covers one day.
  */
-function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor | null): LoopPosition | null {
+/** `inner`: only the item is wanted (the first item of the next day, as `next`); never looks further, so a slot
+ *  a day or longer can't make it call itself without end. */
+function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor | null, inner = false): LoopPosition | null {
   let stream = streamSlots(slots, nowIn).filter((s) => lengthMs(s) >= 1);
   const first = loop?.firstSlotId ? stream.findIndex((s) => s.id === loop.firstSlotId) : -1;
   if (first > 0) stream = [...stream.slice(first), ...stream.slice(0, first)];
@@ -267,10 +269,12 @@ function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor |
       return plainPosition(slots, nowIn, loop);
     }
   }
+  if (inner) return { index: item.index, slot: item.slot, startedAt: item.start, endsAt: item.end, next: item.slot };
   walkCache = { key, at: item, state: cloneState(w) };
   let next: Slot;
   if (item.end >= dayEnd) {
-    next = loopPosition(slots, dayEnd, loop)?.slot ?? item.slot;
+    const live = slots.some((s) => adEvery(s) && isLive(s, dayEnd));
+    next = (live ? walkPosition(slots, dayEnd, loop, true) : plainPosition(slots, dayEnd, loop))?.slot ?? item.slot;
   } else {
     next = step(cloneState(w), stream, anchor, dayEnd).slot;
   }

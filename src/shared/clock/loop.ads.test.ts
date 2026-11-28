@@ -246,6 +246,16 @@ describe('never stuck', () => {
     const only = [slot('m0', 1, 0.0004), ad('a', 3, 10, { by: 'minutes', n: 5 })];
     expect(() => loopPosition(only, DAY_START + 3_600_000, { anchor: DAY_START + 1000, firstSlotId: null })).not.toThrow();
   });
+
+  it('a picture of a day or longer reaches the 4 AM restart without calling itself forever', () => {
+    for (const secs of [86_400, 90_000, 108_000]) {
+      const slots = [slot('m1', 1, secs), ad('a', 2, 10, { by: 'rounds', n: 1 })];
+      const p = loopPosition(slots, DAY_START + 3_600_000, { anchor: DAY_START + 1000, firstSlotId: null })!;
+      expect(p.slot.id).toBe('m1');
+      expect(p.endsAt).toBe(DAY_START + 86_400_000);
+      expect(p.next.id).toBe('m1');
+    }
+  });
 });
 
 describe('pausing at a picture change', () => {

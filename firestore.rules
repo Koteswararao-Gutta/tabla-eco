@@ -25,7 +25,7 @@ service cloud.firestore {
     // A menu loop step. Checked on the whole saved document (partial updates are merged first).
     function validSlot(d) {
       return d.order is number
-        && d.seconds is number && d.seconds > 0 && d.seconds <= 86400
+        && d.seconds is number && d.seconds > 0 && d.seconds <= 3600
         && d.transition in ['fade', 'slide', 'none']
         && d.pictures is map
         && (!('endsAt' in d) || d.endsAt == null || d.endsAt is number)
