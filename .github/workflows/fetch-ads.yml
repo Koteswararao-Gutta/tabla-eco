@@ -1,0 +1,27 @@
+name: Fetch ad videos (one-off)
+# One-off, asked for by the owner on 2026-11-28: copies the new catering ad pair from Higgsfield into
+# public/ads/ on this branch (as version 2; files are never changed in place), then removes itself.
+on:
+  push:
+    branches: [claude/project-thread-onea2e]
+    paths: [.github/workflows/fetch-ads.yml]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          set -e
+          mkdir -p public/ads
+          curl -sSfL -o public/ads/catering-left-2.mp4 "https://d2ol7oe51mr4n9.cloudfront.net/user_3MgCBcaEE3m6GfZyMTnv6Stez9y/28f49d7d-f01d-46d4-8e8b-e81ba612a2d4.mp4"
+          curl -sSfL -o public/ads/catering-right-2.mp4 "https://d2ol7oe51mr4n9.cloudfront.net/user_3MgCBcaEE3m6GfZyMTnv6Stez9y/f116ce95-1840-4054-baed-d80c78cf1eee.mp4"
+          sha256sum public/ads/catering-*-2.mp4
+          ls -la public/ads
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/fetch-ads.yml
+          git add public/ads
+          git commit -m "Add the new catering ad pair (version 2) from Higgsfield"
+          git push
