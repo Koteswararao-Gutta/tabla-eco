@@ -232,6 +232,9 @@ test('an ad video plays in its spot, from the same point on every TV, and falls 
     await expect(now(tv)).toHaveAttribute('data-video', 'playing');
     await expect.poll(() => tv.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 5_000 }).toBeGreaterThan(0.2);
   }
+  // no default play icon: a see-through poster, and the video stays hidden until it really plays
+  await expect(tv1.getByTestId('menu-tv-video')).toHaveAttribute('poster', /^data:image\/gif/);
+  await expect(tv1.getByTestId('menu-tv-video')).toBeVisible();
   const times = await Promise.all([tv1, tv3].map((p) => p.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime)));
   expect(Math.abs(times[0] - times[1])).toBeLessThan(0.6);
   // TV 2's video can't load: it shows the picture instead
