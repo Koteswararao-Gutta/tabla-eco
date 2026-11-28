@@ -1,0 +1,20 @@
+name: Put new ad on TVs
+# One-off, run once after merge (Actions > Put new ad on TVs > Run workflow): points the live ad spot at the
+# new 30 s ad pair (tools/ad-videos/put.mjs). Deletes nothing; running it twice changes nothing new. Remove after use.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  put:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install --no-save --no-audit --no-fund firebase-admin@14.5.1
+        working-directory: tools/ad-videos
+      - run: node tools/ad-videos/put.mjs
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
