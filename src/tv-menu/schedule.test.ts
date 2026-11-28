@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Screen, Slot } from '@shared/data';
+import { lastDailyRestart } from '@shared/clock/loop';
 import { msUntilNextChange, targetFor } from './schedule';
 
 const slot = (id: string, order: number, seconds: number, extra: Partial<Slot> = {}): Slot => ({
@@ -91,5 +92,38 @@ describe('msUntilNextChange', () => {
   it('sleeps at most 30 s, also when nothing plays', () => {
     expect(msUntilNextChange([], null, base)).toBe(30_000);
     expect(msUntilNextChange([slot('long', 1, 600)], null, base)).toBe(30_000);
+  });
+});
+
+describe('ads by rounds or minutes', () => {
+  const anchor = lastDailyRestart(1_763_490_000_000) + 3_600_000;
+  const loop = { anchor, firstSlotId: null };
+  const withAd = [
+    slot('m1', 1, 10, { pictures: { tv1: 'm1a', tv2: 'm1b' } }),
+    slot('m2', 2, 10, { pictures: { tv1: 'm2a' } }),
+    slot('ad', 3, 5, { kind: 'catering', every: { by: 'rounds', n: 1 }, pictures: { tv1: 'adL', tv2: 'adR' } }),
+  ];
+
+  it('all four TVs show the ad at the same moment, each its own side', () => {
+    const t = anchor + 21_000;
+    expect(targetFor(withAd, screens, loop, 'tv1', t)).toMatchObject({ slotId: 'ad', pictureId: 'adL' });
+    expect(targetFor(withAd, screens, loop, 'tv2', t)).toMatchObject({ slotId: 'ad', pictureId: 'adR' });
+    expect(targetFor(withAd, screens, loop, 'tv3', t)).toMatchObject({ slotId: 'ad', pictureId: 'adL' });
+    expect(targetFor(withAd, screens, loop, 'tv4', t)).toMatchObject({ slotId: 'ad', pictureId: 'adR' });
+  });
+
+  it('a menu spot with nothing for this TV repeats its own menu picture, never the ad still', () => {
+    expect(targetFor(withAd, screens, loop, 'tv2', anchor + 12_000)).toMatchObject({ slotId: 'm2', pictureId: 'm1b' });
+  });
+
+  it('preloads the ad before it starts', () => {
+    expect(targetFor(withAd, screens, loop, 'tv1', anchor + 15_000).nextPictureId).toBe('adL');
+  });
+
+  it('wakes at the end of the ad and at the 4 AM restart', () => {
+    expect(msUntilNextChange(withAd, loop, anchor + 21_000)).toBe(4_005);
+    const nextDay = lastDailyRestart(anchor) + 86_400_000;
+    const long = [slot('m1', 1, 600, { pictures: { tv1: 'x' } }), withAd[2]];
+    expect(msUntilNextChange(long, loop, nextDay - 2_000)).toBe(2_005);
   });
 });

@@ -248,6 +248,106 @@ test('an ad video plays in its spot, from the same point on every TV, and falls 
   await expect.poll(() => tv1.getByTestId('menu-tv-video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(1.5);
 });
 
+test('an ad after every 2 rounds: all four TVs play the same order, each its own side, the video goes after', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  await context.route('**/ads/e2e-ad-1.webm', (r) => r.fulfill({ status: 200, contentType: 'video/webm', body: video }));
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const m1 = all['slot-menu-1'].pictures;
+  const m2 = all['slot-menu-2'].pictures;
+  const special = all['slot-special'].pictures.tv1;
+  await control.evaluate((ids) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[ids.special] = { ...pics[ids.special], video: { src: 'ads/e2e-ad-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { special });
+  await setLoop(control, {
+    replace: true,
+    patch: {
+      a: { order: 1, seconds: 2, transition: 'none', kind: 'menu', pictures: m1 },
+      b: { order: 2, seconds: 2, transition: 'none', kind: 'menu', pictures: { tv1: m2.tv1, tv2: m1.tv2 } },
+      ad: { order: 3, seconds: 2, transition: 'none', kind: 'catering', every: { by: 'rounds', n: 2 }, pictures: { tv1: special, tv2: m1.tv1 } },
+    },
+  });
+  const pages = await tvs();
+  for (const p of pages) await expect(now(p)).not.toHaveAttribute('data-state', 'loading');
+  for (const p of pages) await record(p);
+  // TV 1 plays the ad's video; TV 2 shows its own side (a still here)
+  await expect(now(pages[0])).toHaveAttribute('data-slot-id', 'ad', { timeout: 12_000 });
+  await expect(now(pages[0])).toHaveAttribute('data-video', 'playing');
+  await expect(now(pages[1])).toHaveAttribute('data-picture-id', m1.tv1);
+  await expect(now(pages[2])).toHaveAttribute('data-video', 'playing');
+  // the video element is gone once the ad is over (its decoder given back)
+  await expect(now(pages[0])).toHaveAttribute('data-slot-id', 'a', { timeout: 4_000 });
+  await expect(pages[0].getByTestId('menu-tv-video')).toHaveCount(0);
+  await control.waitForTimeout(6_500);
+  const logs = await Promise.all(pages.map(logOf));
+  const seqs = logs.map((l) => l.map(([, id]) => id).filter((id, i, a) => id && id !== a[i - 1]));
+  for (const s of seqs) expect(s.slice(0, 8)).toEqual(seqs[0].slice(0, 8));
+  // the pattern: two rounds of a, b, then the ad
+  const text = seqs[0].join(',');
+  expect(text).toMatch(/a,b,a,b,ad,a,b/);
+  expect(text).not.toMatch(/ad,a,b,ad/);
+});
+
+test('an ad video uploaded from the phone (kept in the database) plays on the TV', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const left = all['slot-menu-1'].pictures.tv1;
+  await control.evaluate(async ({ bytes, left }) => {
+    const db: IDBDatabase = await new Promise((ok) => {
+      const r = indexedDB.open('tabla-pictures', 1);
+      r.onsuccess = () => ok(r.result);
+    });
+    await new Promise<void>((ok) => {
+      const tx = db.transaction('blobs', 'readwrite');
+      tx.objectStore('blobs').put(new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), 'video:v1');
+      tx.oncomplete = () => ok();
+    });
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[left] = { ...pics[left], video: { src: 'stored:v1', sound: false, seconds: 3 } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { bytes: [...video], left });
+  await setLoop(control, { seconds: 30, firstSlotId: 'slot-menu-1' });
+  const [tv1] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
+  await expect(tv1.getByTestId('menu-tv-video')).toHaveAttribute('src', /^blob:/);
+});
+
+test('a paused ad\'s video is never downloaded; a live one is', async ({ context }) => {
+  const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test.webm', import.meta.url));
+  const asked: string[] = [];
+  await context.route('**/ads/e2e-*.webm', (r) => {
+    asked.push(new URL(r.request().url()).pathname.split('/').pop()!);
+    return r.fulfill({ status: 200, contentType: 'video/webm', body: video });
+  });
+  const { control, tvs } = await openTvs(context);
+  const all = await slots(control);
+  const m1 = all['slot-menu-1'].pictures;
+  const special = all['slot-special'].pictures.tv1;
+  await control.evaluate((ids) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[ids.m1] = { ...pics[ids.m1], video: { src: 'ads/e2e-paused.webm', sound: false } };
+    pics[ids.special] = { ...pics[ids.special], video: { src: 'ads/e2e-live.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, { m1: m1.tv1, special });
+  await setLoop(control, {
+    replace: true,
+    patch: {
+      a: { order: 1, seconds: 2, transition: 'none', kind: 'menu', pictures: { tv1: all['slot-menu-2'].pictures.tv1 } },
+      paused: { order: 2, seconds: 2, transition: 'none', kind: 'catering', endsAt: Date.now() - 1_000, every: { by: 'rounds', n: 1 }, pictures: { tv1: m1.tv1 } },
+      live: { order: 3, seconds: 2, transition: 'none', kind: 'catering', every: { by: 'rounds', n: 1 }, pictures: { tv1: special } },
+    },
+  });
+  const [tv1] = await tvs();
+  await expect(now(tv1)).toHaveAttribute('data-slot-id', 'live', { timeout: 8_000 });
+  await expect(now(tv1)).toHaveAttribute('data-video', 'playing');
+  await tv1.waitForTimeout(2_500);
+  expect(asked).toContain('e2e-live.webm');
+  expect(asked).not.toContain('e2e-paused.webm');
+});
+
 test('an ad video that drifts away from the other TVs comes back in sync by itself', async ({ context }) => {
   const video = (await import('node:fs')).readFileSync(new URL('./fixtures/ad-test-long.webm', import.meta.url));
   await context.route('**/ads/e2e-ad-long.webm', (r) => r.fulfill({ status: 200, contentType: 'video/webm', body: video }));
@@ -279,4 +379,26 @@ test('an ad video that drifts away from the other TVs comes back in sync by itse
   await vid(tv1).evaluate((v: HTMLVideoElement) => (v.currentTime += 2));
   await expect.poll(gap, { timeout: 3_000 }).toBeLessThan(0.1);
   await expect.poll(gap, { timeout: 4_000 }).toBeLessThan(0.05);
+});
+
+test('a missing ad video is asked for again only at the next change, not over and over', async ({ context }) => {
+  let asked = 0;
+  await context.route('**/ads/missing-1.webm', (r) => {
+    asked++;
+    return r.fulfill({ status: 404, body: '' });
+  });
+  const { control, tvs } = await openTvs(context);
+  const right = (await slots(control))['slot-menu-1'].pictures.tv2;
+  await control.evaluate((right) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[right] = { ...pics[right], video: { src: 'ads/missing-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, right);
+  await setLoop(control, { seconds: 60, firstSlotId: 'slot-menu-1' });
+  const [, tv2] = await tvs();
+  // it falls back to the still picture
+  await expect(now(tv2)).toHaveAttribute('data-picture-id', right);
+  await tv2.waitForTimeout(5_000);
+  expect(asked).toBeGreaterThan(0);
+  expect(asked).toBeLessThanOrEqual(8);
 });

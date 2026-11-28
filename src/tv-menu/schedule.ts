@@ -1,5 +1,5 @@
 // Pure helpers for the menu TV: what to show and when to look again.
-import { activeSlots, loopPosition, loopSlots, pictureFor } from '@shared/clock/loop';
+import { loopPosition, loopSlots, pictureFor, streamSlots } from '@shared/clock/loop';
 import type { LoopAnchor, Screen, ScreenId, Slot, Transition } from '@shared/data';
 
 /** Small margin after a boundary so the timer never wakes a hair too early. */
@@ -28,7 +28,9 @@ export function targetFor(
   const mine = loopSlots(slots, screenId, screens);
   const pos = loopPosition(mine, now, loop);
   if (!pos) return { key: 'none', slotId: null, pictureId: null, transition: 'fade', nextPictureId: null };
-  const order = activeSlots(mine, now);
+  // Ads that play by rounds or minutes are not in the list order: a menu spot with nothing for this TV
+  // repeats its own next menu picture, never an ad's still.
+  const order = streamSlots(mine, now);
   const pictureId = shownIn(pos.slot, order, screenId, screens);
   return {
     key: pos.slot.id + '|' + (pictureId ?? ''),
@@ -56,8 +58,8 @@ export function shownIn(slot: Slot, order: readonly Slot[], screenId: ScreenId, 
   return null;
 }
 
-/** Milliseconds until the picture could next change: the end of the current slot,
- *  or a slot dropping out of the loop (Slot.endsAt), whichever is first. */
+/** Milliseconds until the picture could next change: the end of the current slot (which includes the daily
+ *  4 AM restart and ads by rounds or minutes), or a slot dropping out of the loop (Slot.endsAt), whichever is first. */
 export function msUntilNextChange(slots: readonly Slot[], loop: LoopAnchor | null, now: number): number {
   let wake = Infinity;
   const pos = loopPosition(slots, now, loop);

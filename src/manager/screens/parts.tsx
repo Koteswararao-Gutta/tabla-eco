@@ -33,7 +33,7 @@ export function StoredPicture({ id, alt }: { id: string | null | undefined; alt:
 
 /** A button that opens the phone's camera / photo picker. A real button (Tab, Enter and Space
  *  work) that clicks a visually hidden file input. */
-export function PictureInput({ label, onFile, className = 't-btn block', testId, disabled }: { label: ReactNode; onFile: (f: File) => void; className?: string; testId?: string; disabled?: boolean }) {
+export function PictureInput({ label, onFile, className = 't-btn block', testId, disabled, accept = 'image/*' }: { label: ReactNode; onFile: (f: File) => void; className?: string; testId?: string; disabled?: boolean; accept?: string }) {
   const input = useRef<HTMLInputElement>(null);
   return (
     <>
@@ -44,7 +44,7 @@ export function PictureInput({ label, onFile, className = 't-btn block', testId,
         ref={input}
         className="sc-file"
         type="file"
-        accept="image/*"
+        accept={accept}
         tabIndex={-1}
         aria-hidden
         disabled={disabled}
@@ -99,11 +99,18 @@ export function FilePreview({ file, onBroken }: { file: File; onBroken?: () => v
   );
 }
 
+/** A video picked on the phone: a button that opens Files / Photos for videos. */
+export function VideoInput(props: { label: ReactNode; onFile: (f: File) => void; className?: string; testId?: string; disabled?: boolean }) {
+  return <PictureInput {...props} accept="video/mp4,video/*" />;
+}
+
 /** After a picture leaves a slot or the TV 5 clip: delete it from storage if nothing else shows it.
  *  `slots` is the slot list as it is after the change. Never throws (the change itself already saved). */
 export async function deletePictureIfUnused(id: string | null | undefined, slots: readonly Pick<Slot, 'pictures'>[], clipPictures?: readonly string[]): Promise<void> {
   if (!id) return;
   try {
+    // An ad's picture (with a video) is never deleted: it is the only way back to that ad.
+    if ((await store.getDoc('pictures', id))?.video) return;
     const clip = clipPictures ?? ((await store.getDoc('singletons', 'music')) as Partial<MusicSettings> | null)?.clipPictures ?? [];
     if (!pictureInUse(id, slots, Array.isArray(clip) ? clip : [])) await store.deletePicture(id);
   } catch {

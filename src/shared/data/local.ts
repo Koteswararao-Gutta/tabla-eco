@@ -5,8 +5,8 @@
 
 import { matchesFilter, recentSince, type CollectionFilter } from './filter';
 import type { DataStore, Unsubscribe, WithId } from './store';
-import { clean, isAppend, isRemove, newId, sameValue } from './store';
-import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, DeviceRecord, Picture, ScannedOrder } from './types';
+import { clean, isAppend, isRemove, newId, sameValue, storedVideoId } from './store';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, DeviceRecord, Picture, PictureVideo, ScannedOrder } from './types';
 import { currentApp, mayManage } from './access';
 
 const PREFIX = 'tabla:';
@@ -164,11 +164,11 @@ export class LocalStore implements DataStore {
     });
   }
 
-  async uploadPicture(file: Blob, name: string): Promise<WithId<Picture>> {
+  async uploadPicture(file: Blob, name: string, video?: PictureVideo | null): Promise<WithId<Picture>> {
     const { blob, width, height } = await fitPicture(file);
     const id = newId();
     await this.idb('readwrite', (s) => s.put(blob, id));
-    const pic: Picture = { id, name, width, height, createdAt: this.now() };
+    const pic: Picture = { id, name, width, height, createdAt: this.now(), ...(video ? { video } : {}) };
     await this.setDoc('pictures', id, pic);
     return { ...pic, id };
   }
@@ -184,11 +184,44 @@ export class LocalStore implements DataStore {
   }
 
   async deletePicture(id: string): Promise<void> {
+    // An ad's picture is never deleted.
+    if ((await this.getDoc('pictures', id))?.video) return;
     await this.idb('readwrite', (s) => s.delete(id));
     const url = this.urlCache.get(id);
     if (url) URL.revokeObjectURL(url);
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
+  }
+
+  // ---------- ad videos ----------
+  private videoCache = new Map<string, Promise<string | null>>();
+
+  async uploadVideo(file: Blob, onProgress?: (done: number) => void): Promise<string> {
+    const id = newId();
+    await this.idb('readwrite', (s) => s.put(file, 'video:' + id));
+    onProgress?.(1);
+    return 'stored:' + id;
+  }
+
+  videoUrl(src: string): Promise<string | null> {
+    let hit = this.videoCache.get(src);
+    if (!hit) {
+      hit = (async () => {
+        const id = storedVideoId(src);
+        if (!id) return fetchVideo(src);
+        const blob = await this.idb<Blob | undefined>('readonly', (s) => s.get('video:' + id));
+        return blob && blob.size ? URL.createObjectURL(blob) : null;
+      })().catch(() => null);
+      this.videoCache.set(src, hit);
+      hit.then((u) => u ?? this.videoCache.delete(src));
+    }
+    return hit;
+  }
+
+  releaseVideo(src: string): void {
+    const hit = this.videoCache.get(src);
+    this.videoCache.delete(src);
+    hit?.then((u) => u && URL.revokeObjectURL(u));
   }
 
   // ---------- approved devices ----------
@@ -346,4 +379,12 @@ export async function fitPicture(file: Blob): Promise<{ blob: Blob; width: numbe
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** A video shipped with the site ("ads/…"), as a blob: URL (the service worker keeps the file for offline). */
+export async function fetchVideo(src: string): Promise<string | null> {
+  const r = await fetch(new URL(src, location.href).href);
+  if (!r.ok) return null;
+  const b = await r.blob();
+  return b.size ? URL.createObjectURL(b) : null;
 }
