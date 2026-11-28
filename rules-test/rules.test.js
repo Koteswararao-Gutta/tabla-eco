@@ -179,7 +179,7 @@ test('videoData: parts as bytes and the finished record; never deleted, nothing 
   await assertFails(setDoc(doc(db, 'videoData/v2/chunks/0'), { data: 'AAAA' }));
   await assertFails(setDoc(doc(db, 'videoData/v2/chunks/0'), { data: part, extra: 1 }));
   await assertFails(setDoc(doc(db, 'videoData/v2'), { type: 'text/html', bytes: 10, chunks: 1, createdAt: 5 }));
-  await assertFails(setDoc(doc(db, 'videoData/v2'), { type: 'video/mp4', bytes: 40 * 1024 * 1024, chunks: 1, createdAt: 5 }));
+  await assertFails(setDoc(doc(db, 'videoData/v2'), { type: 'video/mp4', bytes: 21 * 1024 * 1024, chunks: 1, createdAt: 5 }));
   await assertFails(getDoc(doc(nobody, 'videoData/v1')));
 });
 

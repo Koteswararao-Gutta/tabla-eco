@@ -95,7 +95,11 @@ export function streamSlots<T extends Slot>(slots: readonly T[], now: number): T
   );
 }
 
-const isLive = (s: Slot, t: number) => s.seconds > 0 && (s.endsAt == null || s.endsAt > t);
+/** A slot's length in whole ms; under 1 ms counts as not playing (it could never move the walk on). */
+const lengthMs = (s: Slot) => Math.round(s.seconds * 1000);
+const isLive = (s: Slot, t: number) => s.seconds > 0 && lengthMs(s) >= 1 && (s.endsAt == null || s.endsAt > t);
+/** Backstop: more steps than this in one walk means something is wrong; the plain loop is used instead. */
+const MAX_STEPS = 200_000;
 
 /**
  * Where the loop is at `now`. Without ads that play by rounds or minutes this is the plain loop (above), the same
@@ -197,17 +201,19 @@ let walkCache: { key: string; at: Item; state: WalkState } | null = null;
  *   "stop after"; every item ends by the next 4:00 AM, so all TVs start the day together and a walk covers one day.
  */
 function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor | null): LoopPosition | null {
-  let stream = streamSlots(slots, nowIn);
+  let stream = streamSlots(slots, nowIn).filter((s) => lengthMs(s) >= 1);
   const first = loop?.firstSlotId ? stream.findIndex((s) => s.id === loop.firstSlotId) : -1;
   if (first > 0) stream = [...stream.slice(first), ...stream.slice(0, first)];
-  const dayStart = lastDailyRestart(nowIn);
+  // The day is taken from the later of this TV's time and the anchor: a TV clock a moment behind a phone that
+  // restarted the loop just after 4 AM must not count from the day before (the walk would never end).
+  const dayStart = lastDailyRestart(Math.max(nowIn, loop?.anchor ?? 0));
   let anchor = Math.max(loop?.anchor ?? 0, dayStart);
   for (const s of slots) if (s.seconds > 0 && !adEvery(s) && s.endsAt != null && s.endsAt <= nowIn && s.endsAt > anchor) anchor = s.endsAt;
   // A TV clock a moment behind the phone's: show the first item a moment early.
   const now = Math.max(nowIn, anchor);
   const dayEnd = dayStart + DAY;
   const ads = slots
-    .filter((s) => s.seconds > 0 && adEvery(s))
+    .filter((s) => s.seconds > 0 && lengthMs(s) >= 1 && adEvery(s))
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   if (!stream.length) {
     return plainPosition(
@@ -219,8 +225,8 @@ function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor |
   const key = JSON.stringify([
     anchor,
     loop?.firstSlotId ?? null,
-    stream.map((s) => [s.id, s.seconds]),
-    ads.map((s) => [s.id, s.seconds, s.every, s.endsAt ?? null, s.order]),
+    stream.map((s) => [s.id, s.seconds, s.pictures, s.transition ?? null, s.kind ?? null]),
+    ads.map((s) => [s.id, s.seconds, s.every, s.endsAt ?? null, s.order, s.pictures, s.transition ?? null]),
   ]);
 
   let w: WalkState;
@@ -250,8 +256,17 @@ function walkPosition(slots: readonly Slot[], nowIn: number, loop?: LoopAnchor |
       item = step(w, stream, anchor, dayEnd);
     }
   }
-  // Walk to the item that holds `now`. `w` is always the state just after `item`.
-  while (item.end <= now) item = step(w, stream, anchor, dayEnd);
+  // Walk to the item that holds `now`. `w` is always the state just after `item`. Every step moves time on (items
+  // are at least 1 ms and end by `dayEnd`, which is after `now`); the step cap only guards against a mistake.
+  let steps = 0;
+  while (item.end <= now) {
+    const prev = item.end;
+    item = step(w, stream, anchor, dayEnd);
+    if (item.end <= prev || ++steps > MAX_STEPS) {
+      walkCache = null;
+      return plainPosition(slots, nowIn, loop);
+    }
+  }
   walkCache = { key, at: item, state: cloneState(w) };
   let next: Slot;
   if (item.end >= dayEnd) {

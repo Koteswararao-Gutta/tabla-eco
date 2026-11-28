@@ -37,6 +37,7 @@ import {
 } from 'firebase/firestore';
 import { filterKey, idChunks, recentSince, type CollectionFilter } from './filter';
 import { fetchVideo, fitPicture } from './local';
+import { cachedVideo, keepVideo } from './videoCache';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
 import { clean, isAppend, isRemove, newId, storedVideoId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
@@ -47,6 +48,14 @@ import { currentApp } from './access';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
+/** Thrown when a video upload takes over a minute: it may still finish in the background. */
+export class UploadTimeout extends Error {
+  constructor() {
+    super('upload-timeout');
+    this.name = 'UploadTimeout';
+  }
+}
+
 /** Size of one part of an uploaded video (Firestore documents hold up to 1 MiB). */
 const VIDEO_PART_BYTES = 900 * 1024;
 
@@ -66,7 +75,8 @@ export class FirebaseStore implements DataStore {
   constructor(config: FirebaseOptions) {
     const app = (this.app = initializeApp(config));
     this.db = initializeFirestore(app, {
-      // 100 MB (the default is 40): room for two or three ad videos besides every picture, for offline TVs.
+      // 100 MB (the default is 40): every picture, plus ad video parts while they are read (each device then keeps
+      // its own copy of the video, see videoCache.ts, so the parts may be pushed out without losing it offline).
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager(), cacheSizeBytes: 100 * 1024 * 1024 }),
       ignoreUndefinedProperties: true,
     });
@@ -466,12 +476,14 @@ export class FirebaseStore implements DataStore {
   async uploadVideo(file: Blob, onProgress?: (done: number) => void): Promise<string> {
     await this.ready;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please add the ad when online.');
+    // A part that times out stays queued and may still arrive later; a new try sends the video again under a new
+    // id. Leftover parts are harmless (nothing points at them) and are never deleted.
     const id = newId();
     const n = Math.max(1, Math.ceil(file.size / VIDEO_PART_BYTES));
     // Each part waits for the server (like pictures), so a video only counts once all of it arrived.
     const send = async (p: Promise<void>) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const slow = new Promise<never>((_, fail) => (timer = setTimeout(() => fail(new Error('The video could not be sent. Please check the internet.')), 60_000)));
+      const slow = new Promise<never>((_, fail) => (timer = setTimeout(() => fail(new UploadTimeout()), 60_000)));
       try {
         await Promise.race([p, slow]);
       } finally {
@@ -494,15 +506,20 @@ export class FirebaseStore implements DataStore {
       hit = (async () => {
         const id = storedVideoId(src);
         if (!id) return fetchVideo(src);
+        // This device's own copy first (a TV restarted without internet still plays).
+        const kept = await cachedVideo(id);
+        if (kept) return URL.createObjectURL(kept);
         await this.ready;
-        // Parts never change, so the offline copy comes first (a TV restarted without internet still plays).
+        // Parts never change, so the database's offline copy comes next.
         const read = async (path: string[]) => {
           const ref = doc(this.db, path.join('/'));
           try {
-            return await getDocFromCache(ref);
+            const s = await getDocFromCache(ref);
+            if (s.exists()) return s;
           } catch {
-            return fsGet(ref);
+            /* not in the offline copy */
           }
+          return fsGet(ref);
         };
         const meta = await read(['videoData', id]);
         const chunks = meta.get('chunks');
@@ -515,7 +532,9 @@ export class FirebaseStore implements DataStore {
           parts.push(data.toUint8Array());
         }
         const blob = new Blob(parts as BlobPart[], { type: 'video/mp4' });
-        return blob.size === bytes ? URL.createObjectURL(blob) : null;
+        if (blob.size !== bytes) return null;
+        await keepVideo(id, blob);
+        return URL.createObjectURL(blob);
       })().catch(() => null);
       this.videoCache.set(src, hit);
       hit.then((u) => u ?? this.videoCache.delete(src));

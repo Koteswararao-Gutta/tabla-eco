@@ -229,3 +229,47 @@ describe('same answer everywhere', () => {
     expect(performance.now() - start).toBeLessThan(500);
   });
 });
+
+describe('never stuck', () => {
+  it('a TV a moment behind a phone that restarted the loop just after 4 AM', () => {
+    const fourAm = DAY_START + 86_400_000;
+    const slots = [slot('m1', 1, 15), ad('a', 2, 10, { by: 'rounds', n: 1 })];
+    const p = loopPosition(slots, fourAm - 100, { anchor: fourAm + 200, firstSlotId: null })!;
+    expect(p.slot.id).toBe('m1');
+    expect(p.startedAt).toBe(fourAm + 200);
+  });
+
+  it('a slot shorter than 1 ms is left out instead of freezing the walk', () => {
+    const slots = [slot('m0', 1, 0.0004), slot('m1', 2, 15), ad('a', 3, 10, { by: 'minutes', n: 5 })];
+    const p = loopPosition(slots, DAY_START + 3_600_000, { anchor: DAY_START + 1000, firstSlotId: null })!;
+    expect(['m1', 'a']).toContain(p.slot.id);
+    const only = [slot('m0', 1, 0.0004), ad('a', 3, 10, { by: 'minutes', n: 5 })];
+    expect(() => loopPosition(only, DAY_START + 3_600_000, { anchor: DAY_START + 1000, firstSlotId: null })).not.toThrow();
+  });
+});
+
+describe('pausing at a picture change', () => {
+  it('pausing one of two ads at the end of the current item moves nothing before it and nothing jumps at it', () => {
+    const loop = { anchor: T0, firstSlotId: null };
+    const both = [...menu, ad('a1', 5, 10, { by: 'rounds', n: 1 }), ad('a2', 6, 10, { by: 'minutes', n: 2 })];
+    const at = T0 + 200_000;
+    const cur = loopPosition(both, at, loop)!;
+    const paused = both.map((s) => (s.id === 'a1' ? { ...s, endsAt: cur.endsAt } : s));
+    const brief = (p: ReturnType<typeof loopPosition>) => p && [p.slot.id, p.startedAt, p.endsAt];
+    for (let t = T0; t < cur.endsAt; t += 2_500) expect(brief(loopPosition(paused, t, loop))).toEqual(brief(loopPosition(both, t, loop)));
+    // the next item starts exactly where the current one ends, and a1 never plays again
+    const after = loopPosition(paused, cur.endsAt, loop)!;
+    expect(after.startedAt).toBe(cur.endsAt);
+    expect(sequence(paused, loop, cur.endsAt, cur.endsAt + 600_000)).not.toContain('a1');
+  });
+
+  it('pausing the last scheduled ad at a picture change: the menu goes on from the top at that change', () => {
+    const loop = { anchor: T0, firstSlotId: null };
+    const one = [...menu, ad('a1', 5, 10, { by: 'rounds', n: 1 })];
+    const cur = loopPosition(one, T0 + 100_000, loop)!;
+    const paused = one.map((s) => (s.id === 'a1' ? { ...s, endsAt: cur.endsAt } : s));
+    const after = loopPosition(paused, cur.endsAt, loop)!;
+    expect(after.startedAt).toBe(cur.endsAt);
+    expect(after.slot.id).toBe('m1');
+  });
+});
