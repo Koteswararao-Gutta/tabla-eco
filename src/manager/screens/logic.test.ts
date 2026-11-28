@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '@shared/data/types';
-import { formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
+import { adLine, adSeconds, adVideos, everyLabel, isVideoAd, parseEvery, roundsHint, tvsOnOldCode, formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
 
 const s = (id: string, order: number, extra: Partial<Slot> = {}): Slot => ({ id, order, seconds: 10, transition: 'fade', pictures: { tv1: 'p' + id }, ...extra });
 
@@ -85,5 +85,57 @@ describe('pictureWarnings', () => {
     expect(pictureWarnings(800, 450)).toEqual(['This picture is small and may look blurry on the TV.']);
     expect(pictureWarnings(600, 800)).toHaveLength(2);
     expect(pictureWarnings(0, 0)).toEqual([]);
+  });
+});
+
+describe('ads', () => {
+  const now = 1_763_490_000_000;
+  it('everyLabel and adLine in plain words', () => {
+    expect(everyLabel(null)).toBe('once every round, in its place');
+    expect(everyLabel({ by: 'rounds', n: 1 })).toBe('after every round');
+    expect(everyLabel({ by: 'rounds', n: 3 })).toBe('after every 3 rounds');
+    expect(everyLabel({ by: 'minutes', n: 2 })).toBe('every 2 min');
+    expect(adLine({ seconds: 15, endsAt: null, every: { by: 'minutes', n: 2 } }, now)).toBe('15 s · every 2 min');
+    expect(adLine({ seconds: 15, endsAt: now - 1, every: null }, now)).toBe('Paused');
+    expect(adLine({ seconds: 15, endsAt: now + 3_600_000, every: { by: 'rounds', n: 1 } }, now)).toMatch(/^15 s · after every round · until /);
+  });
+
+  it('tvsOnOldCode names menu TVs without the new version, ignoring TVs not seen for a day', () => {
+    const fresh = now - 60_000;
+    expect(tvsOnOldCode([], now)).toEqual([]);
+    expect(tvsOnOldCode([
+      { id: 'tv1', lastSeen: fresh, version: 2 },
+      { id: 'tv2', lastSeen: fresh, version: 2 },
+      { id: 'tv3', lastSeen: fresh },
+      { id: 'tv4', lastSeen: now - 27 * 3_600_000 },
+      { id: 'kitchen', lastSeen: fresh },
+    ], now)).toEqual(['TV 3']);
+    expect(tvsOnOldCode(['tv1', 'tv2', 'tv3', 'tv4'].map((id) => ({ id, lastSeen: fresh, version: 2 })), now)).toEqual([]);
+  });
+
+  it('adSeconds never cuts the video; parseEvery keeps to the limits', () => {
+    expect(adSeconds(15.04, 15.0)).toBe(15);
+    expect(adSeconds(15.3)).toBe(16);
+    expect(adSeconds(0.2)).toBe(1);
+    expect(parseEvery('rounds', '2')).toEqual({ by: 'rounds', n: 2 });
+    expect(parseEvery('rounds', '21')).toBeNull();
+    expect(parseEvery('minutes', '120')).toEqual({ by: 'minutes', n: 120 });
+    expect(parseEvery('minutes', '0')).toBeNull();
+    expect(parseEvery('minutes', '1.5')).toBeNull();
+  });
+
+  it('finds the video pictures of an ad', () => {
+    const pics = [{ id: 'L', video: { src: 'a', sound: true } }, { id: 'R', video: { src: 'b', sound: false } }, { id: 'P', video: null }];
+    const s = { kind: 'catering' as const, pictures: { tv1: 'L', tv2: 'R' } };
+    expect(adVideos(s, pics).map((p) => p.id)).toEqual(['L', 'R']);
+    expect(isVideoAd(s, pics)).toBe(true);
+    expect(isVideoAd({ kind: 'catering', pictures: { tv1: 'P' } }, pics)).toBe(false);
+    expect(isVideoAd({ kind: 'menu', pictures: { tv1: 'L' } }, pics)).toBe(false);
+  });
+
+  it('roundsHint', () => {
+    expect(roundsHint(1, 45)).toBe('One round of the menu is now 45 s, so about every 45 s.');
+    expect(roundsHint(2, 45)).toBe('One round of the menu is now 45 s, so about every 1½ min.');
+    expect(roundsHint(4, 45)).toBe('One round of the menu is now 45 s, so about every 3 min.');
   });
 });

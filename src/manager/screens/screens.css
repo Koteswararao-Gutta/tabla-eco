@@ -89,3 +89,14 @@ p.sc-meta { cursor: default; }
 .sc-toast { align-self: flex-start; max-width: 100%; scroll-margin-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
 .sc-toast-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-toast .t-btn { flex: none; }
+
+/* ads: one side of the pair (picker, still, notes), the pair side by side, and the upload bar */
+.sc-ad-side { display: flex; flex-direction: column; gap: 8px; }
+.sc-pair figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.sc-pair figcaption { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+.sc-pic video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+.sc-pic:has(video) { background: #000; }
+.sc-progress { display: flex; flex-direction: column; gap: 6px; }
+.sc-progress::before { content: ''; display: block; height: 8px; border-radius: 999px; background: var(--surface-2); }
+.sc-progress { position: relative; }
+.sc-progress-bar { position: absolute; top: 0; left: 0; height: 8px; border-radius: 999px; background: var(--accent); transition: width 0.2s; }

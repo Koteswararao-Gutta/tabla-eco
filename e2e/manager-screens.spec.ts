@@ -342,3 +342,171 @@ test('TV 5 clip picture: × offers Undo, and the file is deleted only after the 
   await expect(toast).toBeHidden({ timeout: 8000 });
   await expect.poll(pictureIds).not.toContain(added);
 });
+
+// ---------- ads ----------
+
+/** Turns two copies of the seeded pictures into a live-like ad: left with sound on TV 1, right without on TV 2. */
+async function seedAd(page: Page, extra: Record<string, unknown> = {}) {
+  await page.evaluate(async (extra) => {
+    const slots = JSON.parse(localStorage.getItem('tabla:slots') || '{}');
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    const { tv1, tv2 } = slots['slot-menu-1'].pictures;
+    const db: IDBDatabase = await new Promise((ok) => {
+      const r = indexedDB.open('tabla-pictures', 1);
+      r.onsuccess = () => ok(r.result);
+    });
+    const copy = (from: string, to: string) =>
+      new Promise<void>((ok) => {
+        const tx = db.transaction('blobs', 'readwrite');
+        const st = tx.objectStore('blobs');
+        const g = st.get(from);
+        g.onsuccess = () => st.put(g.result, to);
+        tx.oncomplete = () => ok();
+      });
+    await copy(tv1, 'adL');
+    await copy(tv2, 'adR');
+    pics.adL = { ...pics[tv1], id: 'adL', name: 'Ad left', video: { src: 'ads/e2e-ad-1.webm', sound: true } };
+    pics.adR = { ...pics[tv2], id: 'adR', name: 'Ad right', video: { src: 'ads/e2e-ad-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+    slots['ad-1'] = { id: 'ad-1', order: 5, seconds: 15, transition: 'fade', kind: 'catering', pictures: { tv1: 'adL', tv2: 'adR' }, endsAt: null, ...extra };
+    localStorage.setItem('tabla:slots', JSON.stringify(slots));
+  }, extra);
+}
+
+const setBeats = (page: Page, beats: Record<string, { lastSeen: number; version?: number }>) =>
+  page.evaluate((b) => {
+    const all: Record<string, unknown> = {};
+    for (const [id, v] of Object.entries(b)) all[id] = { id, ...v };
+    localStorage.setItem('tabla:heartbeats', JSON.stringify(all));
+  }, beats);
+
+async function adPage(context: import('@playwright/test').BrowserContext, extra: Record<string, unknown> = {}, beats?: Record<string, { lastSeen: number; version?: number }>) {
+  const control = await openScreen(context, '/');
+  await expect(control.getByRole('heading', { name: 'Tabla' })).toBeVisible();
+  await seedAd(control, extra);
+  if (beats) await setBeats(control, beats);
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await expect(page.getByTestId('slot')).toHaveCount(5);
+  return page;
+}
+
+test('the Add sheet offers Menu, Special and Ad; Ad asks for two videos, sound and how often', async ({ context }) => {
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await page.getByRole('button', { name: 'Add a picture', exact: true }).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('group', { name: 'Type' }).getByRole('button')).toHaveText(['Menu', 'Special', 'Ad']);
+  await sheet.getByRole('button', { name: 'Ad', exact: true }).click();
+  await expect(sheet.getByRole('heading', { name: 'Add an ad' })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Video for TV 1 (left)' })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Video for TV 2 (right)' })).toBeVisible();
+  await expect(sheet.getByRole('switch', { name: /Play with sound/ })).toHaveAttribute('aria-checked', 'false');
+  await expect(sheet.getByRole('group', { name: 'How often' }).getByRole('button')).toHaveText(['After rounds', 'By minutes']);
+  await expect(sheet.getByTestId('ad-save')).toBeDisabled();
+  await shot(page, 'ad-add-sheet');
+  // a file that is not an MP4: a plain message
+  await sheet.getByTestId('ad-file-left').setInputFiles({ name: 'clip.webm', mimeType: 'video/webm', buffer: Buffer.from('\x1aE\xdf\xa3 not an mp4 file at all') });
+  await expect(sheet.getByTestId('ad-video-problem')).toHaveText('Choose the MP4 file (from Files).');
+  await expect(sheet.getByTestId('ad-save')).toBeDisabled();
+});
+
+test('uploading an ad from the phone: two videos, then one ad spot on TV 1 and TV 2, shown first', async ({ context }) => {
+  const mp4 = (await import('node:fs')).readFileSync(new URL('../public/ads/catering-right-1.mp4', import.meta.url));
+  const page = await openScreen(context, '/manager/screens/tv1');
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Add a picture', exact: true }).click();
+  const sheet = page.getByRole('dialog');
+  await sheet.getByRole('button', { name: 'Ad', exact: true }).click();
+  await sheet.getByTestId('ad-file-left').setInputFiles({ name: 'left.mp4', mimeType: 'video/mp4', buffer: mp4 });
+  await sheet.getByTestId('ad-file-right').setInputFiles({ name: 'right.mp4', mimeType: 'video/mp4', buffer: mp4 });
+  await expect(sheet.getByTestId('ad-summary-left')).toHaveText(/^15 s · /, { timeout: 15_000 });
+  await expect(sheet.getByTestId('ad-summary-right')).toHaveText(/^15 s · /, { timeout: 15_000 });
+  await expect(sheet.getByTestId('ad-side-left').locator('img')).toBeVisible();
+  await sheet.getByRole('switch', { name: /Play with sound/ }).click();
+  await sheet.getByRole('button', { name: 'By minutes' }).click();
+  await sheet.getByTestId('ad-every-n').fill('2');
+  await expect(sheet.getByTestId('ad-every-hint')).toContainText('every 2 minutes');
+  await shot(page, 'ad-add-filled');
+  await sheet.getByTestId('ad-save').click();
+  await expect(sheet).toBeHidden({ timeout: 15_000 });
+
+  const all = await readCollection<Slot & { kind?: string; every?: unknown }>(page, 'slots');
+  const ad = all.find((s) => s.kind === 'catering' && s.id !== 'slot-catering')!;
+  expect(ad.seconds).toBe(15);
+  expect(ad.every).toEqual({ by: 'minutes', n: 2 });
+  const pics = await readCollection<{ id: string; video?: { src: string; sound: boolean; seconds: number } }>(page, 'pictures');
+  const l = pics.find((p) => p.id === ad.pictures.tv1)!;
+  const r = pics.find((p) => p.id === ad.pictures.tv2)!;
+  expect(l.video).toMatchObject({ src: expect.stringMatching(/^stored:/), sound: true });
+  expect(r.video).toMatchObject({ src: expect.stringMatching(/^stored:/), sound: true });
+  expect(l.video!.src).not.toBe(r.video!.src);
+  expect((await singleton(page, 'loop')).firstSlotId).toBe(ad.id);
+  // the list shows it as an ad with sound
+  const item = page.locator(`[data-slot-id="${ad.id}"]`);
+  await expect(item).toContainText('Ad');
+  await expect(item.getByTestId('video-badge')).toHaveText('Sound on');
+  await expect(item.getByTestId('slot-line')).toContainText('15 s · every 2 min');
+});
+
+test('an ad with videos opens the ad sheet: no Replace picture, no Remove; pause, sound and how often', async ({ context }) => {
+  const page = await adPage(context);
+  const item = page.locator('[data-slot-id="ad-1"]');
+  await expect(item.getByTestId('video-badge')).toHaveText('Sound on');
+  await expect(item.locator('.t-badge.accent')).toHaveText('Ad');
+  await item.getByRole('button', { name: /Ad 5: options/ }).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('heading', { name: 'Ad' })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: /Replace picture/ })).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: /Remove/ })).toHaveCount(0);
+  await expect(sheet.getByTestId('ad-pair').locator('img')).toHaveCount(2);
+  await expect(sheet.getByTestId('ad-badges')).toContainText('Sound on TV 1 and TV 3');
+  await shot(page, 'ad-sheet');
+
+  // Sound on for both sides (all 4 TVs)
+  await sheet.getByRole('switch', { name: /Play with sound/ }).click();
+  await expect.poll(async () => (await readCollection<{ id: string; video?: { sound: boolean } }>(page, 'pictures')).filter((p) => p.id === 'adL' || p.id === 'adR').map((p) => p.video?.sound)).toEqual([true, true]);
+  await sheet.getByRole('switch', { name: /Play with sound/ }).click();
+  await expect.poll(async () => (await readCollection<{ id: string; video?: { sound: boolean } }>(page, 'pictures')).filter((p) => p.id === 'adL' || p.id === 'adR').map((p) => p.video?.sound)).toEqual([false, false]);
+
+  // How often: after every 3 rounds, saved on the slot, the loop restarts on it
+  await sheet.getByTestId('ad-every-n').fill('3');
+  await sheet.getByRole('button', { name: 'Save changes' }).click();
+  await expect(sheet).toBeHidden();
+  let ad = (await readCollection<Slot & { every?: unknown; endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!;
+  expect(ad.every).toEqual({ by: 'rounds', n: 3 });
+  expect((await singleton(page, 'loop')).firstSlotId).toBe('ad-1');
+  await expect(item.getByTestId('slot-line')).toContainText('after every 3 rounds');
+
+  // Pause, then play again
+  await item.getByTestId('slot-line').click();
+  await sheet.getByRole('switch', { name: /Ad is playing/ }).click();
+  await expect.poll(async () => (await readCollection<Slot & { endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!.endsAt).not.toBeNull();
+  await expect(sheet.getByRole('switch', { name: /Ad is playing/ })).toHaveAttribute('aria-checked', 'false');
+  await expect(item.getByTestId('slot-line')).toContainText('Paused');
+  await sheet.getByRole('switch', { name: /Ad is playing/ }).click();
+  await expect.poll(async () => (await readCollection<Slot & { endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!.endsAt).toBeNull();
+  expect((await singleton(page, 'loop')).firstSlotId).toBe('ad-1');
+  ad = (await readCollection<Slot & { every?: unknown }>(page, 'slots')).find((s) => s.id === 'ad-1')!;
+  expect(ad.pictures).toEqual({ tv1: 'adL', tv2: 'adR' });
+  // the ad's pictures are still there
+  const ids = (await readCollection<{ id: string }>(page, 'pictures')).map((p) => p.id);
+  expect(ids).toEqual(expect.arrayContaining(['adL', 'adR']));
+});
+
+test('how often waits until every menu TV runs the new version', async ({ context }) => {
+  const fresh = Date.now() - 60_000;
+  const page = await adPage(context, {}, { tv1: { lastSeen: fresh, version: 2 }, tv2: { lastSeen: fresh, version: 2 }, tv3: { lastSeen: fresh }, tv4: { lastSeen: fresh, version: 2 } });
+  await page.locator('[data-slot-id="ad-1"]').getByTestId('slot-line').click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByTestId('ad-every-waiting')).toContainText('Still on the old version: TV 3.');
+  await expect(sheet.getByTestId('ad-every-n')).toHaveCount(0);
+  await shot(page, 'ad-sheet-waiting');
+});
+
+test('a picture-only ad (no video) keeps the normal picture sheet', async ({ context }) => {
+  const page = await adPage(context);
+  // the picture-only catering slot (no video) keeps the normal picture sheet with Remove
+  const cat = page.locator('[data-slot-id="slot-catering"]');
+  await expect(cat.locator('.t-badge.accent')).toHaveText('Ad');
+  await cat.getByRole('button', { name: /Picture 4: options/ }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Remove from TV 1' })).toBeVisible();
+});

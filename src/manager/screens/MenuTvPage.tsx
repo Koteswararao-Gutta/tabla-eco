@@ -7,7 +7,8 @@ import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
 import { MAIN_OF, PARTNER, loopSlots, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
-import { MIRROR_SOURCE, TRANSITIONS, fromLocalInput, insertOrder, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
+import { MIRROR_SOURCE, TRANSITIONS, adLine, fromLocalInput, insertOrder, isVideoAd, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
+import { AdAddFields, AdSheet } from './AdParts';
 import { useAppBase } from '../mode';
 import { deletePictureIfUnused, FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
 
@@ -34,7 +35,8 @@ export default function MenuTvPage({ tv }: { tv: ScreenId }) {
   const screens = useCollection('screens');
   const allSlots = useCollection('slots');
   const slots = useMemo(() => allSlots && allSlots.filter(isWholeSlot), [allSlots]);
-  const now = useNow(30_000);
+  // Every 2 s, so a paused ad or an ended picture shows as such right away.
+  const now = useNow(2_000);
   const base = useAppBase();
   if (!screens || !slots) {
     return <ScreenPage id={tv}><p className="t-sub">Loading…</p></ScreenPage>;
@@ -75,6 +77,7 @@ type Open =
   | { kind: 'fill'; slotId: string; replace: boolean }
   | { kind: 'options'; slotId: string }
   | { kind: 'timing'; slotId: string }
+  | { kind: 'ad'; slotId: string }
   | null;
 
 function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slots: S[]; screens: Screen[]; now: number; readOnly?: boolean }) {
@@ -116,10 +119,13 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           const kind = slot.kind ?? 'menu';
           const inner = <StoredPicture id={shown} alt={`Picture ${i + 1}`} />;
           const video = shown ? pictures?.find((p) => p.id === shown)?.video : null;
+          // An ad with videos opens the ad sheet: none of the picture actions that could lose it.
+          const videoAd = !!pictures && isVideoAd(slot, pictures);
+          const tapPicture = () => setOpen(videoAd ? { kind: 'ad', slotId: slot.id } : { kind: 'options', slotId: slot.id });
           const badges = (
             <>
-              {video && <span className="t-badge" data-testid="video-badge">{video.sound ? 'Video with sound' : 'Video'}</span>}
-              {kind !== 'menu' && <span className="t-badge accent">{kind === 'special' ? 'Special' : 'Catering'}</span>}
+              {kind !== 'menu' && <span className="t-badge accent">{kind === 'special' ? 'Special' : 'Ad'}</span>}
+              {video && <span className="t-badge" data-testid="video-badge">{video.sound ? 'Sound on' : 'No sound'}</span>}
               {shared && main && shown === slot.pictures[main] ? (
                 <span className="t-badge">Same as {screenName(main)}</span>
               ) : (
@@ -141,17 +147,17 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
               ) : readOnly ? (
                 <div className="sc-pic">{inner}</div>
               ) : (
-                <button className="sc-pic" aria-label={`Picture ${i + 1}: options`} onClick={() => setOpen({ kind: 'options', slotId: slot.id })}>
+                <button className="sc-pic" aria-label={videoAd ? `Ad ${i + 1}: options` : `Picture ${i + 1}: options`} onClick={tapPicture}>
                   {inner}
                 </button>
               )}
               <div className="sc-under">
                 {badges}
                 {readOnly ? (
-                  <p className="sc-meta">{slotLine(slot, now)}</p>
+                  <p className="sc-meta">{videoAd ? adLine(slot, now) : slotLine(slot, now)}</p>
                 ) : (
-                  <button className="sc-meta" data-testid="slot-line" onClick={() => setOpen({ kind: 'timing', slotId: slot.id })}>
-                    {slotLine(slot, now)} <span aria-hidden>›</span>
+                  <button className="sc-meta" data-testid="slot-line" onClick={() => setOpen(videoAd ? { kind: 'ad', slotId: slot.id } : { kind: 'timing', slotId: slot.id })}>
+                    {videoAd ? adLine(slot, now) : slotLine(slot, now)} <span aria-hidden>›</span>
                   </button>
                 )}
               </div>
@@ -174,6 +180,7 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
       {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={open.after} onClose={close} />}
       {open?.kind === 'fill' && openSlot && <FillSheet tv={tv} sorted={sorted} slot={openSlot} replace={open.replace} onClose={close} />}
       {open?.kind === 'timing' && openSlot && <TimingSheet slot={openSlot} onClose={close} />}
+      {open?.kind === 'ad' && openSlot && <AdSheet slot={openSlot} sorted={sorted} side={tv === 'tv2' || tv === 'tv4' ? 'tv2' : 'tv1'} onClose={close} />}
       {open?.kind === 'options' && openSlot && (
         <OptionsSheet
           tv={tv}
@@ -211,7 +218,7 @@ function useSaver() {
 const KINDS: { value: Kind; label: string }[] = [
   { value: 'menu', label: 'Menu' },
   { value: 'special', label: 'Special' },
-  { value: 'catering', label: 'Catering' },
+  { value: 'catering', label: 'Ad' },
 ];
 
 /** What the TVs show for a newly added picture, in plain words. */
@@ -277,14 +284,25 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
     }, 'That file could not be saved as a picture. Try another one.');
   };
 
+  const typeRow = (
+    <div className="t-field" role="group" aria-label="Type">
+      <span>Type</span>
+      <Segmented label="Type" value={kind} options={KINDS} onChange={setKind} />
+    </div>
+  );
+  if (kind === 'catering') {
+    return (
+      <Sheet open title="Add an ad" onClose={onClose}>
+        {typeRow}
+        <AdAddFields sorted={sorted} after={after} onDone={onClose} onCancel={onClose} />
+      </Sheet>
+    );
+  }
   return (
     <Sheet open title={`Add a picture to ${screenName(tv)}`} onClose={onClose}>
       {file && <FilePreview file={file} onBroken={() => setBadFile(file)} />}
       <PictureInput label={file ? 'Choose a different picture' : 'Choose a picture'} className={'t-btn block' + (file ? '' : ' accent')} onFile={setFile} testId="add-file" />
-      <div className="t-field" role="group" aria-label="Type">
-        <span>Type</span>
-        <Segmented label="Type" value={kind} options={KINDS} onChange={setKind} />
-      </div>
+      {typeRow}
       <TimingFields seconds={seconds} setSeconds={setSeconds} transition={transition} setTransition={setTransition} invalid={secs == null} />
       {kind !== 'menu' && (
         <Field label="Stop showing after (optional)">

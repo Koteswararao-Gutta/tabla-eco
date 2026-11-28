@@ -1,5 +1,6 @@
 // Pure helpers for the Screens tab (no React, no store). Tested in logic.test.ts.
-import type { Screen, ScreenId, Slot, Transition } from '@shared/data/types';
+import { ADS_CODE_VERSION, type AdEvery, type Heartbeat, type Picture, type Screen, type ScreenId, type Slot, type Transition } from '@shared/data/types';
+import { EVERY_MAX } from '@shared/clock/loop';
 
 /** Slots in play order (same tie-break as activeSlots in @shared/clock/loop). Includes ended slots. */
 export function sortSlots<T extends Slot>(slots: readonly T[]): T[] {
@@ -120,3 +121,67 @@ export const SCREEN_IDS: ScreenId[] = ['tv1', 'tv2', 'tv3', 'tv4', 'tv5', 'kitch
 export const screenName = (id: ScreenId): string => (id === 'kitchen' ? 'Kitchen' : 'TV ' + id.slice(2));
 /** TV 3 mirrors TV 1 and TV 4 mirrors TV 2 when mirroring is on. */
 export const MIRROR_SOURCE: Partial<Record<ScreenId, ScreenId>> = { tv3: 'tv1', tv4: 'tv2' };
+
+// ---------- ads ----------
+
+/** Ads are slots of kind 'catering' (shown as "Ad"; the stored name stays for older TVs and the rules). */
+export const isAd = (s: Pick<Slot, 'kind'>): boolean => (s.kind ?? 'menu') === 'catering';
+
+/** The pictures of this slot that carry an ad video, TV 1's first. */
+export function adVideos<P extends Pick<Picture, 'video'> & { id: string }>(s: Pick<Slot, 'pictures'>, pictures: readonly P[]): P[] {
+  const ids = (['tv1', 'tv2', 'tv3', 'tv4'] as const).map((tv) => s.pictures[tv]).filter((id): id is string => !!id);
+  return [...new Set(ids)].flatMap((id) => pictures.filter((p) => p.id === id && !!p.video));
+}
+
+/** True for an ad that plays videos (it then gets the ad sheet, never the picture sheets that could delete it). */
+export const isVideoAd = (s: Pick<Slot, 'kind' | 'pictures'>, pictures: readonly (Pick<Picture, 'video'> & { id: string })[]): boolean =>
+  isAd(s) && adVideos(s, pictures).length > 0;
+
+/** "after every round", "after every 3 rounds", "every 2 min", or "once every round, in its place" (the old way). */
+export function everyLabel(every: AdEvery | null | undefined): string {
+  if (!every) return 'once every round, in its place';
+  if (every.by === 'rounds') return every.n === 1 ? 'after every round' : `after every ${every.n} rounds`;
+  return every.n === 1 ? 'every minute' : `every ${every.n} min`;
+}
+
+/** The line under an ad: "15 s · every 2 min", "Paused", "15 s · after every round · until Sun 9 PM". */
+export function adLine(slot: Pick<Slot, 'seconds' | 'endsAt' | 'every'>, now: number): string {
+  if (slot.endsAt != null && slot.endsAt <= now) return 'Paused';
+  const parts = [`${slot.seconds} s`, everyLabel(slot.every)];
+  if (slot.endsAt != null) parts.push(`until ${formatWhen(slot.endsAt, now)}`);
+  return parts.join(' · ');
+}
+
+const MENU_TVS: ScreenId[] = ['tv1', 'tv2', 'tv3', 'tv4'];
+/** A TV that hasn't reported in for this long (unplugged) doesn't hold "How often" back. */
+export const STALE_BEAT_MS = 26 * 3_600_000;
+
+/** Menu TVs still on older code ("TV 3"), from the heartbeats; empty when every menu TV can play ads by rounds or
+ *  minutes. A TV never seen, or not seen for 26 hours, doesn't count. */
+export function tvsOnOldCode(beats: readonly (Pick<Heartbeat, 'lastSeen' | 'version'> & { id: string })[], now: number): string[] {
+  return MENU_TVS.filter((tv) => {
+    const b = beats.find((x) => x.id === tv);
+    if (!b || !(now - b.lastSeen < STALE_BEAT_MS)) return false;
+    return !(typeof b.version === 'number' && b.version >= ADS_CODE_VERSION);
+  }).map(screenName);
+}
+
+/** Seconds for an ad from its video length(s): never cuts a video short. */
+export const adSeconds = (...durations: number[]): number => Math.max(1, Math.ceil(Math.max(...durations) - 0.1));
+
+/** A whole number in range for "How often", or null. */
+export function parseEvery(by: AdEvery['by'], v: string): AdEvery | null {
+  if (!/^\s*\d+\s*$/.test(v)) return null;
+  const n = Number(v);
+  return n >= 1 && n <= EVERY_MAX[by] ? { by, n } : null;
+}
+
+/** "About every 1½ min" for "after every N rounds", from the length of one menu round in seconds. */
+export function roundsHint(n: number, roundSeconds: number): string {
+  if (!(roundSeconds > 0)) return '';
+  const s = n * roundSeconds;
+  if (s < 90) return `One round of the menu is now ${roundSeconds} s, so about every ${Math.round(s)} s.`;
+  const min = Math.round(s / 30) / 2;
+  const text = Number.isInteger(min) ? String(min) : `${Math.floor(min) || ''}½`;
+  return `One round of the menu is now ${roundSeconds} s, so about every ${text} min.`;
+}
