@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '@shared/data/types';
-import { adLine, adSeconds, adVideos, everyLabel, isVideoAd, parseEvery, roundsHint, tvsOnOldCode, formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
+import { adLine, adSeconds, adShare, everyProblem, adVideos, everyLabel, isVideoAd, parseEvery, roundsHint, tvsOnOldCode, formatWhen, fromLocalInput, insertOrder, isPin, moveSlot, moveSlotTo, parseSeconds, pictureInUse, pictureWarnings, slotLine, sortSlots, tileLine, toLocalInput, withoutPicture } from './logic';
 
 const s = (id: string, order: number, extra: Partial<Slot> = {}): Slot => ({ id, order, seconds: 10, transition: 'fade', pictures: { tv1: 'p' + id }, ...extra });
 
@@ -121,6 +121,8 @@ describe('ads', () => {
     expect(parseEvery('rounds', '21')).toBeNull();
     expect(parseEvery('minutes', '120')).toEqual({ by: 'minutes', n: 120 });
     expect(parseEvery('minutes', '0')).toBeNull();
+    expect(parseEvery('minutes', '1')).toBeNull();
+    expect(parseEvery('minutes', '2')).toEqual({ by: 'minutes', n: 2 });
     expect(parseEvery('minutes', '1.5')).toBeNull();
   });
 
@@ -131,6 +133,14 @@ describe('ads', () => {
     expect(isVideoAd(s, pics)).toBe(true);
     expect(isVideoAd({ kind: 'catering', pictures: { tv1: 'P' } }, pics)).toBe(false);
     expect(isVideoAd({ kind: 'menu', pictures: { tv1: 'L' } }, pics)).toBe(false);
+  });
+
+  it('everyProblem and adShare', () => {
+    expect(everyProblem({ by: 'minutes', n: 2 }, 15)).toBeNull();
+    expect(everyProblem({ by: 'minutes', n: 2 }, 61)).toBe('Every 2 minutes is too often for a 61 s ad. Choose 3 minutes or more.');
+    expect(everyProblem({ by: 'rounds', n: 1 }, 60)).toBeNull();
+    expect(adShare({ by: 'rounds', n: 1 }, 15, 45)).toBe(25);
+    expect(adShare({ by: 'minutes', n: 2 }, 15, 45)).toBe(13);
   });
 
   it('roundsHint', () => {

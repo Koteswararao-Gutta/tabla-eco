@@ -1,21 +1,40 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { pairProblems, videoFormat, videoProblems, videoSummary, videoWarnings, type VideoInfo } from './adVideo';
 
-const file = (...parts: string[]) => {
-  const bytes = new Uint8Array(64);
-  let at = 0;
-  for (const p of parts) for (const c of p) bytes[at++] = c.charCodeAt(0);
-  return bytes;
+const box = (type: string, payload: string | Uint8Array) => {
+  const body = typeof payload === 'string' ? Uint8Array.from(payload, (c) => c.charCodeAt(0)) : payload;
+  const out = new Uint8Array(8 + body.length);
+  new DataView(out.buffer).setUint32(0, out.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(body, 8);
+  return out;
 };
+const join = (...parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+  let at = 0;
+  for (const p of parts) out.set(p, at), (at += p.length);
+  return out;
+};
+const ftyp = box('ftyp', 'isom\0\0\0\0isomavc1');
 
 describe('videoFormat', () => {
-  it('tells H.264 MP4 from HEVC and other files', () => {
-    expect(videoFormat(file('\0\0\0 ftypisom....moov..avc1'))).toBe('ok');
-    expect(videoFormat(file('\0\0\0 ftypqt  ....moov..hvc1'))).toBe('hevc');
-    expect(videoFormat(file('\0\0\0 ftypisom....hev1'))).toBe('hevc');
-    expect(videoFormat(file('\0\0\0 ftypisom....av01'))).toBe('no-h264');
-    expect(videoFormat(file('\x1aE\xdf\xa3webm'))).toBe('not-mp4');
+  it('tells H.264 MP4 from HEVC and other files, looking only inside moov', () => {
+    expect(videoFormat(join(ftyp, box('mdat', 'xxxx'), box('moov', '..trak..avc1..')))).toBe('ok');
+    expect(videoFormat(join(ftyp, box('moov', '..hvc1..'), box('mdat', 'xxxx')))).toBe('hevc');
+    expect(videoFormat(join(ftyp, box('moov', '..hev1..')))).toBe('hevc');
+    expect(videoFormat(join(ftyp, box('moov', '..av01..')))).toBe('no-h264');
+    // picture data that happens to hold "hvc1" doesn't make an H.264 file HEVC
+    expect(videoFormat(join(ftyp, box('mdat', '..hvc1..hev1..'), box('moov', '..avc1..')))).toBe('ok');
+    expect(videoFormat(join(ftyp, box('mdat', 'avc1')))).toBe('not-mp4'); // no moov
+    expect(videoFormat(Uint8Array.from('\x1aE\xdf\xa3webm', (c) => c.charCodeAt(0)))).toBe('not-mp4');
     expect(videoFormat(new Uint8Array(3))).toBe('not-mp4');
+  });
+
+  it('reads the real ad files as H.264', () => {
+    for (const f of ['catering-left-1.mp4', 'catering-right-1.mp4']) {
+      expect(videoFormat(new Uint8Array(readFileSync(new URL('../../../public/ads/' + f, import.meta.url))))).toBe('ok');
+    }
   });
 });
 
@@ -34,7 +53,7 @@ describe('videoProblems', () => {
     expect(videoProblems({ ...good, format: 'not-mp4' })).toEqual(['Choose the MP4 file (from Files).']);
   });
   it('warns about a big file', () => {
-    expect(videoWarnings({ ...good, size: 20 * 1024 * 1024 })[0]).toMatch(/Big file/);
+    expect(videoWarnings({ ...good, size: 15 * 1024 * 1024 })[0]).toMatch(/Big file/);
   });
   it('the two halves must be the same length', () => {
     expect(pairProblems({ duration: 15 }, { duration: 15.3 })).toEqual([]);

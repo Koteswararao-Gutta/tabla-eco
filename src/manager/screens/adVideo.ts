@@ -9,21 +9,44 @@ const AVC1 = ascii('avc1');
 const HVC1 = ascii('hvc1');
 const HEV1 = ascii('hev1');
 
-function has(bytes: Uint8Array, tag: number[], from = 0): boolean {
+function has(bytes: Uint8Array, tag: number[], from = 0, to = bytes.length): boolean {
   const [a, b, c, d] = tag;
-  for (let i = from; i + 3 < bytes.length; i++) {
+  for (let i = from; i + 3 < to; i++) {
     if (bytes[i] === a && bytes[i + 1] === b && bytes[i + 2] === c && bytes[i + 3] === d) return true;
   }
   return false;
 }
 
+/** Where the file's 'moov' box (the part that describes the video) lies, or null. Walks the top-level boxes. */
+export function moovRange(bytes: Uint8Array): [number, number] | null {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let at = 0;
+  while (at + 8 <= bytes.length) {
+    let size = dv.getUint32(at);
+    let head = 8;
+    if (size === 1) {
+      if (at + 16 > bytes.length) return null;
+      size = dv.getUint32(at + 8) * 2 ** 32 + dv.getUint32(at + 12);
+      head = 16;
+    } else if (size === 0) size = bytes.length - at;
+    if (size < head) return null;
+    const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
+    if (type === 'moov') return [at + head, Math.min(at + size, bytes.length)];
+    at += size;
+  }
+  return null;
+}
+
 /** From the file's bytes: 'ok' (MP4 with H.264, which every TV plays), 'hevc' (the iPhone's newer format, which the
- *  TVs may not play), 'not-mp4', or 'no-h264'. Looks at the whole file: the part that names the format can be at
- *  the end. */
+ *  TVs may not play), 'not-mp4', or 'no-h264'. Looks only inside the 'moov' box, where the format is named (it can
+ *  be at the end of the file); the picture data itself could hold those four letters by chance. */
 export function videoFormat(bytes: Uint8Array): VideoFormat {
   if (bytes.length < 12 || !FTYP.every((c, i) => bytes[4 + i] === c)) return 'not-mp4';
-  if (has(bytes, HVC1) || has(bytes, HEV1)) return 'hevc';
-  return has(bytes, AVC1) ? 'ok' : 'no-h264';
+  const moov = moovRange(bytes);
+  if (!moov) return 'not-mp4';
+  const [from, to] = moov;
+  if (has(bytes, HVC1, from, to) || has(bytes, HEV1, from, to)) return 'hevc';
+  return has(bytes, AVC1, from, to) ? 'ok' : 'no-h264';
 }
 
 export interface VideoInfo {
@@ -37,15 +60,15 @@ export interface VideoInfo {
 
 export const MIN_AD_SECONDS = 3;
 export const MAX_AD_SECONDS = 60;
-export const MAX_VIDEO_BYTES = 30 * 1024 * 1024;
-const BIG_VIDEO_BYTES = 15 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+const BIG_VIDEO_BYTES = 12 * 1024 * 1024;
 
 /** Plain problems that stop the ad from being saved (empty = fine). */
 export function videoProblems(v: VideoInfo): string[] {
   const out: string[] = [];
   if (v.format === 'not-mp4') out.push('Choose the MP4 file (from Files).');
   else if (v.format !== 'ok') out.push("This video is in a format the TVs can't play. Download it from Higgsfield again as MP4 and pick it from Files.");
-  if (v.size > MAX_VIDEO_BYTES) out.push('This file is too big (over 30 MB).');
+  if (v.size > MAX_VIDEO_BYTES) out.push('This file is too big (over 20 MB). Export it again from Higgsfield at a smaller size.');
   if (v.format !== 'not-mp4') {
     if (v.width > 0 && v.height > 0 && v.width <= v.height) out.push('This video is tall. The TVs need a wide (landscape) video.');
     if (!(v.duration >= MIN_AD_SECONDS && v.duration <= MAX_AD_SECONDS)) out.push(`Ads must be ${MIN_AD_SECONDS} to ${MAX_AD_SECONDS} seconds long.`);

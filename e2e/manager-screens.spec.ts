@@ -397,8 +397,8 @@ test('the Add sheet offers Menu, Special and Ad; Ad asks for two videos, sound a
   await expect(sheet.getByRole('group', { name: 'Type' }).getByRole('button')).toHaveText(['Menu', 'Special', 'Ad']);
   await sheet.getByRole('button', { name: 'Ad', exact: true }).click();
   await expect(sheet.getByRole('heading', { name: 'Add an ad' })).toBeVisible();
-  await expect(sheet.getByRole('button', { name: 'Video for TV 1 (left)' })).toBeVisible();
-  await expect(sheet.getByRole('button', { name: 'Video for TV 2 (right)' })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: "Video for TV 1 (left) – ends with 'Scan the code'" })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Video for TV 2 (right) – shows the QR code' })).toBeVisible();
   await expect(sheet.getByRole('switch', { name: /Play with sound/ })).toHaveAttribute('aria-checked', 'false');
   await expect(sheet.getByRole('group', { name: 'How often' }).getByRole('button')).toHaveText(['After rounds', 'By minutes']);
   await expect(sheet.getByTestId('ad-save')).toBeDisabled();
@@ -407,6 +407,27 @@ test('the Add sheet offers Menu, Special and Ad; Ad asks for two videos, sound a
   await sheet.getByTestId('ad-file-left').setInputFiles({ name: 'clip.webm', mimeType: 'video/webm', buffer: Buffer.from('\x1aE\xdf\xa3 not an mp4 file at all') });
   await expect(sheet.getByTestId('ad-video-problem')).toHaveText('Choose the MP4 file (from Files).');
   await expect(sheet.getByTestId('ad-save')).toBeDisabled();
+  // a video was picked: closing asks first, and Keep editing keeps the sheet
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Discard the videos you picked?')).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(sheet.getByRole('heading', { name: 'Add an ad' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(sheet).toBeHidden();
+});
+
+test('how often by minutes: at least 2, and not shorter than the ad plus a minute', async ({ context }) => {
+  const page = await adPage(context);
+  await page.locator('[data-slot-id="ad-1"]').getByTestId('slot-line').click();
+  const sheet = page.getByRole('dialog');
+  await sheet.getByRole('button', { name: 'By minutes' }).click();
+  await sheet.getByTestId('ad-every-n').fill('1');
+  await expect(sheet.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  await sheet.getByTestId('ad-every-n').fill('2');
+  await expect(sheet.getByTestId('ad-every-problem')).toHaveCount(0);
+  await expect(sheet.getByTestId('ad-every-hint')).toContainText('% of the time');
+  await expect(sheet.getByRole('button', { name: 'Save changes' })).toBeEnabled();
 });
 
 test('uploading an ad from the phone: two videos, then one ad spot on TV 1 and TV 2, shown first', async ({ context }) => {
@@ -418,16 +439,17 @@ test('uploading an ad from the phone: two videos, then one ad spot on TV 1 and T
   await sheet.getByRole('button', { name: 'Ad', exact: true }).click();
   await sheet.getByTestId('ad-file-left').setInputFiles({ name: 'left.mp4', mimeType: 'video/mp4', buffer: mp4 });
   await sheet.getByTestId('ad-file-right').setInputFiles({ name: 'right.mp4', mimeType: 'video/mp4', buffer: mp4 });
-  await expect(sheet.getByTestId('ad-summary-left')).toHaveText(/^15 s · /, { timeout: 15_000 });
-  await expect(sheet.getByTestId('ad-summary-right')).toHaveText(/^15 s · /, { timeout: 15_000 });
+  await expect(sheet.getByTestId('ad-summary-left')).toHaveText(/^TV 1: 15 s · /, { timeout: 15_000 });
+  await expect(sheet.getByTestId('ad-summary-right')).toHaveText(/^TV 2: 15 s · /, { timeout: 15_000 });
   await expect(sheet.getByTestId('ad-side-left').locator('img')).toBeVisible();
   await sheet.getByRole('switch', { name: /Play with sound/ }).click();
   await sheet.getByRole('button', { name: 'By minutes' }).click();
   await sheet.getByTestId('ad-every-n').fill('2');
-  await expect(sheet.getByTestId('ad-every-hint')).toContainText('every 2 minutes');
+  await expect(sheet.getByTestId('ad-every-hint')).toContainText('% of the time');
   await shot(page, 'ad-add-filled');
   await sheet.getByTestId('ad-save').click();
   await expect(sheet).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByTestId('ad-notice')).toHaveText('Done. The ad is on the TVs now.');
 
   const all = await readCollection<Slot & { kind?: string; every?: unknown }>(page, 'slots');
   const ad = all.find((s) => s.kind === 'catering' && s.id !== 'slot-catering')!;
@@ -447,7 +469,7 @@ test('uploading an ad from the phone: two videos, then one ad spot on TV 1 and T
   await expect(item.getByTestId('slot-line')).toContainText('15 s · every 2 min');
 });
 
-test('an ad with videos opens the ad sheet: no Replace picture, no Remove; pause, sound and how often', async ({ context }) => {
+test('an ad with videos opens the ad sheet: no Replace picture, no picture Remove; pause, sound and how often', async ({ context }) => {
   const page = await adPage(context);
   const item = page.locator('[data-slot-id="ad-1"]');
   await expect(item.getByTestId('video-badge')).toHaveText('Sound on');
@@ -456,7 +478,7 @@ test('an ad with videos opens the ad sheet: no Replace picture, no Remove; pause
   const sheet = page.getByRole('dialog');
   await expect(sheet.getByRole('heading', { name: 'Ad' })).toBeVisible();
   await expect(sheet.getByRole('button', { name: /Replace picture/ })).toHaveCount(0);
-  await expect(sheet.getByRole('button', { name: /Remove/ })).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: /Remove from/ })).toHaveCount(0);
   await expect(sheet.getByTestId('ad-pair').locator('img')).toHaveCount(2);
   await expect(sheet.getByTestId('ad-badges')).toContainText('Sound on TV 1 and TV 3');
   await shot(page, 'ad-sheet');
@@ -467,29 +489,58 @@ test('an ad with videos opens the ad sheet: no Replace picture, no Remove; pause
   await sheet.getByRole('switch', { name: /Play with sound/ }).click();
   await expect.poll(async () => (await readCollection<{ id: string; video?: { sound: boolean } }>(page, 'pictures')).filter((p) => p.id === 'adL' || p.id === 'adR').map((p) => p.video?.sound)).toEqual([false, false]);
 
-  // How often: after every 3 rounds, saved on the slot, the loop restarts on it
+  // How often: after every 3 rounds, saved on the slot; the loop starts again at the first menu picture
   await sheet.getByTestId('ad-every-n').fill('3');
   await sheet.getByRole('button', { name: 'Save changes' }).click();
   await expect(sheet).toBeHidden();
   let ad = (await readCollection<Slot & { every?: unknown; endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!;
   expect(ad.every).toEqual({ by: 'rounds', n: 3 });
-  expect((await singleton(page, 'loop')).firstSlotId).toBe('ad-1');
+  expect((await singleton(page, 'loop')).firstSlotId).toBeNull();
   await expect(item.getByTestId('slot-line')).toContainText('after every 3 rounds');
 
-  // Pause, then play again
+  // Pause (ends at the end of what plays now, no restart), then play again (restarts at the first menu picture)
   await item.getByTestId('slot-line').click();
-  await sheet.getByRole('switch', { name: /Ad is playing/ }).click();
+  const anchorBefore = (await singleton(page, 'loop')).anchor;
+  await sheet.getByRole('switch', { name: /Show this ad/ }).click();
   await expect.poll(async () => (await readCollection<Slot & { endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!.endsAt).not.toBeNull();
-  await expect(sheet.getByRole('switch', { name: /Ad is playing/ })).toHaveAttribute('aria-checked', 'false');
+  expect((await singleton(page, 'loop')).anchor).toBe(anchorBefore);
+  await expect(sheet.getByRole('switch', { name: /Show this ad/ })).toHaveAttribute('aria-checked', 'false');
   await expect(item.getByTestId('slot-line')).toContainText('Paused');
-  await sheet.getByRole('switch', { name: /Ad is playing/ }).click();
+  await sheet.getByRole('switch', { name: /Show this ad/ }).click();
   await expect.poll(async () => (await readCollection<Slot & { endsAt?: number | null }>(page, 'slots')).find((s) => s.id === 'ad-1')!.endsAt).toBeNull();
-  expect((await singleton(page, 'loop')).firstSlotId).toBe('ad-1');
+  expect((await singleton(page, 'loop')).firstSlotId).toBeNull();
   ad = (await readCollection<Slot & { every?: unknown }>(page, 'slots')).find((s) => s.id === 'ad-1')!;
   expect(ad.pictures).toEqual({ tv1: 'adL', tv2: 'adR' });
   // the ad's pictures are still there
   const ids = (await readCollection<{ id: string }>(page, 'pictures')).map((p) => p.id);
   expect(ids).toEqual(expect.arrayContaining(['adL', 'adR']));
+});
+
+test('Remove ad takes only the ad spot off the TVs; its pictures and videos stay', async ({ context }) => {
+  const page = await adPage(context);
+  await page.locator('[data-slot-id="ad-1"]').getByTestId('slot-line').click();
+  const sheet = page.getByRole('dialog');
+  await sheet.getByTestId('ad-remove').click();
+  await expect(sheet.getByText('Removes the ad from all 4 TVs. The videos stay saved.')).toBeVisible();
+  await sheet.getByTestId('ad-remove-confirm').click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByTestId('ad-notice')).toHaveText('Ad removed from the TVs.');
+  await expect(page.getByTestId('slot')).toHaveCount(4);
+  expect((await readCollection<{ id: string }>(page, 'slots')).map((s) => s.id)).not.toContain('ad-1');
+  expect((await readCollection<{ id: string }>(page, 'pictures')).map((p) => p.id)).toEqual(expect.arrayContaining(['adL', 'adR']));
+  expect((await singleton(page, 'loop')).firstSlotId).toBeNull();
+});
+
+test('the ad sheet asks before throwing away unsaved changes', async ({ context }) => {
+  const page = await adPage(context);
+  await page.locator('[data-slot-id="ad-1"]').getByTestId('slot-line').click();
+  const sheet = page.getByRole('dialog');
+  await sheet.getByTestId('ad-every-n').fill('4');
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Discard your changes?')).toBeVisible();
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(sheet).toBeHidden();
+  expect((await readCollection<Slot & { every?: unknown }>(page, 'slots')).find((s) => s.id === 'ad-1')!.every ?? null).not.toEqual({ by: 'rounds', n: 4 });
 });
 
 test('how often waits until every menu TV runs the new version', async ({ context }) => {

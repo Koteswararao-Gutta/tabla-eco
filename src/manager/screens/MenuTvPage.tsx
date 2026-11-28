@@ -2,13 +2,13 @@
 // Writes: picture changes save the whole slot (so a removed TV entry really goes, even on a
 // merging backend); seconds, transition, order and end date update only that field, so two
 // phones editing different things never overwrite each other.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { newId, restartLoop, store, useCollection, useNow, type Screen, type ScreenId, type Slot, type Transition, type WithId } from '@shared/data';
 import { MAIN_OF, PARTNER, loopSlots, pictureFor } from '@shared/clock/loop';
 import { Field, Segmented, Sheet } from '@shared/ui';
 import { MIRROR_SOURCE, TRANSITIONS, adLine, fromLocalInput, insertOrder, isVideoAd, moveSlotTo, parseSeconds, screenName, slotLine, sortSlots, toLocalInput, withoutPicture } from './logic';
-import { AdAddFields, AdSheet } from './AdParts';
+import { AdAddSheet, AdSheet } from './AdParts';
 import { useAppBase } from '../mode';
 import { deletePictureIfUnused, FilePreview, PictureInput, ScreenPage, StoredPicture, Switch } from './parts';
 
@@ -83,6 +83,17 @@ type Open =
 function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slots: S[]; screens: Screen[]; now: number; readOnly?: boolean }) {
   const [open, setOpen] = useState<Open>(null);
   const close = () => setOpen(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4_000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  const noticeBar = notice && (
+    <div className="sc-toast sc-notice" role="status" data-testid="ad-notice">
+      <span className="sc-toast-text">{notice}</span>
+    </div>
+  );
   const pictures = useCollection('pictures');
   // Only the spots this TV plays: TV 1 and TV 2 never list spots that exist only on TV 3 / TV 4.
   const sorted = sortSlots(loopSlots(slots, tv, screens));
@@ -102,7 +113,8 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
             Add the first picture
           </button>
         )}
-        {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={-1} onClose={close} />}
+        {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={-1} onClose={close} onNotice={setNotice} />}
+        {noticeBar}
       </>
     );
   }
@@ -177,10 +189,11 @@ function PictureList({ tv, slots, screens, now, readOnly }: { tv: ScreenId; slot
           <span aria-hidden>+</span> Add a picture
         </button>
       )}
-      {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={open.after} onClose={close} />}
+      {open?.kind === 'add' && <AddSheet tv={tv} sorted={sorted} after={open.after} onClose={close} onNotice={setNotice} />}
       {open?.kind === 'fill' && openSlot && <FillSheet tv={tv} sorted={sorted} slot={openSlot} replace={open.replace} onClose={close} />}
       {open?.kind === 'timing' && openSlot && <TimingSheet slot={openSlot} onClose={close} />}
-      {open?.kind === 'ad' && openSlot && <AdSheet slot={openSlot} sorted={sorted} side={tv === 'tv2' || tv === 'tv4' ? 'tv2' : 'tv1'} onClose={close} />}
+      {open?.kind === 'ad' && openSlot && <AdSheet slot={openSlot} sorted={sorted} side={tv === 'tv2' || tv === 'tv4' ? 'tv2' : 'tv1'} onClose={close} onNotice={setNotice} />}
+      {noticeBar}
       {open?.kind === 'options' && openSlot && (
         <OptionsSheet
           tv={tv}
@@ -258,7 +271,7 @@ function SheetEnd({ label, onSave, onCancel, disabled, cancel = 'Cancel', primar
 
 const SECONDS_ERROR = 'Seconds must be a whole number from 1 to 3600.';
 
-function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; after: number; onClose: () => void }) {
+function AddSheet({ tv, sorted, after, onClose, onNotice }: { tv: ScreenId; sorted: S[]; after: number; onClose: () => void; onNotice: (text: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<Kind>('menu');
   const [seconds, setSeconds] = useState('10');
@@ -291,12 +304,7 @@ function AddSheet({ tv, sorted, after, onClose }: { tv: ScreenId; sorted: S[]; a
     </div>
   );
   if (kind === 'catering') {
-    return (
-      <Sheet open title="Add an ad" onClose={onClose}>
-        {typeRow}
-        <AdAddFields sorted={sorted} after={after} onDone={onClose} onCancel={onClose} />
-      </Sheet>
-    );
+    return <AdAddSheet typeRow={typeRow} sorted={sorted} after={after} onClose={onClose} onNotice={onNotice} />;
   }
   return (
     <Sheet open title={`Add a picture to ${screenName(tv)}`} onClose={onClose}>

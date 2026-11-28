@@ -144,9 +144,13 @@ export function everyLabel(every: AdEvery | null | undefined): string {
   return every.n === 1 ? 'every minute' : `every ${every.n} min`;
 }
 
+/** A pause takes effect at the next picture change, so an ad whose end is this close already counts as paused. */
+export const PAUSE_SOON_MS = 60_000;
+export const isPaused = (slot: Pick<Slot, 'endsAt'>, now: number): boolean => slot.endsAt != null && slot.endsAt <= now + PAUSE_SOON_MS;
+
 /** The line under an ad: "15 s · every 2 min", "Paused", "15 s · after every round · until Sun 9 PM". */
 export function adLine(slot: Pick<Slot, 'seconds' | 'endsAt' | 'every'>, now: number): string {
-  if (slot.endsAt != null && slot.endsAt <= now) return 'Paused';
+  if (isPaused(slot, now)) return 'Paused';
   const parts = [`${slot.seconds} s`, everyLabel(slot.every)];
   if (slot.endsAt != null) parts.push(`until ${formatWhen(slot.endsAt, now)}`);
   return parts.join(' · ');
@@ -169,11 +173,28 @@ export function tvsOnOldCode(beats: readonly (Pick<Heartbeat, 'lastSeen' | 'vers
 /** Seconds for an ad from its video length(s): never cuts a video short. */
 export const adSeconds = (...durations: number[]): number => Math.max(1, Math.ceil(Math.max(...durations) - 0.1));
 
+/** Smallest "How often" value the app offers: rounds from 1, minutes from 2. */
+export const EVERY_MIN: Record<AdEvery['by'], number> = { rounds: 1, minutes: 2 };
+
 /** A whole number in range for "How often", or null. */
 export function parseEvery(by: AdEvery['by'], v: string): AdEvery | null {
   if (!/^\s*\d+\s*$/.test(v)) return null;
   const n = Number(v);
-  return n >= 1 && n <= EVERY_MAX[by] ? { by, n } : null;
+  return n >= EVERY_MIN[by] && n <= EVERY_MAX[by] ? { by, n } : null;
+}
+
+/** A plain problem with "every N minutes" for an ad this long (at least a minute of menu between ads), or null. */
+export function everyProblem(every: AdEvery | null, adSecs: number): string | null {
+  if (!every || every.by !== 'minutes' || !(adSecs > 0)) return null;
+  if (every.n * 60 >= adSecs + 60) return null;
+  return `Every ${every.n} minutes is too often for a ${adSecs} s ad. Choose ${Math.ceil((adSecs + 60) / 60)} minutes or more.`;
+}
+
+/** About how much of the screen time the ad takes, in whole percent (at least 1). */
+export function adShare(every: AdEvery, adSecs: number, roundSeconds: number): number {
+  const between = every.by === 'rounds' ? every.n * roundSeconds : every.n * 60 - adSecs;
+  const total = between + adSecs;
+  return total > 0 ? Math.max(1, Math.round((adSecs / total) * 100)) : 100;
 }
 
 /** "About every 1½ min" for "after every N rounds", from the length of one menu round in seconds. */
