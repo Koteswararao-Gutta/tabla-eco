@@ -91,8 +91,13 @@ function useVideos(videos: (PictureVideo | null | undefined)[], retry: number) {
 
 /** Plays an ad video from where the slot is now (so every TV is at the same point), with sound when the
  *  picture says so. If sound is refused it plays muted rather than not at all; if it can't play, `onFail`. */
+/** A see-through 1x1 picture: Android TV's WebView otherwise draws a grey play icon on a video before its first frame. */
+const NO_POSTER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 function AdVideo({ url, sound, startedAt, onFail }: { url: string; sound: boolean; startedAt: number; onFail: () => void }) {
   const ref = useRef<HTMLVideoElement>(null);
+  // Hidden until it really plays, so nothing (no icon, no empty frame) shows before the first picture.
+  const [playing, setPlaying] = useState(false);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -110,7 +115,20 @@ function AdVideo({ url, sound, startedAt, onFail }: { url: string; sound: boolea
     return () => v.removeEventListener('loadedmetadata', start);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
-  return <video ref={ref} className="tvm-pic tvm-video" src={url} muted={!sound} playsInline preload="auto" onError={onFail} data-testid="menu-tv-video" />;
+  return (
+    <video
+      ref={ref}
+      className={'tvm-pic tvm-video' + (playing ? '' : ' tvm-video-wait')}
+      src={url}
+      poster={NO_POSTER}
+      muted={!sound}
+      playsInline
+      preload="auto"
+      onPlaying={() => setPlaying(true)}
+      onError={onFail}
+      data-testid="menu-tv-video"
+    />
+  );
 }
 
 export default function MenuTv({ screenId }: { screenId: ScreenId }) {
@@ -190,7 +208,7 @@ export default function MenuTv({ screenId }: { screenId: ScreenId }) {
     const videoUrl = video ? videoUrls[video.src] : null;
     return (
       <div key={l.n} className={`tvm-layer tvm-${out ? 'out' : 'in'}-${anim}`} aria-hidden={out || undefined}>
-        {url ? (
+        {url && !(videoUrl && !out) ? (
           <img className="tvm-pic" src={url} alt="" draggable={false} onError={() => l.pictureId && broken(l.pictureId)} />
         ) : url === null && !videoUrl ? (
           <Idle line={name} />
