@@ -38,7 +38,7 @@ import { filterKey, idChunks, recentSince, type CollectionFilter } from './filte
 import { fitPicture } from './local';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
 import { clean, isAppend, isRemove, newId } from './store';
-import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
+import { bestOffset, CLOCK_SAMPLES, keepListening, queued, scheduleClockSync, singleFlight, type ClockSample } from './resync';
 import { vapidKey } from './firebaseConfig';
 import { swUrl } from './sw';
 import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, ScannedOrder } from './types';
@@ -123,21 +123,30 @@ export class FirebaseStore implements DataStore {
     }
   }
 
-  /** Writes a server timestamp and reads it back; the server time sits halfway through the round trip. */
+  /** Writes a server timestamp a few times and reads each back. The server stamped each write inside the
+   *  time from sending it to its confirmation, so the quickest one gives the closest offset (bestOffset). */
   private clockAttempt = singleFlight(async () => {
     try {
       // A clock write left waiting before a reload is still queued: wait for it rather than adding another.
       if (clockWriteWaiting()) await waitForPendingWrites(this.db);
       const ref = doc(this.db, 'clocks', deviceId());
-      const t0 = Date.now();
-      clockWriteWaiting(true);
-      await fsSet(ref, { t: serverTimestamp() });
-      clockWriteWaiting(false);
-      const snap = await getDocFromServer(ref);
-      const t1 = Date.now();
-      const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
-      if (!server || t1 - t0 >= 5000) return false;
-      this.offset = server - (t0 + t1) / 2;
+      const samples: ClockSample[] = [];
+      for (let i = 0; i < CLOCK_SAMPLES; i++) {
+        const t0 = Date.now();
+        clockWriteWaiting(true);
+        await fsSet(ref, { t: serverTimestamp() });
+        clockWriteWaiting(false);
+        const t1 = Date.now();
+        const snap = await getDocFromServer(ref);
+        const server = (snap.get('t') as Timestamp | undefined)?.toMillis();
+        if (!server) break;
+        samples.push({ t0, t1, server });
+        // A slow connection: one sample is enough, and more would only keep it busy.
+        if (t1 - t0 >= 2000) break;
+      }
+      const offset = bestOffset(samples);
+      if (offset === null) return false;
+      this.offset = offset;
       return true;
     } catch {
       return false;

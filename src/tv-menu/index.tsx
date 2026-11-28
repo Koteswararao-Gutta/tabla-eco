@@ -7,6 +7,7 @@ import { store, useCollection, useHeartbeat, useSingleton, type PictureVideo, ty
 import { loopPosition, loopSlots } from '@shared/clock/loop';
 import { msUntilNextChange, targetFor, type Target } from './schedule';
 import './tv-menu.css';
+import { useAdDrift } from './adSync';
 
 /** How long a leaving picture stays on screen; matches the CSS animations. */
 const TRANSITION_MS = 700;
@@ -98,6 +99,8 @@ function AdVideo({ url, sound, startedAt, onFail }: { url: string; sound: boolea
   const ref = useRef<HTMLVideoElement>(null);
   // Hidden until it really plays, so nothing (no icon, no empty frame) shows before the first picture.
   const [playing, setPlaying] = useState(false);
+  // Keeps it at the same point as the other TVs while it plays (small speed nudges, a jump if far off).
+  useAdDrift(ref, startedAt);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;

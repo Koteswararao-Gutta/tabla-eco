@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keepListening, LISTEN_RETRY_FIRST_MS, onSaveFailure, queued, reportSaveFailure, SAVE_WAIT_MS, scheduleClockSync, singleFlight, type SaveFailure } from './resync';
+import { bestOffset, keepListening, LISTEN_RETRY_FIRST_MS, onSaveFailure, queued, reportSaveFailure, SAVE_WAIT_MS, scheduleClockSync, singleFlight, type SaveFailure } from './resync';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -288,5 +288,23 @@ describe('connection health (hasSyncTrouble)', () => {
     expect(changes).toBe(6);
     off();
     vi.useRealTimers();
+  });
+});
+
+describe('bestOffset', () => {
+  it('uses the quickest round trip', () => {
+    // Device clock is 1000 ms behind the server. The slow sample would guess wrong by 200 ms.
+    expect(
+      bestOffset([
+        { t0: 0, t1: 600, server: 1100 },
+        { t0: 1000, t1: 1040, server: 2020 },
+        { t0: 2000, t1: 2300, server: 3150 },
+      ]),
+    ).toBe(1000);
+  });
+  it('skips unusable samples', () => {
+    expect(bestOffset([])).toBeNull();
+    expect(bestOffset([{ t0: 0, t1: 6000, server: 3000 }])).toBeNull();
+    expect(bestOffset([{ t0: 10, t1: 5, server: 3000 }])).toBeNull();
   });
 });
