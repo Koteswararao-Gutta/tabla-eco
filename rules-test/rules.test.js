@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, test } from 'node:test';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { arrayUnion, deleteDoc, doc, getDoc, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
+import { arrayUnion, Bytes, deleteDoc, doc, getDoc, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
 
 setLogLevel('silent'); // refused writes are expected here; keep the output readable
 
@@ -152,6 +152,45 @@ test('pictureData: only pictures can be saved, never a web page', async () => {
   await assertFails(setDoc(doc(db, 'pictureData/x3'), { type: 'text/html', data: 'AAAA' }));
   await assertFails(setDoc(doc(db, 'pictureData/x4'), { type: 'image/png; text/html', data: 'AAAA' }));
   await assertFails(setDoc(doc(db, 'pictureData/x5'), { data: 'AAAA' }));
+});
+
+test('pictures: an ad picture (with a video) and its still are never deleted; a plain picture is', async () => {
+  await seed('pictures/ad', { id: 'ad', name: 'Ad left', width: 1920, height: 1080, createdAt: 1, video: { src: 'stored:v1', sound: true } });
+  await seed('pictureData/ad', { type: 'image/jpeg', data: 'AAAA' });
+  await seed('pictures/p', { id: 'p', name: 'Menu', width: 1920, height: 1080, createdAt: 1 });
+  await seed('pictureData/p', { type: 'image/jpeg', data: 'AAAA' });
+  await assertFails(deleteDoc(doc(db, 'pictureData/ad')));
+  await assertFails(deleteDoc(doc(db, 'pictures/ad')));
+  await assertSucceeds(deleteDoc(doc(db, 'pictureData/p')));
+  await assertSucceeds(deleteDoc(doc(db, 'pictures/p')));
+  // Sound on/off is a normal change.
+  await assertSucceeds(updateDoc(doc(db, 'pictures/ad'), { video: { src: 'stored:v1', sound: false } }));
+});
+
+// ---------- ad videos ----------
+
+test('videoData: parts as bytes and the finished record; never deleted, nothing else saved', async () => {
+  const part = Bytes.fromUint8Array(new Uint8Array(900 * 1024));
+  await assertSucceeds(setDoc(doc(db, 'videoData/v1/chunks/0'), { data: part }));
+  await assertSucceeds(setDoc(doc(db, 'videoData/v1'), { type: 'video/mp4', bytes: 921600, chunks: 1, createdAt: 5 }));
+  await assertSucceeds(getDoc(doc(db, 'videoData/v1/chunks/0')));
+  await assertFails(deleteDoc(doc(db, 'videoData/v1/chunks/0')));
+  await assertFails(deleteDoc(doc(db, 'videoData/v1')));
+  await assertFails(setDoc(doc(db, 'videoData/v2/chunks/0'), { data: 'AAAA' }));
+  await assertFails(setDoc(doc(db, 'videoData/v2/chunks/0'), { data: part, extra: 1 }));
+  await assertFails(setDoc(doc(db, 'videoData/v2'), { type: 'text/html', bytes: 10, chunks: 1, createdAt: 5 }));
+  await assertFails(setDoc(doc(db, 'videoData/v2'), { type: 'video/mp4', bytes: 40 * 1024 * 1024, chunks: 1, createdAt: 5 }));
+  await assertFails(getDoc(doc(nobody, 'videoData/v1')));
+});
+
+test('slots: how often an ad plays', async () => {
+  const ad = { id: 'a', order: 1, seconds: 15, transition: 'fade', pictures: { tv1: 'x' }, kind: 'catering' };
+  await assertSucceeds(setDoc(doc(db, 'slots/a'), { ...ad, every: null }));
+  await assertSucceeds(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'rounds', n: 2 } }));
+  await assertSucceeds(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'minutes', n: 120 } }));
+  await assertFails(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'hours', n: 1 } }));
+  await assertFails(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'rounds', n: 0 } }));
+  await assertFails(setDoc(doc(db, 'slots/a'), { ...ad, every: { by: 'rounds', n: 2, x: 1 } }));
 });
 
 // ---------- approved devices (More > Devices) ----------

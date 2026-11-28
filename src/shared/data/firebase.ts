@@ -30,22 +30,26 @@ import {
   persistentMultipleTabManager,
   serverTimestamp,
   setDoc as fsSet,
+  Bytes,
   waitForPendingWrites,
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
 import { filterKey, idChunks, recentSince, type CollectionFilter } from './filter';
-import { fitPicture } from './local';
+import { fetchVideo, fitPicture } from './local';
 import type { DataStore, ToastMenuReport, Unsubscribe, WithId } from './store';
-import { clean, isAppend, isRemove, newId } from './store';
+import { clean, isAppend, isRemove, newId, storedVideoId } from './store';
 import { keepListening, queued, scheduleClockSync, singleFlight } from './resync';
 import { vapidKey } from './firebaseConfig';
 import { swUrl } from './sw';
-import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, PictureVideo, ScannedOrder } from './types';
 import { currentApp } from './access';
 
 /** Largest picture we store, in bytes before base64 (base64 adds a third; the limit per document is 1 MB). */
 const MAX_PICTURE_BYTES = 650_000;
+/** Size of one part of an uploaded video (Firestore documents hold up to 1 MiB). */
+const VIDEO_PART_BYTES = 900 * 1024;
+
 /** How long a read waits for the server before it uses the copy on this phone. */
 const GET_WAIT_MS = 3000;
 
@@ -56,12 +60,14 @@ export class FirebaseStore implements DataStore {
   private ready: Promise<void>;
   private offset = 0;
   private urlCache = new Map<string, Promise<string | null>>();
+  private videoCache = new Map<string, Promise<string | null>>();
   private auth: Auth;
 
   constructor(config: FirebaseOptions) {
     const app = (this.app = initializeApp(config));
     this.db = initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      // 100 MB (the default is 40): room for two or three ad videos besides every picture, for offline TVs.
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager(), cacheSizeBytes: 100 * 1024 * 1024 }),
       ignoreUndefinedProperties: true,
     });
     const auth = (this.auth = getAuth(app));
@@ -404,7 +410,7 @@ export class FirebaseStore implements DataStore {
   }
 
   // ---------- pictures ----------
-  async uploadPicture(file: Blob, name: string): Promise<WithId<Picture>> {
+  async uploadPicture(file: Blob, name: string, video?: PictureVideo | null): Promise<WithId<Picture>> {
     const fitted = await fitPicture(file);
     const blob = fitted.blob.size > MAX_PICTURE_BYTES ? await shrink(fitted.blob) : fitted.blob;
     const id = newId();
@@ -420,7 +426,7 @@ export class FirebaseStore implements DataStore {
     } finally {
       clearTimeout(timer);
     }
-    const pic: Picture = { id, name, width: fitted.width, height: fitted.height, createdAt: this.now() };
+    const pic: Picture = { id, name, width: fitted.width, height: fitted.height, createdAt: this.now(), ...(video ? { video } : {}) };
     await this.setDoc('pictures', id, pic);
     return { ...pic, id };
   }
@@ -447,11 +453,80 @@ export class FirebaseStore implements DataStore {
 
   async deletePicture(id: string): Promise<void> {
     await this.ready;
+    // An ad's picture is never deleted (the rules refuse it too).
+    if ((await this.getDoc('pictures', id))?.video) return;
     await fsDelete(doc(this.db, 'pictureData', id));
     const url = await this.urlCache.get(id);
     if (url) URL.revokeObjectURL(url);
     this.urlCache.delete(id);
     await this.deleteDoc('pictures', id);
+  }
+
+  // ---------- ad videos ----------
+  async uploadVideo(file: Blob, onProgress?: (done: number) => void): Promise<string> {
+    await this.ready;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('No internet. Please add the ad when online.');
+    const id = newId();
+    const n = Math.max(1, Math.ceil(file.size / VIDEO_PART_BYTES));
+    // Each part waits for the server (like pictures), so a video only counts once all of it arrived.
+    const send = async (p: Promise<void>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const slow = new Promise<never>((_, fail) => (timer = setTimeout(() => fail(new Error('The video could not be sent. Please check the internet.')), 60_000)));
+      try {
+        await Promise.race([p, slow]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    for (let i = 0; i < n; i++) {
+      const part = new Uint8Array(await file.slice(i * VIDEO_PART_BYTES, (i + 1) * VIDEO_PART_BYTES).arrayBuffer());
+      await send(fsSet(doc(this.db, 'videoData', id, 'chunks', String(i)), { data: Bytes.fromUint8Array(part) }));
+      onProgress?.((i + 1) / n);
+    }
+    // Written last: marks a finished upload.
+    await send(fsSet(doc(this.db, 'videoData', id), { type: 'video/mp4', bytes: file.size, chunks: n, createdAt: this.now() }));
+    return 'stored:' + id;
+  }
+
+  videoUrl(src: string): Promise<string | null> {
+    let hit = this.videoCache.get(src);
+    if (!hit) {
+      hit = (async () => {
+        const id = storedVideoId(src);
+        if (!id) return fetchVideo(src);
+        await this.ready;
+        // Parts never change, so the offline copy comes first (a TV restarted without internet still plays).
+        const read = async (path: string[]) => {
+          const ref = doc(this.db, path.join('/'));
+          try {
+            return await getDocFromCache(ref);
+          } catch {
+            return fsGet(ref);
+          }
+        };
+        const meta = await read(['videoData', id]);
+        const chunks = meta.get('chunks');
+        const bytes = meta.get('bytes');
+        if (typeof chunks !== 'number' || typeof bytes !== 'number') return null;
+        const parts: Uint8Array[] = [];
+        for (let i = 0; i < chunks; i++) {
+          const data = (await read(['videoData', id, 'chunks', String(i)])).get('data');
+          if (!(data instanceof Bytes)) return null;
+          parts.push(data.toUint8Array());
+        }
+        const blob = new Blob(parts as BlobPart[], { type: 'video/mp4' });
+        return blob.size === bytes ? URL.createObjectURL(blob) : null;
+      })().catch(() => null);
+      this.videoCache.set(src, hit);
+      hit.then((u) => u ?? this.videoCache.delete(src));
+    }
+    return hit;
+  }
+
+  releaseVideo(src: string): void {
+    const hit = this.videoCache.get(src);
+    this.videoCache.delete(src);
+    hit?.then((u) => u && URL.revokeObjectURL(u));
   }
 
   // ---------- phone alerts ----------

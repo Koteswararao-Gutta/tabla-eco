@@ -5,11 +5,11 @@ import { LocalStore } from './local';
 import { hasSyncTrouble, onSaveFailure, onSyncTroubleChange, type SaveFailure } from './resync';
 import { filterKey, type CollectionFilter } from './filter';
 import type { DataStore, WithId } from './store';
-import type { CollectionName, Collections, DeviceAccess, ScreenId, SingletonId, Singletons } from './types';
+import { ADS_CODE_VERSION, type CollectionName, type Collections, type DeviceAccess, type ScreenId, type SingletonId, type Singletons } from './types';
 
 export * from './types';
 export type { DataStore, ToastMenuReport, WithId, Unsubscribe } from './store';
-export { appendItems, newId, removeItems } from './store';
+export { appendItems, newId, removeItems, storedVideoId } from './store';
 export { deviceValue, setDeviceValue } from './device';
 export { swUrl, isFrontPage } from './sw';
 export { activeManagers, appLabel, currentApp, deviceLabel, isRecent, mayManage } from './access';
@@ -94,11 +94,12 @@ export function useNow(everyMs = 250): number {
   return now;
 }
 
-/** Screens call this so the manager can show a green (online) or grey (offline) dot.
+/** Screens call this so the manager can show a green (online) or grey (offline) dot, and which code version
+ *  the screen runs (the manager waits for every menu TV to run new code before writing new kinds of data).
  *  Every 2 minutes: 6 screens x 720 = ~4,300 writes a day, well inside Firestore's free 20,000. */
 export function useHeartbeat(screenId: ScreenId): void {
   useEffect(() => {
-    const beat = () => store.setDoc('heartbeats', screenId, { lastSeen: store.now() });
+    const beat = () => store.setDoc('heartbeats', screenId, { lastSeen: store.now(), version: ADS_CODE_VERSION });
     beat();
     const t = setInterval(beat, 120_000);
     return () => clearInterval(t);

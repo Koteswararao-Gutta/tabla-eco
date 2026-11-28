@@ -6,7 +6,7 @@
 // Screens must never talk to localStorage, IndexedDB or Firebase directly.
 
 import type { CollectionFilter } from './filter';
-import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, ScannedOrder } from './types';
+import type { AlertState, CollectionName, Collections, DeviceAccess, DeviceAction, Picture, PictureVideo, ScannedOrder } from './types';
 
 export type Unsubscribe = () => void;
 export type WithId<T> = T & { id: string };
@@ -46,12 +46,24 @@ export interface DataStore {
    *  True when it saved. For small automatic fixes that must never undo another device's newer change. */
   updateIf<C extends CollectionName>(col: C, id: string, test: (cur: WithId<Collections[C]> | null) => boolean, patch: Partial<Collections[C]>): Promise<boolean>;
 
-  /** Stores a picture (resized to fit 1920x1080 for menu use) and returns its record. */
-  uploadPicture(file: Blob, name: string): Promise<WithId<Picture>>;
+  /** Stores a picture (resized to fit 1920x1080 for menu use) and returns its record. With `video`, the picture is
+   *  the still of an ad video (shown while the video loads or if it can't play). */
+  uploadPicture(file: Blob, name: string, video?: PictureVideo | null): Promise<WithId<Picture>>;
   /** A URL an <img> can show, served from a local cache (a blob: URL) so it keeps working offline.
    *  FirebaseStore must cache picture bytes in IndexedDB too. Cached; safe to call often. */
   pictureUrl(id: string): Promise<string | null>;
+  /** Deletes a picture. Does nothing for a picture with a video (an ad): ads are never deleted by the app. */
   deletePicture(id: string): Promise<void>;
+
+  /** Stores an MP4 uploaded from the phone (in parts) and returns its src ("stored:<id>"). The finished record
+   *  is written last. `onProgress(0..1)` after each part. Throws with a plain message (offline, too slow). */
+  uploadVideo(file: Blob, onProgress?: (done: number) => void): Promise<string>;
+  /** A blob: URL a <video> can play, for "ads/…" (a file shipped with the site; the service worker keeps it for
+   *  offline) or "stored:…" (from the database's offline copy first). Cached per src; null when missing or broken
+   *  (asked again next time). */
+  videoUrl(src: string): Promise<string | null>;
+  /** Frees the blob URL of a video this screen no longer needs. */
+  releaseVideo(src: string): void;
 
   /** Reads a photo of a paper catering order with AI (server side) and returns the form's fields.
    *  Saves nothing. Throws with a plain message when it can't (offline, unreadable, server down).
@@ -133,6 +145,9 @@ export function sameValue(a: unknown, b: unknown): boolean {
 export function clean<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
+
+/** The id of a video uploaded from the phone ("stored:<id>"), or null for a file shipped with the site. */
+export const storedVideoId = (src: string): string | null => (src.startsWith('stored:') ? src.slice(7) || null : null);
 
 export const newId = (): string =>
   Date.now().toString(36) + Math.random().toString(36).slice(2, 8);

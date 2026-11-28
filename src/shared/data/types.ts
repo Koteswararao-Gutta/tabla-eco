@@ -28,13 +28,29 @@ export interface Picture {
   video?: PictureVideo | null;
 }
 
-/** A video shipped with the site (public/ads/). The file name carries a version, so it is never changed in place. */
+/** A video an ad plays. Never changed in place: a new video gets a new src. */
 export interface PictureVideo {
-  /** Path from the site's top folder, e.g. "ads/catering-left-1.mp4". */
+  /** "ads/catering-left-1.mp4": a file shipped with the site (public/ads/), or
+   *  "stored:<id>": uploaded from the manager phone, bytes kept in the database (read with store.videoUrl). */
   src: string;
-  /** true: play with sound through the TV's speaker. false: always muted. */
+  /** true: play with sound. The ad sheet sets the same value on both pictures of an ad, so sound on means
+   *  every menu TV that shows the ad plays it with sound. false: always muted. */
   sound: boolean;
+  /** Length in seconds, measured on the phone at upload. null or missing: not known (older ads). */
+  seconds?: number | null;
 }
+
+/** How often an ad plays (Slot.every). */
+export interface AdEvery {
+  /** 'rounds': after every n rounds of the menu (1 = after every round). 'minutes': every n minutes. */
+  by: 'rounds' | 'minutes';
+  /** Whole number: rounds 1 to 20, minutes 1 to 120. */
+  n: number;
+}
+
+/** Raise when every menu TV must run new code before the manager may write a new kind of data.
+ *  2 = Slot.every (ads by rounds or minutes). TVs report it in their heartbeat. */
+export const ADS_CODE_VERSION = 2;
 
 /**
  * One step of the front menu loop. All four menu TVs change slot at the same moment.
@@ -51,7 +67,12 @@ export interface Slot {
   pictures: Partial<Record<ScreenId, string>>; // picture id
   /** Optional: the slot drops out of the loop after this time (ms since epoch). */
   endsAt?: number | null;
+  /** 'catering' is shown as "Ad" in the app (the name stays so older TVs and the rules keep working). */
   kind?: 'menu' | 'special' | 'catering';
+  /** Ads only (kind 'catering'): how often it plays, between menu pictures, on every menu TV at once. null or
+   *  missing: it plays in its place in the list, once every round (the old way). Only written once every menu TV
+   *  reports code version >= ADS_CODE_VERSION in its heartbeat; older TVs ignore it. */
+  every?: AdEvery | null;
 }
 
 export interface MusicSettings {
@@ -342,6 +363,13 @@ export type DeviceAction =
   | { action: 'remove'; uid: string }
   | { action: 'setManager'; uid: string; manager: boolean };
 
+/** When a screen last reported in, and which code it runs. */
+export interface Heartbeat {
+  lastSeen: number;
+  /** ADS_CODE_VERSION of the app that wrote it; missing on older code. */
+  version?: number | null;
+}
+
 /** Single documents, by id. Use useSingleton / saveSingleton from @shared/data. */
 export interface Singletons {
   music: MusicSettings;
@@ -368,7 +396,7 @@ export interface Collections {
   staffWeeks: StaffWeek;
   /** One doc per screen id: when it last reported in. Kept apart from `screens` so a
    *  heartbeat doesn't wake every TV's listener (Firestore free-plan read limits). */
-  heartbeats: { lastSeen: number };
+  heartbeats: Heartbeat;
   /** Read only (the server writes it): use useDoc('toastMenu', 'current'). */
   toastMenu: ToastMenu;
   /** Approved devices, by sign-in id. Read only: change them with store.manageDevices. */

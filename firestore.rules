@@ -29,10 +29,15 @@ service cloud.firestore {
         && d.transition in ['fade', 'slide', 'none']
         && d.pictures is map
         && (!('endsAt' in d) || d.endsAt == null || d.endsAt is number)
-        && (!('kind' in d) || d.kind in ['menu', 'special', 'catering']);
+        && (!('kind' in d) || d.kind in ['menu', 'special', 'catering'])
+        // Ads: how often they play (rounds 1-20 or minutes 1-120; the app checks the exact range).
+        && (!('every' in d) || d.every == null
+            || (d.every is map && d.every.keys().hasOnly(['by', 'n']) && d.every.by in ['rounds', 'minutes']
+                && d.every.n is int && d.every.n >= 1 && d.every.n <= 120));
     }
     match /slots/{id}       { allow read: if allowed(); allow create, update: if allowed() && small() && validSlot(request.resource.data); allow delete: if allowed(); }
-    match /pictures/{id}    { allow read: if allowed(); allow create, update: if allowed() && small(); allow delete: if allowed(); }
+    // A picture with a video is an ad: never deleted from the app (an older phone's "Replace picture" included).
+    match /pictures/{id}    { allow read: if allowed(); allow create, update: if allowed() && small(); allow delete: if allowed() && (resource == null || resource.data.get('video', null) == null); }
     // A catering order. New orders must have the main fields; any save keeps their types right.
     function orderTypes(d) {
       return (!('customerName' in d) || (d.customerName is string && d.customerName.size() <= 200))
@@ -135,7 +140,29 @@ service cloud.firestore {
         && request.resource.data.type is string && request.resource.data.type.matches('image/[a-z0-9.+-]{1,40}')
         && request.resource.data.data is string
         && request.resource.data.data.size() <= 950000;
-      allow delete: if allowed();
+      // The still of an ad stays while its picture record has a video.
+      allow delete: if allowed()
+        && !(exists(/databases/$(database)/documents/pictures/$(id))
+             && get(/databases/$(database)/documents/pictures/$(id)).data.get('video', null) != null);
+    }
+    // Ad videos uploaded from the manager phone, in parts of up to 900 KB. Written once, never deleted from the app.
+    // `update` is allowed only so the database can retry a write; the app never reuses an id.
+    match /videoData/{id} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && request.resource.data.keys().hasOnly(['type', 'bytes', 'chunks', 'createdAt'])
+        && request.resource.data.type == 'video/mp4'
+        && request.resource.data.bytes is int && request.resource.data.bytes > 0 && request.resource.data.bytes <= 31457280
+        && request.resource.data.chunks is int && request.resource.data.chunks >= 1 && request.resource.data.chunks <= 40
+        && request.resource.data.createdAt is number;
+      allow delete: if false;
+      match /chunks/{n} {
+        allow read: if allowed();
+        allow create, update: if allowed()
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is bytes && request.resource.data.data.size() <= 1000000;
+        allow delete: if false;
+      }
     }
     // Approved devices (More > Devices). Only the server adds, renames or removes them.
     match /devices/{id}     { allow read: if allowed(); allow write: if false; }
