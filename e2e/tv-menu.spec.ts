@@ -380,3 +380,25 @@ test('an ad video that drifts away from the other TVs comes back in sync by itse
   await expect.poll(gap, { timeout: 3_000 }).toBeLessThan(0.1);
   await expect.poll(gap, { timeout: 4_000 }).toBeLessThan(0.05);
 });
+
+test('a missing ad video is asked for again only at the next change, not over and over', async ({ context }) => {
+  let asked = 0;
+  await context.route('**/ads/missing-1.webm', (r) => {
+    asked++;
+    return r.fulfill({ status: 404, body: '' });
+  });
+  const { control, tvs } = await openTvs(context);
+  const right = (await slots(control))['slot-menu-1'].pictures.tv2;
+  await control.evaluate((right) => {
+    const pics = JSON.parse(localStorage.getItem('tabla:pictures') || '{}');
+    pics[right] = { ...pics[right], video: { src: 'ads/missing-1.webm', sound: false } };
+    localStorage.setItem('tabla:pictures', JSON.stringify(pics));
+  }, right);
+  await setLoop(control, { seconds: 60, firstSlotId: 'slot-menu-1' });
+  const [, tv2] = await tvs();
+  // it falls back to the still picture
+  await expect(now(tv2)).toHaveAttribute('data-picture-id', right);
+  await tv2.waitForTimeout(5_000);
+  expect(asked).toBeGreaterThan(0);
+  expect(asked).toBeLessThanOrEqual(8);
+});

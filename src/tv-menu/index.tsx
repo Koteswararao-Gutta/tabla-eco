@@ -70,9 +70,16 @@ function useVideos(srcs: string[], retry: number) {
   const asked = useRef(new Set<string>());
   const keep = useRef(new Set<string>());
   const loading = useRef(false);
+  // Videos that failed since the last tick: asked again only on the next tick (slot change), never at once.
+  const failed = useRef(new Set<string>());
+  const lastRetry = useRef(retry);
   const [loaded, setLoaded] = useState(0);
   const key = [...new Set(srcs)].sort().join('|');
   useEffect(() => {
+    if (lastRetry.current !== retry) {
+      lastRetry.current = retry;
+      failed.current.clear();
+    }
     const want = new Set(key ? key.split('|') : []);
     keep.current = want;
     for (const src of asked.current) {
@@ -82,7 +89,7 @@ function useVideos(srcs: string[], retry: number) {
       setUrls(({ [src]: _gone, ...rest }) => rest);
     }
     if (loading.current) return;
-    const src = [...want].find((s) => !asked.current.has(s));
+    const src = [...want].find((s) => !asked.current.has(s) && !failed.current.has(s));
     if (!src) return;
     asked.current.add(src);
     loading.current = true;
@@ -95,7 +102,10 @@ function useVideos(srcs: string[], retry: number) {
         // Let go while it was loading (releaseVideo already frees it): if it is wanted again, the next
         // run asks afresh.
         if (!asked.current.has(src) || !keep.current.has(src)) return;
-        if (!url) asked.current.delete(src);
+        if (!url) {
+          asked.current.delete(src);
+          failed.current.add(src);
+        }
         setUrls((m) => ({ ...m, [src]: url }));
       });
   }, [key, retry, loaded]);
@@ -107,6 +117,7 @@ function useVideos(srcs: string[], retry: number) {
   );
   const broken = (src: string) => {
     asked.current.delete(src);
+    failed.current.add(src);
     store.releaseVideo(src);
     setUrls((m) => ({ ...m, [src]: null }));
   };
